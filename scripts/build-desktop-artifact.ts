@@ -3654,8 +3654,9 @@ export const stageOpenCodeBinary = Effect.fn("stageOpenCodeBinary")(function* (i
     assetName: asset.assetName,
     expectedSha256: asset.sha256,
   });
-  // Both release runners ship bsdtar, which reads the release's zip layout.
-  yield* runCommand(ChildProcess.make("tar", ["-xf", assetPath, "-C", downloadDir]), {
+  // Git's GNU tar shadows bsdtar on Windows runners, and it cannot read zips or C:\ paths.
+  const tar = input.platform === "win" ? "C:\\Windows\\System32\\tar.exe" : "tar";
+  yield* runCommand(ChildProcess.make(tar, ["-xf", assetPath, "-C", downloadDir]), {
     label: `tar -xf ${asset.assetName}`,
     verbose: input.verbose,
   });
