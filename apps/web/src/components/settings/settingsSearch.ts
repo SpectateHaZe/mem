@@ -445,6 +445,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset wake recover continue"],
   },
   {
+    id: "discord-status",
+    title: "Discord status",
+    to: "/settings/threads",
+    searchTerms: ["discord rich presence rpc activity status"],
+  },
+  {
     id: "daily-spend-cap",
     title: "Daily spending cap",
     to: "/settings/threads",

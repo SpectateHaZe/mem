@@ -1485,6 +1485,8 @@ export const ServerSettings = Schema.Struct({
   dailySpendCapUsd: Schema.NullOr(DailySpendCapUsd).pipe(
     Schema.withDecodingDefault(Effect.succeed(20)),
   ),
+  /** Discord Application ID for Rich Presence. Empty turns it off. */
+  discordClientId: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1840,6 +1842,7 @@ export const ServerSettingsPatch = Schema.Struct({
   ),
 
   dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
+  discordClientId: Schema.optionalKey(Schema.String),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

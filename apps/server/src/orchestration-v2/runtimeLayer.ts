@@ -1,5 +1,6 @@
 import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
+import * as DiscordPresence from "../presence/DiscordPresence.ts";
 import * as GoalQueueService from "../rooms/GoalQueueService.ts";
 import * as RoomService from "../rooms/RoomService.ts";
 import * as SpendingCap from "./SpendingCap.ts";
@@ -405,6 +406,7 @@ export const layerProduction = Layer.mergeAll(
   GuestShareService.layer.pipe(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
   ),
+  DiscordPresence.layer.pipe(Layer.provide(ProjectionStore.layer)),
   SpendingCap.layer.pipe(
     Layer.provide(
       Layer.mergeAll(

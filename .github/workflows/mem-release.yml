@@ -1,0 +1,45 @@
+name: Mem release
+
+# Push a version tag to publish an update: git tag v0.1.8 && git push --tags
+# Installed copies of Mem check this repository's latest release.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: mem-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Build and publish Windows installer
+    runs-on: windows-2025
+    timeout-minutes: 60
+    env:
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Build installer
+        shell: bash
+        run: |
+          node scripts/build-desktop-artifact.ts \
+            --platform win --target nsis --arch x64 \
+            --build-version "${GITHUB_REF_NAME#v}" --verbose
+
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes \
+            release/*.exe release/*.blockmap release/latest.yml

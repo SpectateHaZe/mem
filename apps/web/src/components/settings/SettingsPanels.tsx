@@ -497,6 +497,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.dailySpendCapUsd !== DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd
       ? ["Daily spending cap"]
       : []),
+    ...(settings.discordClientId !== DEFAULT_UNIFIED_SETTINGS.discordClientId
+      ? ["Discord status"]
+      : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
@@ -660,6 +663,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
+      discordClientId: DEFAULT_UNIFIED_SETTINGS.discordClientId,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
@@ -1645,6 +1649,28 @@ export function ThreadsSettingsPanel() {
         </SettingsSection>
       ) : null}
 
+      <SettingsSection id="discord" title="Discord">
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("discord-status")}
+          description="Shows how many agents are working on your Discord profile. Project and thread names are never shared. Paste a Discord Application ID to turn it on, or clear it to turn it off."
+          settingKeys={["discordClientId"]}
+          control={
+            <DraftInput
+              size="sm"
+              className="w-full sm:w-48"
+              inputMode="numeric"
+              value={settings.discordClientId}
+              onCommit={(next) => {
+                const clientId = next.trim();
+                if (/^\d*$/.test(clientId)) updateSettings({ discordClientId: clientId });
+              }}
+              placeholder="Off"
+              aria-label="Discord Application ID"
+            />
+          }
+        />
+      </SettingsSection>
       <SettingsSection id="usage-limits" title="Usage limits">
         <SettingsRow
           serverScoped
