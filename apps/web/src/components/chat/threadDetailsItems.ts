@@ -14,6 +14,7 @@ export const THREAD_DETAILS_ITEMS = [
   { id: "sideChats", label: "Side chats", defaultVisible: true },
   { id: "lowUsage", label: "Low usage mode", defaultVisible: true },
   { id: "usage", label: "Usage limits", defaultVisible: true },
+  { id: "sessionUsage", label: "Session usage", defaultVisible: true },
   { id: "context", label: "Context window", defaultVisible: false },
 ] as const;
 

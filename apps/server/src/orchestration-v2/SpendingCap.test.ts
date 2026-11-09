@@ -1,12 +1,8 @@
 import { assert, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
+import { isSubscriptionBilledProvider } from "@t3tools/shared/providerBilling";
 
-import {
-  billableSpendUsd,
-  isSubscriptionBilledProvider,
-  localUsageDay,
-  subscriptionUsageProviders,
-} from "./SpendingCap.ts";
+import { billableSpendUsd, localUsageDay, subscriptionUsageProviders } from "./SpendingCap.ts";
 import { spendingCapHit, startsWork } from "./SpendingCapState.ts";
 
 function provider(
@@ -32,11 +28,31 @@ it("treats subscription logins as unbilled and metered logins as spending", () =
   });
   const chatgpt = provider("codex", "codex", { status: "authenticated", type: "chatgpt" });
   const grokApiKey = provider("grok", "grok", { status: "authenticated", type: "apiKey" });
+  const openCodeApiKey = provider("opencode", "opencode", {
+    status: "authenticated",
+    type: "apiKey",
+  });
+  const antigravitySubscription = provider("antigravity", "antigravity", {
+    status: "authenticated",
+    type: "oauth-personal",
+  });
+  const antigravityApiKey = provider("antigravity-key", "antigravity", {
+    status: "authenticated",
+    type: "gemini-api-key",
+  });
+  const signedOutClaude = provider("claude-signed-out", "claudeAgent", {
+    status: "unauthenticated",
+    type: "pro",
+  });
 
   assert.isTrue(isSubscriptionBilledProvider(subscription));
   assert.isFalse(isSubscriptionBilledProvider(apiKey));
   assert.isTrue(isSubscriptionBilledProvider(chatgpt));
   assert.isFalse(isSubscriptionBilledProvider(grokApiKey));
+  assert.isFalse(isSubscriptionBilledProvider(openCodeApiKey));
+  assert.isTrue(isSubscriptionBilledProvider(antigravitySubscription));
+  assert.isFalse(isSubscriptionBilledProvider(antigravityApiKey));
+  assert.isFalse(isSubscriptionBilledProvider(signedOutClaude));
 });
 
 it("excludes a provider only when every authenticated login is subscription-billed", () => {

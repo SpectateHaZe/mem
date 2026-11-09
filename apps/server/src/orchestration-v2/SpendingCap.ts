@@ -1,5 +1,6 @@
 import type { ServerProvider, UsageProviderKind } from "@t3tools/contracts";
 import { CommandId, UsageDay } from "@t3tools/contracts";
+import { isSubscriptionBilledProvider } from "@t3tools/shared/providerBilling";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
@@ -30,28 +31,6 @@ export const localUsageDay = (nowMs: number, timeZone: string) =>
       day: "2-digit",
     }).format(nowMs),
   );
-
-/** Auth types that bill each call rather than drawing on a subscription plan. */
-const METERED_CLAUDE_AUTH_TYPES: ReadonlySet<string> = new Set([
-  "apiKey",
-  "bedrock",
-  "customEndpoint",
-]);
-
-/** Subscription plans have no marginal cost, so they must not consume the spending cap. */
-export function isSubscriptionBilledProvider(provider: ServerProvider): boolean {
-  if (provider.auth.status !== "authenticated") return false;
-  switch (provider.driver) {
-    case "claudeAgent":
-      return provider.auth.type !== undefined && !METERED_CLAUDE_AUTH_TYPES.has(provider.auth.type);
-    case "codex":
-      return provider.auth.subscriptionSharing === true || provider.auth.type === "chatgpt";
-    case "antigravity":
-      return provider.auth.type === "oauth-personal" || provider.auth.type === "oauth-business";
-    default:
-      return false;
-  }
-}
 
 /**
  * Usage providers whose every authenticated login is subscription-billed. A metered login for the

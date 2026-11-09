@@ -164,6 +164,17 @@ export const PanelAnimationDurationMs = Schema.Int.check(
 export type PanelAnimationDurationMs = typeof PanelAnimationDurationMs.Type;
 const DEFAULT_PANEL_ANIMATION_DURATION_MS: PanelAnimationDurationMs = 0;
 
+export const MIN_COMPLETION_CHIME_VOLUME = 0;
+export const MAX_COMPLETION_CHIME_VOLUME = 100;
+export const CompletionChimeVolume = Schema.Int.check(
+  Schema.isBetween({
+    minimum: MIN_COMPLETION_CHIME_VOLUME,
+    maximum: MAX_COMPLETION_CHIME_VOLUME,
+  }),
+);
+export type CompletionChimeVolume = typeof CompletionChimeVolume.Type;
+const DEFAULT_COMPLETION_CHIME_VOLUME: CompletionChimeVolume = 50;
+
 export const MIN_INTERFACE_FONT_SIZE = 12;
 export const MAX_INTERFACE_FONT_SIZE = 20;
 export const InterfaceFontSize = Schema.Int.check(
@@ -392,6 +403,13 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed("off" as const)),
   ),
   inAppNotificationsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  completionChimeEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  completionChimeVolume: CompletionChimeVolume.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_COMPLETION_CHIME_VOLUME)),
+  ),
+  completionChimeCustomSoundName: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed("")),
+  ),
   diffColorScheme: DiffColorScheme.pipe(
     Schema.withDecodingDefault(Effect.succeed("red-green" as const)),
   ),
@@ -736,7 +754,11 @@ export const CodexSettings = makeProviderSettingsSchema(
 );
 export type CodexSettings = typeof CodexSettings.Type;
 
-const CLAUDE_AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
+export const AUTO_COMPACT_WINDOW_PATTERN = /^(?:|[1-9]\d{5}|1000000)$/;
+export const AutoCompactWindowSetting = TrimmedString.check(
+  Schema.isPattern(AUTO_COMPACT_WINDOW_PATTERN),
+);
+export type AutoCompactWindowSetting = typeof AutoCompactWindowSetting.Type;
 
 export const IDLE_COMPACTION_MODES = [
   { value: "onReturn", label: "When you return" },
@@ -795,14 +817,12 @@ export const ClaudeSettings = makeProviderSettingsSchema(
         },
       }),
     ),
-    autoCompactWindow: TrimmedString.check(
-      Schema.isPattern(CLAUDE_AUTO_COMPACT_WINDOW_PATTERN),
-    ).pipe(
+    autoCompactWindow: AutoCompactWindowSetting.pipe(
       Schema.withDecodingDefault(Effect.succeed("")),
       Schema.annotateKey({
         title: "Auto-compact after",
         description:
-          "Compact after 100,000 to 1,000,000 tokens. Leave empty to use Claude's default.",
+          "Compact after 100,000 to 1,000,000 tokens. Leave empty to use the server default, then Claude's.",
         providerSettingsForm: {
           placeholder: "e.g. 300000",
           clearWhenEmpty: "omit",
@@ -1362,6 +1382,8 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
+  /** Token count where Claude and Codex auto-compact. Empty uses each provider's default. */
+  autoCompactWindow: AutoCompactWindowSetting.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   snoozeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   autoResumeLimitedThreads: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   snoozePresets: SnoozePresetSettings.pipe(
@@ -1612,6 +1634,21 @@ export const resolveIdleCompaction = (
   return override === "default" ? globalIdleCompaction(settings) : override;
 };
 
+/** The Claude instance's own window wins, then the environment default, then Claude's own settings. */
+export const resolveAutoCompactWindow = (
+  settings: Pick<ServerSettings, "providerInstances" | "autoCompactWindow">,
+  instanceId: ProviderInstanceId,
+): string => {
+  const instance = Object.hasOwn(settings.providerInstances, instanceId)
+    ? settings.providerInstances[instanceId]
+    : undefined;
+  const override = decodeClaudeSettings(instance?.config ?? {}).pipe(
+    Option.map((config) => config.autoCompactWindow),
+    Option.getOrElse(() => ""),
+  );
+  return override !== "" ? override : settings.autoCompactWindow;
+};
+
 export const ServerSettingsOperation = Schema.Literals([
   "normalize",
   "check-exists",
@@ -1787,6 +1824,7 @@ export const ServerSettingsPatch = Schema.Struct({
   sidebarAutoSettleAfterDays: Schema.optionalKey(Schema.NullOr(SidebarAutoSettleAfterDays)),
   compactIdleThreads: Schema.optionalKey(LegacyCompactIdleThreads),
   idleCompaction: Schema.optionalKey(IdleCompactionMode),
+  autoCompactWindow: Schema.optionalKey(AutoCompactWindowSetting),
   sidebarAutoSettleKeepPullRequests: Schema.optionalKey(Schema.Boolean),
   sidebarAutoSettleOnMerge: Schema.optionalKey(Schema.Boolean),
   autoResumeLimitedThreads: Schema.optionalKey(Schema.Boolean),
@@ -1911,6 +1949,9 @@ export function requiredScopesForProjectMutation(
 export const ClientSettingsPatch = Schema.Struct({
   notificationMode: Schema.optionalKey(NotificationMode),
   inAppNotificationsEnabled: Schema.optionalKey(Schema.Boolean),
+  completionChimeEnabled: Schema.optionalKey(Schema.Boolean),
+  completionChimeVolume: Schema.optionalKey(CompletionChimeVolume),
+  completionChimeCustomSoundName: Schema.optionalKey(Schema.String),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),
   effortDisplay: Schema.optionalKey(EffortDisplay),

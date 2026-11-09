@@ -152,6 +152,13 @@ describe("CodexAdapterV2 assistant message streaming", () => {
 });
 
 describe("CodexAdapterV2 runtime policy", () => {
+  it("maps the auto-compact token limit to Codex thread config", () => {
+    assert.deepEqual(CodexAdapterV2.codexAutoCompactConfig("400000"), {
+      model_auto_compact_token_limit: 400_000,
+    });
+    assert.deepEqual(CodexAdapterV2.codexAutoCompactConfig(""), {});
+  });
+
   it.effect.each([undefined, false, true])(
     "selects native collaboration modes without prompt overrides with hasT3Mcp=%s",
     (hasT3Mcp) =>

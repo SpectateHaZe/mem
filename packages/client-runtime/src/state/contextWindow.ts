@@ -13,6 +13,7 @@ import {
   COMPACTION_SUGGESTION_MIN_TOKENS,
   isClaudeResumeCompactionQuestion,
 } from "@t3tools/shared/claudeCompaction";
+import { isSubscriptionBilledProvider } from "@t3tools/shared/providerBilling";
 import * as DateTime from "effect/DateTime";
 
 import { resolvePendingHandoff } from "../handoff.ts";
@@ -70,6 +71,67 @@ export function latestProviderTurnTokenUsage(
         (transfer.status === "pending" || transfer.resolution?.strategy === "native_fork"),
     )?.sourceTokenUsage ?? null
   );
+}
+
+export interface SessionUsage {
+  readonly totalTokens: number;
+  /** Null when no API-billed provider reported a USD cost. */
+  readonly costUsd: number | null;
+}
+
+/** Pay-per-use tokens and spend across the session, ignoring subscription-billed work. */
+export function deriveSessionUsage(input: {
+  readonly providerTurns: ReadonlyArray<
+    Pick<OrchestrationV2ProviderTurn, "providerThreadId" | "turnTokenUsage">
+  >;
+  readonly providerThreads: ReadonlyArray<
+    Pick<OrchestrationV2ProviderThread, "id" | "providerInstanceId" | "contextUsage">
+  >;
+  readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver" | "auth">>;
+}): SessionUsage | null {
+  const providersById = new Map(input.providers.map((provider) => [provider.instanceId, provider]));
+  const billableThreadIds = new Set<OrchestrationV2ProviderThread["id"]>();
+  let costUsd = 0;
+  let hasCost = false;
+  for (const thread of input.providerThreads) {
+    const provider = providersById.get(thread.providerInstanceId);
+    if (provider === undefined || isSubscriptionBilledProvider(provider)) continue;
+    billableThreadIds.add(thread.id);
+    const cost = thread.contextUsage?.cost;
+    if (cost !== undefined && cost.currency === "USD" && Number.isFinite(cost.amount)) {
+      costUsd += cost.amount;
+      hasCost = true;
+    }
+  }
+  if (billableThreadIds.size === 0) return null;
+
+  let totalTokens = 0;
+  let hasTokens = false;
+  for (const turn of input.providerTurns) {
+    if (!billableThreadIds.has(turn.providerThreadId)) continue;
+    const usage = turn.turnTokenUsage;
+    if (usage === undefined || usage.localCommand === true) continue;
+    let turnTokens = 0;
+    let reported = false;
+    if (usage.inputTokens !== undefined) {
+      turnTokens += usage.inputTokens;
+      reported = true;
+    }
+    if (usage.outputTokens !== undefined) {
+      turnTokens += usage.outputTokens;
+      reported = true;
+    }
+    if (usage.otherUsage !== undefined) {
+      turnTokens += usage.otherUsage.inputTokens + usage.otherUsage.outputTokens;
+      reported = true;
+    }
+    if (!reported) continue;
+    totalTokens += turnTokens;
+    hasTokens = true;
+  }
+  // A provider that reports no token counts leaves nothing to show.
+  if (!hasTokens) return null;
+  return { totalTokens, costUsd: hasCost ? costUsd : null };
 }
 
 export function deriveLatestContextWindowSnapshot(

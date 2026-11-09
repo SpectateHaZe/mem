@@ -14,6 +14,7 @@ const state = vi.hoisted(() => ({
   shells: null as unknown as { set: (id: string, value: unknown) => void },
   navigate: vi.fn(),
   sound: vi.fn(),
+  chime: vi.fn(),
   badge: vi.fn(),
   settingsListeners: new Set<() => void>(),
 }));
@@ -66,7 +67,11 @@ vi.mock(import("../hooks/useSettings"), async (original) => ({
   getClientSettings: (() => ({
     notificationMode: state.mode,
     inAppNotificationsEnabled: state.inApp,
+    completionChimeEnabled: true,
   })) as never,
+}));
+vi.mock(import("../lib/completionChime"), () => ({
+  playCompletionChime: state.chime,
 }));
 vi.mock(import("../threadNotifications"), async (original) => ({
   ...(await original()),
@@ -108,6 +113,12 @@ const thread = {
   hasPendingUserInput: false,
   session: null as { status: string } | null,
   latestTurn: { turnId: "turn", state: "running", completedAt: null as string | null },
+  latestRunStopRequested: false,
+  lineage: null as {
+    parentThreadId: string | null;
+    relationshipToParent: "subagent" | "fork" | null;
+    sideChat?: boolean;
+  } | null,
 };
 let focused = false;
 let visibility = "visible";
@@ -129,8 +140,9 @@ function toV2ThreadShell(input: typeof thread) {
     activeProviderThreadId: null,
     lineage: {
       rootThreadId: input.id,
-      parentThreadId: null,
-      relationshipToParent: null,
+      parentThreadId: input.lineage?.parentThreadId ?? null,
+      relationshipToParent: input.lineage?.relationshipToParent ?? null,
+      ...(input.lineage?.sideChat ? { sideChat: true } : {}),
     },
     forkedFrom: null,
     createdBy: "user",
@@ -160,6 +172,7 @@ function toV2ThreadShell(input: typeof thread) {
     latestRunCompletedAt: latestTurn.completedAt
       ? DateTime.makeUnsafe(latestTurn.completedAt)
       : undefined,
+    latestRunStopRequested: input.latestRunStopRequested ? true : undefined,
     archivedAt: input.archivedAt ? DateTime.makeUnsafe(input.archivedAt) : null,
     settledOverride: null,
     settledAt: null,
@@ -312,7 +325,76 @@ it.each([false, true])(
     state.shells.set("one", completed);
     state.shells.set("one", { ...completed, status: "cached" });
     expect(TestNotification.sent.map(({ title }) => title)).toEqual(["Thread completed"]);
+    expect(state.chime).toHaveBeenCalledTimes(1);
     state.shells.set("one", continued ? shell() : completed);
     expect(TestNotification.sent.map(({ title }) => title)).toEqual(["Thread completed"]);
+    expect(state.chime).toHaveBeenCalledTimes(1);
   },
 );
+
+it.each([
+  { relationshipToParent: "subagent" as const },
+  { relationshipToParent: null, sideChat: true },
+])("chimes for a main thread completion but never for a child thread (%o)", async (lineage) => {
+  await using app = setup();
+  app.start();
+  const parent = { id: "parent" };
+  const child = { id: "child", lineage: { parentThreadId: "parent", ...lineage } };
+  const childCompleted = {
+    ...child,
+    latestTurn: {
+      turnId: "child-turn",
+      state: "completed",
+      completedAt: "2026-09-13T07:01:00.000Z",
+    },
+  };
+  state.shells.set("one", shell(parent, child));
+  state.shells.set("two", shell(parent, child));
+  state.chime.mockClear();
+  state.shells.set("one", shell(parent, childCompleted));
+  state.shells.set("two", shell(parent, child));
+  expect(state.chime).not.toHaveBeenCalled();
+  state.shells.set(
+    "one",
+    shell(
+      {
+        ...parent,
+        latestTurn: {
+          turnId: "parent-turn",
+          state: "completed",
+          completedAt: "2026-09-13T07:02:00.000Z",
+        },
+      },
+      childCompleted,
+    ),
+  );
+  expect(state.chime).toHaveBeenCalledTimes(1);
+});
+
+it("does not chime on load or when the user stopped the turn", async () => {
+  await using app = setup();
+  const completed = shell({
+    latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:05:00.000Z" },
+  });
+  state.shells.set("one", completed);
+  state.shells.set("two", completed);
+  app.start();
+  expect(state.chime).not.toHaveBeenCalled();
+  state.shells.set("two", shell());
+  state.chime.mockClear();
+  state.shells.set(
+    "two",
+    shell({
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:06:00.000Z" },
+      latestRunStopRequested: true,
+    }),
+  );
+  expect(state.chime).not.toHaveBeenCalled();
+  state.shells.set(
+    "two",
+    shell({
+      latestTurn: { turnId: "turn", state: "completed", completedAt: "2026-09-13T07:06:00.000Z" },
+    }),
+  );
+  expect(state.chime).not.toHaveBeenCalled();
+});

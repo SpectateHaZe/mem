@@ -7,16 +7,21 @@ import type {
 import {
   collectProviderUsageLimits,
   formatDuration,
+  formatResetsIn,
   type LimitPace,
   limitsNotice,
   paceOf,
   remainingPercent,
 } from "@t3tools/shared/usageLimits";
+import { formatTokens, formatUsd } from "@t3tools/shared/usageFormat";
 import type { ReactNode } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { useNowMinute } from "../../hooks/useNowMinute";
-import type { ContextWindowSnapshot } from "@t3tools/client-runtime/state/context-window";
+import type {
+  ContextWindowSnapshot,
+  SessionUsage,
+} from "@t3tools/client-runtime/state/context-window";
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
@@ -35,6 +40,7 @@ export interface ThreadDetailsUsageInput {
   readonly providers: readonly ServerProvider[];
   readonly sources: UsageLimitSourceSnapshots;
   readonly contextWindow: ContextWindowSnapshot | null;
+  readonly sessionUsage: SessionUsage | null;
 }
 
 type UsageTone = "error" | "warning" | null;
@@ -77,6 +83,37 @@ export function ThreadDetailsUsage({
         ) : (
           limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
         )}
+      </div>
+    </ThreadDetailsSection>
+  );
+}
+
+/** Pay-per-use tokens and spend for the whole session. Hidden when nothing was billed. */
+export function ThreadDetailsSessionUsage({ usage }: { readonly usage: SessionUsage }) {
+  const tokens = formatTokens(usage.totalTokens);
+  const cost = usage.costUsd === null ? null : formatUsd(usage.costUsd);
+  return (
+    <ThreadDetailsSection
+      headingId="thread-details-session-usage-heading"
+      title="Session usage"
+      showHeading={false}
+    >
+      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+        <UsageRow
+          label="Tokens"
+          fill={null}
+          tone={null}
+          value={cost === null ? tokens : `${tokens} · ${cost}`}
+          ariaValue={cost === null ? tokens : `${tokens}, ${cost}`}
+          tooltip={
+            <>
+              <span className="text-foreground">
+                {usage.totalTokens.toLocaleString("en-US")} tokens used
+              </span>
+              {cost !== null ? <span className="text-muted-foreground">{cost} spent</span> : null}
+            </>
+          }
+        />
       </div>
     </ThreadDetailsSection>
   );
@@ -149,13 +186,14 @@ function LimitRow({
   const left = remainingPercent(window);
   const pace = paceOf(window, now);
   const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+  const resetsIn = formatResetsIn(window, now);
   return (
     <UsageRow
       label={window.label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
-      value={`${left}%`}
-      ariaValue={`${left}% left`}
+      value={resetsIn ? `${left}% · ${resetsIn}` : `${left}%`}
+      ariaValue={resetsIn ? `${left}% left, ${resetsIn}` : `${left}% left`}
       tooltip={
         <>
           <span className="text-foreground">

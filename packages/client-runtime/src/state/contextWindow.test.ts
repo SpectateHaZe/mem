@@ -4,6 +4,7 @@ import {
   ProviderInstanceId,
   ProviderThreadId,
   RunId,
+  type OrchestrationV2ProviderTurn,
   type ServerProvider,
   type ServerSettings,
 } from "@t3tools/contracts";
@@ -14,7 +15,7 @@ import {
 import * as DateTime from "effect/DateTime";
 import { describe, expect, it } from "vite-plus/test";
 
-import { shouldCompactBeforeSend } from "./contextWindow.ts";
+import { deriveSessionUsage, shouldCompactBeforeSend } from "./contextWindow.ts";
 import type { ThreadStructure } from "./models.ts";
 import { v2Projection } from "./orchestrationV2TestFixtures.ts";
 
@@ -260,5 +261,129 @@ describe("shouldCompactBeforeSend", () => {
     expect(shouldCompactBeforeSend(sendInput(overrides as Parameters<typeof sendInput>[0]))).toBe(
       expected,
     );
+  });
+});
+
+describe("deriveSessionUsage", () => {
+  const openCode = ProviderInstanceId.make("opencode");
+  const claude = ProviderInstanceId.make("claudeAgent");
+  const codex = ProviderInstanceId.make("codex");
+  const providers = [
+    {
+      instanceId: openCode,
+      driver: ProviderDriverKind.make("opencode"),
+      auth: { status: "authenticated", type: "apiKey" },
+    },
+    {
+      instanceId: claude,
+      driver: ProviderDriverKind.make("claudeAgent"),
+      auth: { status: "authenticated", type: "pro" },
+    },
+    {
+      instanceId: codex,
+      driver: ProviderDriverKind.make("codex"),
+      auth: { status: "authenticated", subscriptionSharing: true },
+    },
+  ] as unknown as ReadonlyArray<ServerProvider>;
+
+  const complete = (inputTokens: number, outputTokens: number) => ({
+    usageStatus: "complete" as const,
+    usageScope: "main_agent" as const,
+    hasSubagents: false,
+    inputTokens,
+    outputTokens,
+  });
+  const thread = (id: string, providerInstanceId: ProviderInstanceId, costUsd?: number) => ({
+    id: ProviderThreadId.make(id),
+    providerInstanceId,
+    contextUsage:
+      costUsd === undefined ? null : { usedTokens: 0, cost: { amount: costUsd, currency: "USD" } },
+  });
+  const turn = (
+    providerThreadId: string,
+    turnTokenUsage: OrchestrationV2ProviderTurn["turnTokenUsage"],
+  ) => ({
+    providerThreadId: ProviderThreadId.make(providerThreadId),
+    turnTokenUsage,
+  });
+
+  it("sums tokens across turns and adds provider-reported cost", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", complete(1_000, 200)),
+          turn("api-thread", complete(3_000, 300)),
+          turn("api-thread", {
+            usageStatus: "unavailable",
+            usageScope: "main_agent",
+            hasSubagents: false,
+          }),
+        ],
+        providerThreads: [thread("api-thread", openCode, 0.42)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 4_500, costUsd: 0.42 });
+  });
+
+  it("counts only API-billed turns when a thread used several providers", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", complete(1_000, 200)),
+          turn("subscription-thread", complete(9_000, 900)),
+        ],
+        providerThreads: [thread("api-thread", openCode), thread("subscription-thread", claude, 5)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 1_200, costUsd: null });
+  });
+
+  it("hides a thread billed entirely by subscription", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [turn("subscription-thread", complete(9_000, 900))],
+        providerThreads: [thread("subscription-thread", codex, 5)],
+        providers,
+      }),
+    ).toBeNull();
+  });
+
+  it("includes provider-ledger usage beyond the main agent", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", {
+            ...complete(1_000, 100),
+            otherUsage: { inputTokens: 500, outputTokens: 50 },
+          }),
+        ],
+        providerThreads: [thread("api-thread", openCode)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 1_650, costUsd: null });
+  });
+
+  it("shows nothing when no API-billed turn reports tokens", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", {
+            usageStatus: "unavailable",
+            usageScope: "main_agent",
+            hasSubagents: false,
+          }),
+          turn("unknown-thread", complete(1_000, 200)),
+        ],
+        providerThreads: [
+          thread("api-thread", openCode, 0.42),
+          {
+            id: ProviderThreadId.make("unknown-thread"),
+            providerInstanceId: ProviderInstanceId.make("missing"),
+            contextUsage: null,
+          },
+        ],
+        providers,
+      }),
+    ).toBeNull();
   });
 });

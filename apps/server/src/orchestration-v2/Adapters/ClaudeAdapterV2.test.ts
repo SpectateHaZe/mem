@@ -318,6 +318,20 @@ describe("ClaudeAdapterV2 runtime query policy", () => {
     assert.isUndefined(options.extraArgs?.["add-dir"]);
   });
 
+  it("maps the auto-compact token limit to the SDK settings window", () => {
+    const options = ClaudeAdapterV2.makeClaudeQueryOptions({
+      modelSelection: CLAUDE_TEST_MODEL_SELECTION,
+      nativeThreadId: "native-auto-compact",
+      resume: false,
+      cwd: "/workspace",
+      settings: AUTO_COMPACT_CLAUDE_SETTINGS,
+    });
+    assert.equal(
+      (options.settings as { readonly autoCompactWindow?: number }).autoCompactWindow,
+      300_000,
+    );
+  });
+
   it("gives delegated children Claude's subagent prompt cache TTL", () => {
     const lineage = (relationshipToParent: "fork" | "subagent" | null) => ({
       lineage: {
@@ -8048,6 +8062,8 @@ describe("ClaudeAdapterV2 background wake turns", () => {
     { autoCompactWindow: "150000", model: "claude-sonnet-4-6", threshold: 117_000 },
     { autoCompactWindow: "200000", model: "claude-sonnet-4-6", threshold: undefined },
     { autoCompactWindow: "650000", model: "claude-sonnet-4-6", threshold: undefined },
+    { autoCompactWindow: "400000", model: "claude-sonnet-4-6", threshold: undefined },
+    { autoCompactWindow: "400000", model: "claude-opus-5-5", threshold: 367_000 },
     { autoCompactWindow: "650000", model: "uncatalogued-model", threshold: 617_000 },
     {
       autoCompactWindow: "",

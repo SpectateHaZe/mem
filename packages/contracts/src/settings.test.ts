@@ -16,6 +16,7 @@ import {
   idleCompactionPatch,
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
+  resolveAutoCompactWindow,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
@@ -249,6 +250,39 @@ describe("custom model settings", () => {
       "bare-slug",
       { slug: "named", name: "Named", capabilities },
     ]);
+  });
+});
+
+describe("auto-compact window setting", () => {
+  it("defaults to empty and only accepts 100,000 to 1,000,000 tokens", () => {
+    expect(decodeServerSettings({}).autoCompactWindow).toBe("");
+    expect(decodeServerSettingsPatch({ autoCompactWindow: "400000" })).toEqual({
+      autoCompactWindow: "400000",
+    });
+    expect(decodeServerSettingsPatch({ autoCompactWindow: "" })).toEqual({
+      autoCompactWindow: "",
+    });
+    expect(() => decodeServerSettingsPatch({ autoCompactWindow: "40000" })).toThrow();
+    expect(() => decodeServerSettingsPatch({ autoCompactWindow: "1000001" })).toThrow();
+  });
+
+  it("lets a Claude instance override the server default", () => {
+    const settings = decodeServerSettings({
+      autoCompactWindow: "400000",
+      providerInstances: {
+        claude_work: { driver: "claudeAgent", config: { autoCompactWindow: "300000" } },
+        claude_personal: { driver: "claudeAgent" },
+      },
+    });
+    expect(resolveAutoCompactWindow(settings, ProviderInstanceId.make("claude_work"))).toBe(
+      "300000",
+    );
+    expect(resolveAutoCompactWindow(settings, ProviderInstanceId.make("claude_personal"))).toBe(
+      "400000",
+    );
+    expect(
+      resolveAutoCompactWindow(decodeServerSettings({}), ProviderInstanceId.make("claudeAgent")),
+    ).toBe("");
   });
 });
 

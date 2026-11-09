@@ -652,6 +652,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["claude context compaction idle cache tokens usage summary resume"],
   },
   {
+    id: "auto-compact-window",
+    title: "Auto-compact after",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["claude codex context compaction tokens limit threshold automatic"],
+  },
+  {
     id: "auto-settle-merged-threads",
     title: "Auto-settle merged threads",
     to: "/settings/threads",
@@ -688,6 +695,24 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "In-app notifications",
     to: "/settings/general",
     searchTerms: ["notification toast popup completion input approval failure"],
+  },
+  {
+    id: "completion-chime",
+    title: "Completion chime",
+    to: "/settings/general",
+    searchTerms: ["sound chime audio finish done complete completion turn agent background"],
+  },
+  {
+    id: "completion-chime-volume",
+    title: "Completion chime volume",
+    to: "/settings/general",
+    searchTerms: ["sound chime audio volume loud quiet level"],
+  },
+  {
+    id: "completion-chime-sound",
+    title: "Completion chime sound",
+    to: "/settings/general",
+    searchTerms: ["custom sound audio file upload chime preview"],
   },
   {
     id: "time-format",

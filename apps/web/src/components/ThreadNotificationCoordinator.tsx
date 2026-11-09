@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 
 import { getClientSettings, subscribeClientSettings } from "../hooks/useSettings";
+import { playCompletionChime } from "../lib/completionChime";
 import { isWindowsPlatform } from "../lib/utils";
 import { environmentSummaries } from "../state/presentation";
 import { environmentShell } from "../state/shell";
@@ -116,6 +117,7 @@ export function startThreadNotifications(
     state: NotificationState,
     kind: ThreadNotificationKind,
   ) => {
+    if (kind === "completion") void playCompletionChime();
     const { thread, status } = state;
     if (
       registry
@@ -332,8 +334,10 @@ export function startThreadNotifications(
   };
 
   const syncEnvironments = () => {
-    const { notificationMode, inAppNotificationsEnabled } = getClientSettings();
-    const enabled = notificationMode !== "off" || inAppNotificationsEnabled;
+    const { notificationMode, inAppNotificationsEnabled, completionChimeEnabled } =
+      getClientSettings();
+    const enabled =
+      notificationMode !== "off" || inAppNotificationsEnabled || completionChimeEnabled;
     const environmentIds = enabled ? registry.get(environmentSummaries.environmentIdsAtom) : [];
     const activeIds = new Set(environmentIds);
     for (const [environmentId, entry] of watched) {

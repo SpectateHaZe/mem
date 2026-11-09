@@ -1,4 +1,5 @@
 import { useAtomValue } from "@effect/atom-react";
+import { CompletionChimeSettings } from "./CompletionChimeSettings";
 import { NotificationSettings } from "./NotificationSettings";
 import { PRIVACY_POLICY_URL } from "../../legalLinks";
 import { CheckIcon } from "lucide-react";
@@ -15,6 +16,7 @@ import {
   type SidebarProjectGroupingMode,
 } from "@t3tools/contracts";
 import {
+  AUTO_COMPACT_WINDOW_PATTERN,
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
@@ -785,6 +787,7 @@ export function GeneralSettingsPanel() {
             />
           }
         />
+        <CompletionChimeSettings />
       </SettingsSection>
 
       <SettingsSection id="sidebar" title="Sidebar">
@@ -1752,6 +1755,44 @@ export function ThreadsSettingsPanel() {
               }}
               placeholder="No cap"
               aria-label="Daily spending cap in US dollars"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("auto-compact-window")}
+          description="Claude and Codex auto-compact around this token count (100,000 to 1,000,000). Empty uses the provider default; a Claude provider can override this."
+          settingKeys={["autoCompactWindow"]}
+          resetAction={
+            settings.autoCompactWindow !== DEFAULT_UNIFIED_SETTINGS.autoCompactWindow ? (
+              <SettingResetButton
+                label="auto-compact limit"
+                onClick={() =>
+                  updateSettings({
+                    autoCompactWindow: DEFAULT_UNIFIED_SETTINGS.autoCompactWindow,
+                  })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              size="sm"
+              type="number"
+              min={100_000}
+              max={1_000_000}
+              step={1_000}
+              className="w-full sm:w-32"
+              inputMode="numeric"
+              value={settings.autoCompactWindow}
+              onCommit={(next) => {
+                const window = next.trim();
+                if (AUTO_COMPACT_WINDOW_PATTERN.test(window)) {
+                  updateSettings({ autoCompactWindow: window });
+                }
+              }}
+              placeholder="Default"
+              aria-label="Auto-compact after this many tokens"
             />
           }
         />

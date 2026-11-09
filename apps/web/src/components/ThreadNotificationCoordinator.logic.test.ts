@@ -111,3 +111,27 @@ describe("createThreadNotificationGate", () => {
     }
   });
 });
+
+describe("completion chime decision", () => {
+  it("chimes once for a real running-to-finished transition", () => {
+    const { notify, observe } = harness();
+    observe(working);
+    observe(completed(1));
+    observe(completed(1));
+    expect(notify.mock.calls).toEqual([["thread", "completion"]]);
+  });
+
+  it("stays silent on the initial state", () => {
+    const { notify, observe } = harness();
+    observe(completed(1));
+    expect(notify).not.toHaveBeenCalled();
+  });
+
+  it("stays silent when the user stopped the turn", () => {
+    const { notify, observe } = harness();
+    observe(working);
+    observe(completed(1), { archived: false, quiet: true });
+    observe(completed(1));
+    expect(notify).not.toHaveBeenCalled();
+  });
+});
