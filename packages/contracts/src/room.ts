@@ -73,6 +73,16 @@ export const RoomCreateInput = Schema.Struct({
 });
 export type RoomCreateInput = typeof RoomCreateInput.Type;
 
+/** A subagent started from the composer whose result goes to the thread that started it. */
+export const SubagentReportWatchInput = Schema.Struct({
+  projectId: ProjectId,
+  parentThreadId: ThreadId,
+  childThreadId: ThreadId,
+  label: TrimmedNonEmptyString,
+  task: TrimmedNonEmptyString,
+});
+export type SubagentReportWatchInput = typeof SubagentReportWatchInput.Type;
+
 export const RoomSendInput = Schema.Struct({ roomId: RoomId, message: TrimmedNonEmptyString });
 export type RoomSendInput = typeof RoomSendInput.Type;
 

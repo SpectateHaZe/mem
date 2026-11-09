@@ -237,6 +237,8 @@ interface ComposerSendInput {
   readonly onSideChat?: ((prompt: string) => Promise<boolean>) | undefined;
   /** Refuses `/side` with this reason and keeps the draft. */
   readonly sideChatDisabledReason: string | null;
+  /** The next message starts a subagent even without `/side`. */
+  readonly subagentArmed: boolean;
   readonly handleNewThreadInActiveProject: () => void;
   readonly persistThreadSettingsForNextTurn: (input: {
     threadId: ThreadId;
@@ -322,6 +324,7 @@ export function useComposerSend(input: ComposerSendInput) {
     acknowledgeActiveThreadWoke,
     onSideChat,
     sideChatDisabledReason,
+    subagentArmed,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
   } = input;
@@ -446,7 +449,8 @@ export function useComposerSend(input: ComposerSendInput) {
     // `/side` beats an open question and a plan follow-up, which would send the text to main.
     const sideChatCommand =
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
-        ? parseSideChatCommand(promptAtSend)
+        ? (parseSideChatCommand(promptAtSend) ??
+          (subagentArmed && promptAtSend.trim() ? { prompt: promptAtSend.trim() } : null))
         : null;
     const answeringQuestion =
       Boolean(activePendingProgress) && sendCtx?.answeringPendingUserInput !== false;

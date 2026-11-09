@@ -277,6 +277,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import type { ComposerSubagent } from "./chat/SubagentModelPicker";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
 import { shouldShowOpenInPicker } from "./chat/OpenInPicker.logic";
@@ -2790,7 +2791,37 @@ export default function ChatView(props: ChatViewProps) {
                 ? "Available once the thread's worktree is set up."
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
-  const sendSideChatStable = useStableCallback((prompt: string) => sideChat.open(prompt));
+  const [pickedSubagent, setPickedSubagent] = useState<{
+    readonly threadKey: string | null;
+    readonly selection: ModelSelection;
+    readonly label: string;
+  } | null>(null);
+  const [subagentReportsToMain, setSubagentReportsToMain] = useLocalStorage(
+    "mem:subagent-reports-to-main",
+    true,
+    Schema.Boolean,
+  );
+  const subagent = pickedSubagent?.threadKey === routeThreadKey ? pickedSubagent : null;
+  const sendSideChatStable = useStableCallback(async (prompt: string) => {
+    if (subagent === null) return sideChat.open(prompt);
+    const started = await sideChat.open(prompt, {
+      modelSelection: subagent.selection,
+      label: subagent.label,
+      reportToMain: subagentReportsToMain,
+    });
+    if (started) setPickedSubagent(null);
+    return started;
+  });
+  const composerSubagent: ComposerSubagent | undefined = sideChat.available
+    ? {
+        selection: subagent?.selection ?? null,
+        reportToMain: subagentReportsToMain,
+        onSelect: (selection, label) =>
+          setPickedSubagent({ threadKey: routeThreadKey, selection, label }),
+        onClear: () => setPickedSubagent(null),
+        onReportToMainChange: setSubagentReportsToMain,
+      }
+    : undefined;
   const { onConfirmRevertStable, onForkFromRunStable, onRevertTimelineTurnStable } =
     useTimelineRewind({
       environmentId,
@@ -2932,6 +2963,7 @@ export default function ChatView(props: ChatViewProps) {
     acknowledgeActiveThreadWoke,
     onSideChat: sideChat.available ? sendSideChatStable : undefined,
     sideChatDisabledReason,
+    subagentArmed: subagent !== null,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
   });
@@ -3616,6 +3648,7 @@ export default function ChatView(props: ChatViewProps) {
                                 keepFullHistory={keepFullHistory}
                                 onToggleKeepFullHistory={toggleKeepFullHistoryStable}
                                 sideChatAvailable={sideChat.available}
+                                subagent={composerSubagent}
                                 sideChatDisabledReason={sideChatDisabledReason}
                                 onFreshSession={
                                   freshSessionCommandAvailable ? armFreshSessionStable : undefined

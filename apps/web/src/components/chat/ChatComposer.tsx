@@ -265,6 +265,7 @@ import {
   usePreparingComposerImages,
 } from "./preparingComposerImages";
 import { ComposerControlsBar } from "./ComposerControlsBar";
+import type { ComposerSubagent } from "./SubagentModelPicker";
 import { composerCommandKeyHandler } from "./composerCommandKey";
 import { usePromptSuggestion } from "./usePromptSuggestion";
 import { useFreshSessionArmed } from "./freshSessionArms";
@@ -369,6 +370,7 @@ export interface ChatComposerProps {
   onToggleKeepFullHistory: () => void;
   onUsageLimitsCommand?: (() => void) | undefined;
   sideChatAvailable?: boolean;
+  subagent?: ComposerSubagent | undefined;
   sideChatDisabledReason?: string | null;
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
   onFreshSession?: (() => void) | undefined;
@@ -2366,6 +2368,7 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
       : expandedControlsIconOnlyBlockCount;
   const composerControls = (
     <ComposerControlsBar
+      subagent={props.subagent}
       environmentId={environmentId}
       routeKind={routeKind}
       routeThreadRef={routeThreadRef}

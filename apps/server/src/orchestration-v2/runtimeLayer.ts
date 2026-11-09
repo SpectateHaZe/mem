@@ -3,6 +3,7 @@ import * as GuestShareService from "../guest/GuestShareService.ts";
 import * as DiscordPresence from "../presence/DiscordPresence.ts";
 import * as GoalQueueService from "../rooms/GoalQueueService.ts";
 import * as RoomService from "../rooms/RoomService.ts";
+import * as SubagentReportService from "../rooms/SubagentReportService.ts";
 import * as SpendingCap from "./SpendingCap.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -385,6 +386,15 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(
       Layer.mergeAll(
         layerThreadLaunchProvided,
+        layerThreadManagementProvided,
+        layerOrchestratorProvided,
+        ProjectionStore.layer,
+      ),
+    ),
+  ),
+  SubagentReportService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
         layerThreadManagementProvided,
         layerOrchestratorProvided,
         ProjectionStore.layer,

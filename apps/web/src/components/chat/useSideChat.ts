@@ -13,9 +13,17 @@ import { useComposerDraftStore } from "../../composerDraftStore";
 import { useStableCallback } from "../../hooks/useStableCallback";
 import { useRightPanelStore } from "../../rightPanelStore";
 import { readThreadShell, waitForThreadShell } from "../../state/entities";
+import { serverEnvironment } from "../../state/server";
 import { threadEnvironment } from "../../state/threads";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+
+/** Runs the side chat as a subagent on another model instead of the composer's. */
+export type SubagentStart = {
+  readonly modelSelection: ModelSelection;
+  readonly label: string;
+  readonly reportToMain: boolean;
+};
 
 /**
  * Starts side chats from `threadRef`, or offers none when it is null. `open` forks the
@@ -34,6 +42,9 @@ export function useSideChat(input: {
   const pendingRef = useRef(false);
   const forkSideChat = useAtomCommand(threadEnvironment.forkSideChat, { reportFailure: false });
   const deleteThread = useAtomCommand(threadEnvironment.delete, { reportFailure: false });
+  const watchSubagentReport = useAtomCommand(serverEnvironment.watchSubagentReport, {
+    reportFailure: false,
+  });
   const setThreadRuntimeMode = useOrchestrationCommand(threadEnvironment.setRuntimeMode, {
     reportFailure: false,
   });
@@ -48,12 +59,21 @@ export function useSideChat(input: {
     const error = squashAtomCommandFailure(failure);
     input.onError(error instanceof Error ? error.message : fallback);
   };
-  const start = async (threadRef: ScopedThreadRef, prompt: string | undefined) => {
-    const { runtimeMode, modelSelection } = input.readSettings();
+  const start = async (
+    threadRef: ScopedThreadRef,
+    prompt: string | undefined,
+    subagent: SubagentStart | undefined,
+  ) => {
+    const { runtimeMode, modelSelection: composerSelection } = input.readSettings();
+    const modelSelection = subagent?.modelSelection ?? composerSelection;
     const targetThreadId = newThreadId();
     const fork = await forkSideChat({
       environmentId: threadRef.environmentId,
-      input: { sourceThreadId: threadRef.threadId, targetThreadId, title: "Side chat" },
+      input: {
+        sourceThreadId: threadRef.threadId,
+        targetThreadId,
+        title: subagent ? `Subagent: ${subagent.label}` : "Side chat",
+      },
     });
     if (fork._tag === "Failure") {
       reportFailure(fork, "Could not start a side chat.");
@@ -108,17 +128,32 @@ export function useSideChat(input: {
         discard();
         return false;
       }
+      if (subagent?.reportToMain) {
+        const watch = await watchSubagentReport({
+          environmentId: threadRef.environmentId,
+          input: {
+            projectId: sideChat.projectId,
+            parentThreadId: threadRef.threadId,
+            childThreadId: targetThreadId,
+            label: subagent.label,
+            task: text,
+          },
+        });
+        if (watch._tag === "Failure") {
+          reportFailure(watch, "The subagent started, but it can't report to the main agent.");
+        }
+      }
     } else if (modelSelection !== undefined) {
       useComposerDraftStore.getState().setModelSelection(targetRef, modelSelection);
     }
     useRightPanelStore.getState().openSideChat(threadRef, targetThreadId);
     return true;
   };
-  const open = async (prompt?: string) => {
+  const open = async (prompt?: string, subagent?: SubagentStart) => {
     const { threadRef } = input;
     if (!threadRef || pendingRef.current) return false;
     pendingRef.current = true;
-    return start(threadRef, prompt).finally(() => {
+    return start(threadRef, prompt, subagent).finally(() => {
       pendingRef.current = false;
     });
   };

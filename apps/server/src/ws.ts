@@ -243,6 +243,7 @@ import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as RoomService from "./rooms/RoomService.ts";
+import * as SubagentReportService from "./rooms/SubagentReportService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
@@ -1478,6 +1479,7 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const rooms = yield* RoomService.RoomService;
+      const subagentReports = yield* SubagentReportService.SubagentReportService;
       const goalQueue = yield* GoalQueueService.GoalQueueService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
@@ -2357,6 +2359,7 @@ export const layerWsRpc = (
         [WS_METHODS.roomsSend]: (input) => rooms.send(input),
         [WS_METHODS.roomsSetPaused]: (input) => rooms.setPaused(input),
         [WS_METHODS.roomsDelete]: (input) => rooms.delete(input),
+        [WS_METHODS.subagentReportsWatch]: (input) => subagentReports.watch(input),
         [WS_METHODS.queueSubscribe]: (_input) => goalQueue.subscribe(),
         [WS_METHODS.queueAdd]: (input) => goalQueue.add(input),
         [WS_METHODS.queueSetPaused]: (input) => goalQueue.setPaused(input),

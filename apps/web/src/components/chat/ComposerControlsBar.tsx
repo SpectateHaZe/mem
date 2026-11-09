@@ -3,6 +3,7 @@ import type { PromptUltrathink } from "./TraitsPicker";
 import type { ProviderInstanceEntry } from "../../providerInstances";
 import { type AppModelOption } from "../../modelSelection";
 import { CircleAlertIcon } from "lucide-react";
+import { type ComposerSubagent, SubagentModelPicker } from "./SubagentModelPicker";
 import { CompactComposerControlsMenu } from "./CompactComposerControlsMenu";
 import { ComposerControl } from "./ComposerControl";
 import {
@@ -38,6 +39,7 @@ import { resolveComposerControlsOwnership } from "./composerControlsOwnership";
 const MODEL_TRIGGER_STATES = "data-popup-open:bg-accent data-popup-open:text-foreground";
 
 export function ComposerControlsBar(props: {
+  subagent: ComposerSubagent | undefined;
   environmentId: EnvironmentId;
   routeKind: ChatComposerProps["routeKind"];
   routeThreadRef: ChatComposerProps["routeThreadRef"];
@@ -255,6 +257,19 @@ export function ComposerControlsBar(props: {
   ) : (
     <>
       {composerModelPicker}
+      {props.subagent ? (
+        <SubagentModelPicker
+          subagent={props.subagent}
+          fallbackInstanceId={selectedInstanceId}
+          environmentId={environmentId}
+          disabled={providerCatalogPending || isSendBusy}
+          instanceEntries={providerInstanceEntries}
+          modelOptionsByInstance={modelOptionsByInstance}
+          size={controlSize}
+          getModelDisabledReason={getModelDisabledReason}
+          onOpenProviderSetup={onOpenProviderSetup}
+        />
+      ) : null}
 
       <>
         {restingBlockDefs.map((def, index) => {

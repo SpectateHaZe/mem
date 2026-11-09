@@ -42,6 +42,7 @@ import {
   RoomListResult,
   RoomSendInput,
   RoomSetPausedInput,
+  SubagentReportWatchInput,
 } from "./room.ts";
 import {
   GoalQueue,
@@ -565,6 +566,7 @@ export const WS_METHODS = {
   roomsSend: "rooms.send",
   roomsSetPaused: "rooms.setPaused",
   roomsDelete: "rooms.delete",
+  subagentReportsWatch: "subagentReports.watch",
   queueSubscribe: "queue.subscribe",
   queueAdd: "queue.add",
   queueSetPaused: "queue.setPaused",
@@ -2025,6 +2027,11 @@ const WsRoomsCreateRpc = Rpc.make(WS_METHODS.roomsCreate, {
   error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
 });
 
+const WsSubagentReportsWatchRpc = Rpc.make(WS_METHODS.subagentReportsWatch, {
+  payload: SubagentReportWatchInput,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+});
+
 const WsRoomsSendRpc = Rpc.make(WS_METHODS.roomsSend, {
   payload: RoomSendInput,
   success: Room,
@@ -2193,6 +2200,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoomsSubscribeRpc,
   WsRoomsCreateRpc,
   WsRoomsSendRpc,
+  WsSubagentReportsWatchRpc,
   WsRoomsSetPausedRpc,
   WsRoomsDeleteRpc,
   WsQueueSubscribeRpc,

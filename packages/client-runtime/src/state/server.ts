@@ -1355,6 +1355,10 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:queue:remove",
       tag: WS_METHODS.queueRemove,
     }),
+    watchSubagentReport: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:subagent-report:watch",
+      tag: WS_METHODS.subagentReportsWatch,
+    }),
     createRoom: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:room:create",
       tag: WS_METHODS.roomsCreate,

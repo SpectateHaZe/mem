@@ -98,6 +98,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.roomsSend]: "rooms",
   [WS_METHODS.roomsSetPaused]: "rooms",
   [WS_METHODS.roomsDelete]: "rooms",
+  [WS_METHODS.subagentReportsWatch]: "rooms",
   [WS_METHODS.queueSubscribe]: "rooms",
   [WS_METHODS.queueAdd]: "rooms",
   [WS_METHODS.queueSetPaused]: "rooms",

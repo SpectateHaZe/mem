@@ -1,7 +1,13 @@
 import { assert, it } from "@effect/vitest";
 import type { Room } from "@t3tools/contracts";
 
-import { addAgentReply, addUserMessage, beginTurn, nextSpeakerIndex } from "./roomModerator.ts";
+import {
+  addAgentReply,
+  addUserMessage,
+  beginTurn,
+  nextSpeakerIndex,
+  subagentFinishedNote,
+} from "./roomModerator.ts";
 
 const makeRoom = (): Room =>
   ({
@@ -76,4 +82,18 @@ it("sends each agent only what it has not seen and asks the last speaker to deci
   assert.notInclude(again.prompt, "[Claude]: My answer");
   assert.include(again.prompt, "[You]: Follow up");
   assert.notInclude(again.prompt, "You are Codex");
+});
+
+it("reports a subagent's outcome to its parent", () => {
+  assert.strictEqual(
+    subagentFinishedNote("Haiku", "completed", " Done. "),
+    "Subagent (Haiku) finished.\n\nDone.",
+  );
+  assert.strictEqual(
+    subagentFinishedNote("Haiku", "failed", ""),
+    "Subagent (Haiku) stopped early (failed). It left no reply.",
+  );
+  const long = subagentFinishedNote("Haiku", "completed", "x".repeat(30_000));
+  assert.include(long, "Result cut off");
+  assert.isBelow(long.length, 20_200);
 });
