@@ -1264,6 +1264,8 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+const MEM_DISCORD_CLIENT_ID = "1569225354881662976";
+
 /** A thread whose main agent only leads subagents, and the model they run on. */
 export const LowUsageThread = Schema.Struct({
   threadId: ThreadId,
@@ -1494,7 +1496,9 @@ export const ServerSettings = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(20)),
   ),
   /** Discord Application ID for Rich Presence. Empty turns it off. */
-  discordClientId: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  discordClientId: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed(MEM_DISCORD_CLIENT_ID)),
+  ),
   /** What agents in full-access threads may do with the desktop. */
   computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
   obscuraEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),

@@ -1704,7 +1704,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("discord-status")}
-          description="Shows how many agents are working on your Discord profile. Project and thread names are never shared. Paste a Discord Application ID to turn it on, or clear it to turn it off."
+          description="Shows how many agents are working on your Discord profile. Project and thread names are never shared. Clear the Application ID to turn it off."
           settingKeys={["discordClientId"]}
           control={
             <DraftInput
