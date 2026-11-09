@@ -19,6 +19,7 @@ import ProjectScriptsControl, {
 import { memo, useState, type ComponentProps } from "react";
 import { ThreadDetailsCard } from "./ThreadDetailsCard";
 import { OpenInPicker } from "./OpenInPicker";
+import { ThreadDetailsLowUsage } from "./ThreadDetailsLowUsage";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
@@ -255,6 +256,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                   threadId={props.threadId}
                   showLineage={visible.lineage}
                   showSideChats={visible.sideChats}
+                />
+              ) : null}
+
+              {visible.lowUsage ? (
+                <ThreadDetailsLowUsage
+                  environmentId={props.environmentId}
+                  threadId={props.threadId}
                 />
               ) : null}
 

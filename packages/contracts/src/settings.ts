@@ -1264,6 +1264,13 @@ export const CloudSpeechCredentials = Schema.Struct({
   openrouter: CloudSpeechCredential,
 });
 
+/** A thread whose main agent only leads subagents, and the model they run on. */
+export const LowUsageThread = Schema.Struct({
+  threadId: ThreadId,
+  subagentModel: ModelSelection,
+});
+export type LowUsageThread = typeof LowUsageThread.Type;
+
 export const ServerSettings = Schema.Struct({
   // Null means unmigrated; empty is authoritative and must not resurrect cleared preferences.
   favorites: Schema.NullOr(ModelFavorites).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
@@ -1491,6 +1498,9 @@ export const ServerSettings = Schema.Struct({
   /** What agents in full-access threads may do with the desktop. */
   computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
   obscuraEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  lowUsageThreads: Schema.Array(LowUsageThread).pipe(
+    Schema.withDecodingDefault(Effect.succeed([])),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1849,6 +1859,7 @@ export const ServerSettingsPatch = Schema.Struct({
   discordClientId: Schema.optionalKey(Schema.String),
   computerUseMode: Schema.optionalKey(ComputerUseMode),
   obscuraEnabled: Schema.optionalKey(Schema.Boolean),
+  lowUsageThreads: Schema.optionalKey(Schema.Array(LowUsageThread)),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

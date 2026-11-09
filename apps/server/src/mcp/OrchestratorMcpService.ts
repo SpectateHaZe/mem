@@ -2442,9 +2442,22 @@ const make = Effect.gen(function* () {
         operation: "delegate-task",
       });
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
+      const lowUsage = yield* serverSettings.getSettings.pipe(
+        Effect.map(({ lowUsageThreads }) =>
+          lowUsageThreads.find((entry) => entry.threadId === parent.thread.id),
+        ),
+        Effect.orElseSucceed(() => undefined),
+      );
       const target = yield* resolveTargetRechecking({
         parent,
-        target: input.target,
+        target:
+          input.target ??
+          (lowUsage === undefined
+            ? undefined
+            : {
+                providerInstanceId: lowUsage.subagentModel.instanceId,
+                model: lowUsage.subagentModel.model,
+              }),
         providers,
         skipProjectEnablementFilter: isRetryOfAcceptedDelegation,
       });

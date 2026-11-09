@@ -30,6 +30,7 @@ import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
+import { withLowUsageInstructions } from "../rooms/lowUsage.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as EventSink from "./EventSink.ts";
@@ -149,6 +150,7 @@ export const layer: Layer.Layer<
   ProviderTurnStartServiceV2,
   Effect.gen(function* () {
     const eventSink = yield* EventSink.EventSinkV2;
+    const serverSettings = yield* ServerSettings.ServerSettingsService;
     const turnAnalytics = yield* ProviderUsageAnalytics.ProviderTurnAnalytics;
     const contextHandoffService = yield* ContextHandoffService.ContextHandoffServiceV2;
     const idAllocator = yield* IdAllocator.IdAllocatorV2;
@@ -837,10 +839,21 @@ export const layer: Layer.Layer<
       });
       let effectiveHandoffs = handoffs;
       let resumeFellBack = false;
-      const userText = projectComposerContextForProvider({
+      const projectedText = projectComposerContextForProvider({
         text: message.text,
         records: message.context?.records ?? [],
       });
+      const lowUsage = yield* serverSettings.getSettings.pipe(
+        Effect.map(({ lowUsageThreads }) =>
+          lowUsageThreads.find((entry) => entry.threadId === run.threadId),
+        ),
+        Effect.orElseSucceed(() => undefined),
+      );
+      // Slash commands must stay first in the prompt for providers to parse them.
+      const userText =
+        lowUsage !== undefined && !message.text.trimStart().startsWith("/")
+          ? withLowUsageInstructions(projectedText, lowUsage.subagentModel)
+          : projectedText;
       // Codex and Claude parse /goal from the prompt, so it goes verbatim and history waits a turn.
       const goalDriver = session.driver === "codex" || session.driver === "claudeAgent";
       const goalCommand = goalDriver && parseGoalCommand(message) !== null;

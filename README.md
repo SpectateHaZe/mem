@@ -8,6 +8,7 @@ Mem is a desktop app for running coding agents, built as a fork of [T3 Code](htt
 
 - **Group chats.** Put several agents from different providers in one conversation, or let one lead agent hand jobs to helpers.
 - **Subagent picker.** Choose a model from any provider next to the composer and your next message starts it in the side panel. It can report back to the main agent or stay separate.
+- **Low usage mode.** Turn it on for a thread in the details panel and pick a cheaper subagent model. The main agent then plans and delegates instead of doing the work itself.
 - **A queue.** Line up goals and leave. Mem retries failures, survives restarts, and stops when the queue is empty or the spending cap is hit.
 - **A spending cap.** See what you've used and stop work at a daily limit ($20 by default, editable in Settings).
 - **Computer control.** Agents in full-access threads can see the screen and use the mouse and keyboard on Windows. It defaults to full control; Settings → Threads has View only and Off.
