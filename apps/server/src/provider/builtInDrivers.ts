@@ -2,6 +2,7 @@ import {
   AcpRegistryDriver,
   type AcpRegistryDriverEnv,
 } from "@t3tools/provider-acp-registry/server";
+import type { ProviderDriverKind, UsageProviderKind } from "@t3tools/contracts";
 import { AntigravityDriver, type AntigravityDriverEnv } from "./Drivers/AntigravityDriver.ts";
 import { ClaudeDriver, type ClaudeDriverEnv } from "./Drivers/ClaudeDriver.ts";
 import { CodexDriver, type CodexDriverEnv } from "./Drivers/CodexDriver.ts";
@@ -67,3 +68,10 @@ export const BUILT_IN_USAGE_DRIVERS: ReadonlyArray<
   AntigravityDriver,
   CursorDriver,
 ];
+
+/** Usage transcripts are keyed by usage provider, not driver, so map back for cost attribution. */
+export const USAGE_PROVIDER_BY_DRIVER: ReadonlyMap<ProviderDriverKind, UsageProviderKind> = new Map(
+  BUILT_IN_USAGE_DRIVERS.flatMap((driver) =>
+    driver.usage ? [[driver.driverKind, driver.usage.provider] as const] : [],
+  ),
+);

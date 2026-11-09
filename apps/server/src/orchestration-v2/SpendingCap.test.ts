@@ -1,7 +1,68 @@
 import { assert, it } from "@effect/vitest";
+import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 
-import { localUsageDay } from "./SpendingCap.ts";
+import {
+  billableSpendUsd,
+  isSubscriptionBilledProvider,
+  localUsageDay,
+  subscriptionUsageProviders,
+} from "./SpendingCap.ts";
 import { spendingCapHit, startsWork } from "./SpendingCapState.ts";
+
+function provider(
+  instanceId: string,
+  driver: string,
+  auth: ServerProvider["auth"],
+): ServerProvider {
+  return {
+    instanceId: ProviderInstanceId.make(instanceId),
+    driver: ProviderDriverKind.make(driver),
+    auth,
+  } as ServerProvider;
+}
+
+it("treats subscription logins as unbilled and metered logins as spending", () => {
+  const subscription = provider("claude", "claudeAgent", {
+    status: "authenticated",
+    type: "pro",
+  });
+  const apiKey = provider("claude-key", "claudeAgent", {
+    status: "authenticated",
+    type: "apiKey",
+  });
+  const chatgpt = provider("codex", "codex", { status: "authenticated", type: "chatgpt" });
+  const grokApiKey = provider("grok", "grok", { status: "authenticated", type: "apiKey" });
+
+  assert.isTrue(isSubscriptionBilledProvider(subscription));
+  assert.isFalse(isSubscriptionBilledProvider(apiKey));
+  assert.isTrue(isSubscriptionBilledProvider(chatgpt));
+  assert.isFalse(isSubscriptionBilledProvider(grokApiKey));
+});
+
+it("excludes a provider only when every authenticated login is subscription-billed", () => {
+  const subscription = provider("claude", "claudeAgent", {
+    status: "authenticated",
+    type: "pro",
+  });
+  const apiKey = provider("claude-key", "claudeAgent", {
+    status: "authenticated",
+    type: "apiKey",
+  });
+  const chatgpt = provider("codex", "codex", { status: "authenticated", type: "chatgpt" });
+
+  assert.deepEqual([...subscriptionUsageProviders([subscription])], ["claude"]);
+  assert.deepEqual([...subscriptionUsageProviders([subscription, apiKey])], []);
+  assert.deepEqual([...subscriptionUsageProviders([chatgpt])], ["codex"]);
+});
+
+it("counts only pay-per-use buckets toward the cap", () => {
+  const buckets = [
+    { provider: "claude" as const, costUsd: 12 },
+    { provider: "codex" as const, costUsd: 3.5 },
+  ];
+  assert.equal(billableSpendUsd(buckets, new Set(["claude"])), 3.5);
+  assert.equal(billableSpendUsd(buckets, new Set()), 15.5);
+});
 
 it("hits the cap at exactly the limit and never when the cap is off", () => {
   assert.equal(spendingCapHit(19.99, 20), undefined);

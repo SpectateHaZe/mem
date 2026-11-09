@@ -1726,7 +1726,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("daily-spend-cap")}
-          description="Stops every agent and blocks new turns once today's estimated spend reaches this amount in US dollars. Leave empty for no cap."
+          description="Stops every agent and blocks new turns once today's estimated pay-per-use spend reaches this amount. Subscription plans like Claude Pro/Max and ChatGPT don't count. Empty for no cap."
           settingKeys={["dailySpendCapUsd"]}
           resetAction={
             settings.dailySpendCapUsd !== DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd ? (

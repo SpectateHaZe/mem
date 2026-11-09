@@ -11,10 +11,11 @@ const servers = THREAD_DETAILS_ITEMS.find((item) => item.id === "servers")!;
 
 describe("thread details items", () => {
   it.each([
-    { legacy: false, items: {}, usage: false, context: false },
+    { legacy: false, items: {}, usage: true, context: false },
     { legacy: true, items: {}, usage: true, context: true },
     { legacy: true, items: { usage: false }, usage: false, context: true },
-    { legacy: false, items: { usage: true, retired: false }, usage: true, context: false },
+    { legacy: false, items: { usage: false }, usage: false, context: false },
+    { legacy: false, items: { usage: true }, usage: true, context: false },
   ])("resolves Usage and Context from overrides and the retired Labs flag: %o", (row) => {
     const visibility = resolveThreadDetailsVisibility({
       threadDetailsItems: row.items,
@@ -32,5 +33,10 @@ describe("thread details items", () => {
 
     const hidden = { threadDetailsItems: { servers: false }, threadDetailsUsageEnabled: false };
     expect(setThreadDetailsItem(hidden, servers, true)).toEqual({});
+
+    // Usage limits are visible by default even with the retired Labs flag off.
+    const legacyOff = { threadDetailsItems: {}, threadDetailsUsageEnabled: false };
+    expect(setThreadDetailsItem(legacyOff, usage, true)).toEqual({});
+    expect(setThreadDetailsItem(legacyOff, usage, false)).toEqual({ usage: false });
   });
 });

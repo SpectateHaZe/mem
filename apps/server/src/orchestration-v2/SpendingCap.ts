@@ -1,3 +1,4 @@
+import type { ServerProvider, UsageProviderKind } from "@t3tools/contracts";
 import { CommandId, UsageDay } from "@t3tools/contracts";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -5,6 +6,8 @@ import * as Layer from "effect/Layer";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import { USAGE_PROVIDER_BY_DRIVER } from "../provider/builtInDrivers.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as UsageService from "../usage/UsageService.ts";
@@ -28,11 +31,62 @@ export const localUsageDay = (nowMs: number, timeZone: string) =>
     }).format(nowMs),
   );
 
+/** Auth types that bill each call rather than drawing on a subscription plan. */
+const METERED_CLAUDE_AUTH_TYPES: ReadonlySet<string> = new Set([
+  "apiKey",
+  "bedrock",
+  "customEndpoint",
+]);
+
+/** Subscription plans have no marginal cost, so they must not consume the spending cap. */
+export function isSubscriptionBilledProvider(provider: ServerProvider): boolean {
+  if (provider.auth.status !== "authenticated") return false;
+  switch (provider.driver) {
+    case "claudeAgent":
+      return provider.auth.type !== undefined && !METERED_CLAUDE_AUTH_TYPES.has(provider.auth.type);
+    case "codex":
+      return provider.auth.subscriptionSharing === true || provider.auth.type === "chatgpt";
+    case "antigravity":
+      return provider.auth.type === "oauth-personal" || provider.auth.type === "oauth-business";
+    default:
+      return false;
+  }
+}
+
+/**
+ * Usage providers whose every authenticated login is subscription-billed. A metered login for the
+ * same provider keeps it counted, since transcripts cannot attribute cost to a specific login.
+ */
+export function subscriptionUsageProviders(
+  providers: ReadonlyArray<ServerProvider>,
+): ReadonlySet<UsageProviderKind> {
+  const subscription = new Set<UsageProviderKind>();
+  const metered = new Set<UsageProviderKind>();
+  for (const provider of providers) {
+    if (provider.auth.status !== "authenticated") continue;
+    const kind = USAGE_PROVIDER_BY_DRIVER.get(provider.driver);
+    if (!kind) continue;
+    (isSubscriptionBilledProvider(provider) ? subscription : metered).add(kind);
+  }
+  return new Set([...subscription].filter((kind) => !metered.has(kind)));
+}
+
+/** Estimated pay-per-use cost only; subscription plans contribute nothing to the cap. */
+export function billableSpendUsd(
+  buckets: ReadonlyArray<{ readonly provider: UsageProviderKind; readonly costUsd: number }>,
+  subscriptionProviders: ReadonlySet<UsageProviderKind>,
+): number {
+  return buckets
+    .filter((bucket) => !subscriptionProviders.has(bucket.provider))
+    .reduce((total, bucket) => total + bucket.costUsd, 0);
+}
+
 const makeSweep = Effect.gen(function* () {
   const usage = yield* UsageService.UsageService;
   const settings = yield* ServerSettings.ServerSettingsService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const threads = yield* ThreadManagement.ThreadManagementService;
+  const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   let lastCheckMs = 0;
   let lastCap: number | null | undefined;
 
@@ -60,7 +114,11 @@ const makeSweep = Effect.gen(function* () {
       timeZone,
       sessionIds,
     });
-    const spentUsd = summary.buckets.reduce((total, bucket) => total + bucket.costUsd, 0);
+    const providers = yield* Effect.forEach(
+      yield* providerInstances.listInstances,
+      (instance) => instance.snapshot.getSnapshot,
+    );
+    const spentUsd = billableSpendUsd(summary.buckets, subscriptionUsageProviders(providers));
     yield* Ref.set(lastSpentUsd, spentUsd);
     const hit = spendingCapHit(spentUsd, capUsd);
     const previous = yield* Ref.getAndSet(currentHit, hit);
