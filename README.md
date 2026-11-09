@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/prod/mem-logo-source.png" alt="Mem logo" width="160" />
+</p>
+
 # Mem
 
 Mem is a desktop app for running coding agents, built as a fork of [T3 Code](https://github.com/pingdotgg/t3code) (MIT). It keeps T3 Code's interface and adds:
