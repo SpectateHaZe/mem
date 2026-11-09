@@ -74,11 +74,11 @@ export const encodeDiscordFrame = (op: number, payload: unknown) => {
   return Buffer.concat([header, body]);
 };
 
-const runtimeDirectory = (env: NodeJS.ProcessEnv) =>
-  (env["XDG_RUNTIME_DIR"] ?? env["TMPDIR"] ?? env["TMP"] ?? env["TEMP"] ?? "/tmp").replace(
-    /[\\/]+$/,
-    "",
-  ) || "/";
+const runtimeDirectory = (platform: NodeJS.Platform | string, env: NodeJS.ProcessEnv) =>
+  (platform === "darwin"
+    ? (env["TMPDIR"] ?? "/tmp")
+    : (env["XDG_RUNTIME_DIR"] ?? env["TMPDIR"] ?? env["TMP"] ?? env["TEMP"] ?? "/tmp")
+  ).replace(/[\\/]+$/, "") || "/";
 
 export const discordIpcPathCandidates = (
   platform: NodeJS.Platform | string,
@@ -87,7 +87,7 @@ export const discordIpcPathCandidates = (
   platform === "win32"
     ? Array.from({ length: IPC_SOCKET_COUNT }, (_, index) => `\\\\?\\pipe\\discord-ipc-${index}`)
     : (() => {
-        const directory = runtimeDirectory(env);
+        const directory = runtimeDirectory(platform, env);
         return Array.from(
           { length: IPC_SOCKET_COUNT },
           (_, index) => `${directory}/discord-ipc-${index}`,

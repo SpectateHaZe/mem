@@ -967,6 +967,7 @@ interface StagePackageJson {
   readonly buildVersion: string;
   readonly t3codeCommitHash: string;
   readonly t3codeWebAuthn?: MacWebAuthnEntitlements;
+  readonly t3codeMacUnsigned?: true;
   readonly private: true;
   readonly packageManager: string;
   readonly description: string;
@@ -3874,6 +3875,8 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
     t3codeCommitHash: commitHash,
     // Read by apps/desktop/src/preview/Passkeys.ts; must match the signed entitlements.
     ...(macWebAuthn ? { t3codeWebAuthn: macWebAuthn } : {}),
+    // An unsigned macOS app cannot install Squirrel.Mac updates; the updater checks this.
+    ...(options.platform === "mac" && !options.signed ? { t3codeMacUnsigned: true as const } : {}),
     private: true,
     packageManager: rootPackageJson.packageManager,
     description:

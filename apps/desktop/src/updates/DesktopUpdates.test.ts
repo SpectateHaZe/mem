@@ -65,6 +65,23 @@ describe("DesktopUpdates", () => {
     ).pipe(Effect.provide(harness.layer));
   });
 
+  it.effect("disables updates for an unsigned macOS build", () => {
+    const harness = makeHarness({ macUnsigned: true });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const state = yield* updates.getState;
+        assert.isFalse(state.enabled);
+        assert.equal(state.status, "disabled");
+        assert.include(state.message, "not code-signed");
+        assert.equal(harness.checkCount(), 0);
+      }),
+    ).pipe(Effect.provide(harness.layer));
+  });
+
   it.effect("checks for newer releases after an update has been downloaded", () => {
     const harness = makeHarness();
 

@@ -37,6 +37,8 @@ export interface UpdatesHarnessOptions {
   readonly platform?: NodeJS.Platform;
   readonly packageType?: string | undefined;
   readonly installRecord?: string | undefined;
+  /** Marks the staged app package.json as an unsigned macOS build. */
+  readonly macUnsigned?: boolean;
   readonly policy?: DesktopUpdatePolicy.UpdatePolicy;
   readonly appVersion?: string;
   /** Starts from in-memory settings with this track saved, as after a restart. */
@@ -243,11 +245,15 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     path.endsWith(DesktopUpdates.DESKTOP_UPDATE_INSTALL_RECORD_FILE);
   const layerFileSystem = FileSystem.layerNoop({
     readFileString: (path) => {
+      if (options.macUnsigned === true && /(?:^|[\\/])package\.json$/.test(path)) {
+        return Effect.succeed(JSON.stringify({ t3codeMacUnsigned: true }));
+      }
       const installRecord = isInstallRecord(path)
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
       if (installRecord !== undefined) return Effect.succeed(installRecord);
-      return path === "/missing/resources/package-type" && options.packageType !== undefined
+      return path.replaceAll("\\", "/") === "/missing/resources/package-type" &&
+        options.packageType !== undefined
         ? Effect.succeed(options.packageType)
         : Effect.fail(
             PlatformError.systemError({

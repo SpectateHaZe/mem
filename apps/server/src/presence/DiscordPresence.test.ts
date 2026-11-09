@@ -62,6 +62,14 @@ it("falls back through the Unix runtime directories", () => {
     discordIpcPathCandidates("darwin", { TMPDIR: "/var/folders/t/" })[0],
     "/var/folders/t/discord-ipc-0",
   );
+  // macOS sets TMPDIR; an unrelated XDG_RUNTIME_DIR must not win there.
+  assert.equal(
+    discordIpcPathCandidates("darwin", {
+      TMPDIR: "/var/folders/t/",
+      XDG_RUNTIME_DIR: "/run/user/1000",
+    })[0],
+    "/var/folders/t/discord-ipc-0",
+  );
   assert.equal(discordIpcPathCandidates("linux", { TMP: "/var/tmp" })[0], "/var/tmp/discord-ipc-0");
   assert.equal(discordIpcPathCandidates("linux", {})[0], "/tmp/discord-ipc-0");
 });

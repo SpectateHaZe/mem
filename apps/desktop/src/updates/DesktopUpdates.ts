@@ -68,6 +68,10 @@ interface DesktopPreparedUpdateInstallResult extends DesktopUpdateActionResult {
 const AppUpdateYmlConfig = Schema.Record(Schema.String, Schema.String);
 type AppUpdateYmlConfig = typeof AppUpdateYmlConfig.Type;
 
+const StagePackageMetadata = Schema.Struct({
+  t3codeMacUnsigned: Schema.optional(Schema.Boolean),
+});
+
 const UpdateInfo = Schema.Struct({
   version: Schema.String,
   // Malformed notes must not block update-state decoding; normalizeDesktopUpdateReleaseNotes validates separately.
@@ -86,6 +90,9 @@ const decodeInstallRecord = Schema.decodeUnknownEffect(DesktopUpdateInstallRecor
 const encodeInstallRecord = Schema.encodeEffect(DesktopUpdateInstallRecord);
 
 const decodeAppUpdateYmlConfig = Schema.decodeUnknownEffect(AppUpdateYmlConfig);
+const decodeStagePackageMetadata = Schema.decodeUnknownEffect(
+  Schema.fromJsonString(StagePackageMetadata),
+);
 const decodeUpdateInfo = Schema.decodeUnknownEffect(UpdateInfo);
 const decodeDownloadProgressInfo = Schema.decodeUnknownEffect(DownloadProgressInfo);
 
@@ -293,6 +300,13 @@ function parseAppUpdateYml(raw: string): Effect.Effect<Option.Option<AppUpdateYm
   );
 }
 
+function resolveReleasePageUrl(config: Option.Option<AppUpdateYmlConfig>): string | undefined {
+  if (Option.isNone(config) || config.value.provider !== "github") return undefined;
+  const owner = config.value.owner?.trim();
+  const repo = config.value.repo?.trim();
+  return owner && repo ? `https://github.com/${owner}/${repo}/releases/latest` : undefined;
+}
+
 function createBaseUpdateState(
   channel: DesktopUpdateChannel,
   disabledReason: Option.Option<string>,
@@ -338,9 +352,16 @@ function getAutoUpdateDisabledReason(args: {
   isDebPackage: boolean;
   disabledByEnv: boolean;
   hasUpdateFeedConfig: boolean;
+  isUnsignedMac: boolean;
+  releasePageUrl: string | undefined;
 }): string | null {
   if (args.policy.mode === "off") {
     return args.policy.message ?? "Updates are turned off on this machine.";
+  }
+  if (args.isUnsignedMac) {
+    return args.releasePageUrl
+      ? `Automatic updates are unavailable because this macOS build is not code-signed. Download the latest version from ${args.releasePageUrl}.`
+      : "Automatic updates are unavailable because this macOS build is not code-signed. Download the latest version from the Mem releases page.";
   }
   if (!args.hasUpdateFeedConfig) {
     return "Automatic updates are not available because no update feed is configured.";
@@ -452,6 +473,18 @@ export const make = Effect.gen(function* () {
           )
       : false;
 
+  // electron-updater installs macOS updates through Squirrel.Mac, which rejects an unsigned app.
+  const isUnsignedMac =
+    environment.platform === "darwin" && environment.isPackaged
+      ? yield* fileSystem
+          .readFileString(environment.path.join(environment.appRoot, "package.json"))
+          .pipe(
+            Effect.flatMap(decodeStagePackageMetadata),
+            Effect.map((metadata) => metadata.t3codeMacUnsigned === true),
+            Effect.orElseSucceed(() => false),
+          )
+      : false;
+
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
     Effect.map(
       (appUpdateYmlConfig) =>
@@ -461,6 +494,7 @@ export const make = Effect.gen(function* () {
 
   const resolveDisabledReason = Effect.gen(function* () {
     const hasFeedConfig = yield* hasUpdateFeedConfig;
+    const appUpdateYmlConfig = yield* Ref.get(appUpdateYmlConfigRef);
     return Option.fromNullishOr(
       getAutoUpdateDisabledReason({
         policy,
@@ -471,6 +505,8 @@ export const make = Effect.gen(function* () {
         isDebPackage,
         disabledByEnv: config.disableAutoUpdate,
         hasUpdateFeedConfig: hasFeedConfig,
+        isUnsignedMac,
+        releasePageUrl: resolveReleasePageUrl(appUpdateYmlConfig),
       }),
     );
   });

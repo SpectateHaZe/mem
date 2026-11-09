@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   windows:
-    name: Build and publish Windows installer
+    name: Build Windows installer
     runs-on: windows-2025
     timeout-minutes: 60
     env:
@@ -36,10 +36,105 @@ jobs:
             --platform win --target nsis --arch x64 \
             --build-version "${GITHUB_REF_NAME#v}" --verbose
 
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-windows
+          path: release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  macos:
+    name: Build macOS installer (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: arm64
+            runner: macos-15
+            rust_target: aarch64-apple-darwin
+          - arch: x64
+            runner: macos-15-intel
+            rust_target: x86_64-apple-darwin
+    env:
+      T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/desktop... --filter=t3... --filter=@t3tools/scripts...
+
+      - name: Ensure Rust target
+        run: rustup target add "${{ matrix.rust_target }}"
+
+      # Unsigned on purpose: no Apple Developer account, so no --signed flag and
+      # no signing secrets. The built app disables its own updater.
+      - name: Build installer
+        run: |
+          node scripts/build-desktop-artifact.ts \
+            --platform mac --target dmg --arch "${{ matrix.arch }}" \
+            --build-version "${GITHUB_REF_NAME#v}" --verbose
+
+      # Both architectures write latest-mac.yml; keep them apart so the release
+      # job can merge them into one multi-arch manifest.
+      - name: Name the x64 update manifest
+        if: matrix.arch == 'x64'
+        shell: bash
+        run: |
+          test -f release/latest-mac.yml
+          mv release/latest-mac.yml release/latest-mac-x64.yml
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v7
+        with:
+          name: desktop-mac-${{ matrix.arch }}
+          path: release/*
+          if-no-files-found: error
+          retention-days: 1
+
+  release:
+    name: Publish GitHub release
+    needs: [windows, macos]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - name: Download installers
+        uses: actions/download-artifact@v8
+        with:
+          pattern: desktop-*
+          merge-multiple: true
+          path: release
+
+      - name: Merge macOS update manifests
+        shell: bash
+        run: |
+          shopt -s nullglob
+          for x64_manifest in release/*-mac-x64.yml; do
+            arm64_manifest="${x64_manifest%-x64.yml}.yml"
+            if [[ -f "$arm64_manifest" ]]; then
+              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest"
+              rm -f "$x64_manifest"
+            fi
+          done
+
+      # Windows keeps its existing asset names: installed copies update from
+      # Mem-<version>-x64.exe and latest.yml.
       - name: Publish release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create "$GITHUB_REF_NAME" --generate-notes \
-            release/*.exe release/*.blockmap release/latest.yml
+            release/*.exe release/*.blockmap release/latest.yml \
+            release/*.dmg release/*.zip release/latest-mac.yml
