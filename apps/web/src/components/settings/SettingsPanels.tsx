@@ -494,6 +494,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.sidebarAutoSettleOnMerge !== DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge
       ? ["Auto-settle merged threads"]
       : []),
+    ...(settings.dailySpendCapUsd !== DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd
+      ? ["Daily spending cap"]
+      : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
@@ -656,6 +659,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleAfterDays: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleAfterDays,
       sidebarAutoSettleKeepPullRequests: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleKeepPullRequests,
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
+      dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
@@ -1642,6 +1646,38 @@ export function ThreadsSettingsPanel() {
       ) : null}
 
       <SettingsSection id="usage-limits" title="Usage limits">
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("daily-spend-cap")}
+          description="Stops every agent and blocks new turns once today's estimated spend reaches this amount in US dollars. Leave empty for no cap."
+          settingKeys={["dailySpendCapUsd"]}
+          resetAction={
+            settings.dailySpendCapUsd !== DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd ? (
+              <SettingResetButton
+                label="daily spending cap"
+                onClick={() =>
+                  updateSettings({ dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd })
+                }
+              />
+            ) : null
+          }
+          control={
+            <DraftInput
+              size="sm"
+              className="w-full sm:w-28"
+              inputMode="decimal"
+              value={settings.dailySpendCapUsd === null ? "" : String(settings.dailySpendCapUsd)}
+              onCommit={(next) => {
+                const capUsd = next.trim() === "" ? null : Number(next);
+                if (capUsd === null || (Number.isFinite(capUsd) && capUsd > 0)) {
+                  updateSettings({ dailySpendCapUsd: capUsd });
+                }
+              }}
+              placeholder="No cap"
+              aria-label="Daily spending cap in US dollars"
+            />
+          }
+        />
         <SettingsRow
           serverScoped
           {...searchableSetting("auto-resume-limited-threads")}

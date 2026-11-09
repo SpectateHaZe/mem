@@ -169,6 +169,7 @@ import {
   type OlderSettledThreadsQuery,
   type ShellSnapshotOptions,
 } from "./ProjectionStore.ts";
+import * as SpendingCapState from "./SpendingCapState.ts";
 import { ProviderAdapterRegistryV2 } from "./ProviderAdapterRegistry.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
 import { makeProviderFailure } from "@t3tools/provider-core/server/failure";
@@ -300,6 +301,19 @@ function runtimePolicyCeilingCause(error: unknown) {
   return isRuntimePolicyAboveCeilingError(current) ? current : undefined;
 }
 
+export class OrchestratorDailySpendCapError extends Schema.TaggedError<OrchestratorDailySpendCapError>()(
+  "OrchestratorDailySpendCapError",
+  {
+    commandId: CommandId,
+    spentUsd: Schema.Number,
+    capUsd: Schema.Number,
+  },
+) {
+  override get message(): string {
+    return `Today's spending cap of $${this.capUsd.toFixed(2)} has been reached (about $${this.spentUsd.toFixed(2)} spent). Raise it in Settings, or wait until tomorrow.`;
+  }
+}
+
 export class OrchestratorRuntimeModeAboveCeilingError extends Schema.TaggedError<OrchestratorRuntimeModeAboveCeilingError>()(
   "OrchestratorRuntimeModeAboveCeilingError",
   {
@@ -356,6 +370,7 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorSubagentThreadReadOnlyError,
   OrchestratorThreadAboveModeLimitError,
   OrchestratorRuntimeModeAboveCeilingError,
+  OrchestratorDailySpendCapError,
 ]);
 export type OrchestratorV2Error = typeof OrchestratorV2Error.Type;
 
@@ -4673,6 +4688,17 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ...runtimeModeCeiling,
     });
   });
+
+  const refuseOverSpendingCap = Effect.fn("orchestrationV2.dispatch.refuseOverSpendingCap")(
+    function* (
+      command: OrchestrationV2ServerCommand,
+      events: ReadonlyArray<OrchestrationV2DomainEvent>,
+    ) {
+      const hit = yield* Ref.get(SpendingCapState.currentHit);
+      if (hit === undefined || !SpendingCapState.startsWork(events)) return;
+      return yield* new OrchestratorDailySpendCapError({ commandId: command.commandId, ...hit });
+    },
+  );
 
   const dispatchThreadFork = Effect.fn("orchestrationV2.dispatch.threadFork")(function* (
     command: Extract<OrchestrationV2Command, { readonly type: "thread.fork" }>,
@@ -13910,6 +13936,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
 
     const plan = yield* dispatchOnce(command, sideChatIds).pipe(
       Effect.tap((planned) => refuseAboveRuntimeModeCeiling(command, planned.events)),
+      Effect.tap((planned) => refuseOverSpendingCap(command, planned.events)),
       Effect.filterOrFail(
         (planned) =>
           planned.events.length > 0 ||

@@ -445,6 +445,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset wake recover continue"],
   },
   {
+    id: "daily-spend-cap",
+    title: "Daily spending cap",
+    to: "/settings/threads",
+    searchTerms: ["budget cost money credits dollars limit spend api"],
+  },
+  {
     id: "auto-resume-limited-threads",
     title: "Resume after usage limits",
     to: "/settings/threads",

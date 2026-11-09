@@ -582,6 +582,8 @@ const UsageModelTokenPrice = Schema.Number.check(
   Schema.isGreaterThanOrEqualTo(0),
 );
 
+const DailySpendCapUsd = Schema.Number.check(Schema.isFinite(), Schema.isGreaterThan(0));
+
 /** Omitted cache rates use the input rate. */
 export const UsageModelPriceOverride = Schema.Struct({
   inputCostPerMillionTokens: UsageModelTokenPrice,
@@ -1478,6 +1480,11 @@ export const ServerSettings = Schema.Struct({
 
   /** Sent by the Usage tab with each summary request to this environment; edit in settings.json. Invalid values are ignored. */
   usageModelFilter: ForwardCompatibleOptional(UsageModelFilter),
+
+  /** Null turns the cap off. */
+  dailySpendCapUsd: Schema.NullOr(DailySpendCapUsd).pipe(
+    Schema.withDecodingDefault(Effect.succeed(20)),
+  ),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1831,6 +1838,8 @@ export const ServerSettingsPatch = Schema.Struct({
   usageModelAliases: Schema.optionalKey(
     Schema.Record(TrimmedNonEmptyString, Schema.NullOr(TrimmedNonEmptyString)),
   ),
+
+  dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 
