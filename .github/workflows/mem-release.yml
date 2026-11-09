@@ -55,9 +55,6 @@ jobs:
           - arch: arm64
             runner: macos-15
             rust_target: aarch64-apple-darwin
-          - arch: x64
-            runner: macos-15-intel
-            rust_target: x86_64-apple-darwin
     env:
       T3CODE_DESKTOP_UPDATE_REPOSITORY: ${{ github.repository }}
     steps:
@@ -78,15 +75,6 @@ jobs:
           node scripts/build-desktop-artifact.ts \
             --platform mac --target dmg --arch "${{ matrix.arch }}" \
             --build-version "${GITHUB_REF_NAME#v}" --verbose
-
-      # Both architectures write latest-mac.yml; keep them apart so the release
-      # job can merge them into one multi-arch manifest.
-      - name: Name the x64 update manifest
-        if: matrix.arch == 'x64'
-        shell: bash
-        run: |
-          test -f release/latest-mac.yml
-          mv release/latest-mac.yml release/latest-mac-x64.yml
 
       - name: Upload installer
         uses: actions/upload-artifact@v7
@@ -115,18 +103,6 @@ jobs:
           pattern: desktop-*
           merge-multiple: true
           path: release
-
-      - name: Merge macOS update manifests
-        shell: bash
-        run: |
-          shopt -s nullglob
-          for x64_manifest in release/*-mac-x64.yml; do
-            arm64_manifest="${x64_manifest%-x64.yml}.yml"
-            if [[ -f "$arm64_manifest" ]]; then
-              node scripts/merge-update-manifests.ts --platform mac "$arm64_manifest" "$x64_manifest"
-              rm -f "$x64_manifest"
-            fi
-          done
 
       # Windows keeps its existing asset names: installed copies update from
       # Mem-<version>-x64.exe and latest.yml.
