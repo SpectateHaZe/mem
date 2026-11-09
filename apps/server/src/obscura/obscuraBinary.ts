@@ -30,7 +30,8 @@ export const limitContent = (content: string) => ({
 const install = async (stateDir: string, target: string) => {
   // @effect-diagnostics-next-line globalFetch:off
   const response = await fetch(
-    `https://github.com/h4ckf0r0day/obscura/releases/download/v${VERSION}/${ASSET}`,
+    "https://api.github.com/repos/h4ckf0r0day/obscura/releases/assets/696469077",
+    { headers: { Accept: "application/octet-stream", "User-Agent": "Mem" } },
   );
   if (!response.ok) throw new Error(`Download failed: ${response.status}`);
   const archive = Buffer.from(await response.arrayBuffer());

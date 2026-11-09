@@ -63,7 +63,8 @@ const obscura_fetch = McpToolAccess.readsAsCaller((input: ObscuraFetchInput) =>
     const { stateDir } = yield* ServerConfig.ServerConfig;
     const executable = yield* Effect.tryPromise({
       try: () => ensureObscura(stateDir),
-      catch: () => failure("Couldn't install Obscura.", "orchestration_error"),
+      catch: (cause) =>
+        failure(`Couldn't install Obscura: ${String(cause)}`, "orchestration_error"),
     });
     return limitContent(yield* runObscura(executable, args));
   }),
