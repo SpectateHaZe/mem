@@ -208,6 +208,19 @@ describe("UsageAggregator", () => {
     expect(result.buckets[0]?.costUsd).toBeCloseTo(0.00925, 9);
     expect(result.buckets[0]?.unpricedRecords).toBe(0);
   });
+
+  it("counts only the requested sessions", () => {
+    const aggregator = new UsageAggregator({
+      timeZone: "UTC",
+      sinceDay: "2026-08-01",
+      untilDay: "2026-08-31",
+      rates,
+      sessionIds: new Set(["session-a"]),
+    });
+    aggregator.add(record());
+    aggregator.add(record({ sessionId: "session-b" }));
+    expect(aggregator.finish().buckets[0]?.records).toBe(1);
+  });
 });
 
 describe("resolveModelAliases", () => {

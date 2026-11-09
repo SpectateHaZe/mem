@@ -1335,6 +1335,26 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:webhook-delivery",
       tag: WS_METHODS.scheduledTasksGetWebhookDelivery,
     }),
+    roomsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:rooms:live",
+      tag: WS_METHODS.roomsSubscribe,
+    }),
+    createRoom: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:room:create",
+      tag: WS_METHODS.roomsCreate,
+    }),
+    sendToRoom: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:room:send",
+      tag: WS_METHODS.roomsSend,
+    }),
+    setRoomPaused: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:room:set-paused",
+      tag: WS_METHODS.roomsSetPaused,
+    }),
+    deleteRoom: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:room:delete",
+      tag: WS_METHODS.roomsDelete,
+    }),
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",
       tag: WS_METHODS.scheduledTasksSubscribe,

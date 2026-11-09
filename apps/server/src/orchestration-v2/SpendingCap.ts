@@ -9,10 +9,12 @@ import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as UsageService from "../usage/UsageService.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
-import { currentHit, spendingCapHit } from "./SpendingCapState.ts";
+import { currentHit, lastSpentUsd, spendingCapHit } from "./SpendingCapState.ts";
 import * as ThreadManagement from "./ThreadManagementService.ts";
 
 const CHECK_INTERVAL_MS = 60_000;
+// Longer than any local day, so a thread used today is always included.
+const SESSION_LOOKBACK_MS = 48 * 60 * 60 * 1000;
 const decodeUsageDay = Schema.decodeSync(UsageDay);
 
 // en-CA formats as YYYY-MM-DD.
@@ -48,8 +50,18 @@ const makeSweep = Effect.gen(function* () {
 
     const timeZone = Intl.DateTimeFormat().resolvedOptions().timeZone;
     const day = localUsageDay(nowMs, timeZone);
-    const summary = yield* usage.readSummary({ sinceDay: day, untilDay: day, timeZone });
+    // Transcripts cover the whole machine; only sessions Mem launched count against its cap.
+    const sessionIds = yield* projections.listRecentNativeSessionIds(
+      DateTime.formatIso(DateTime.makeUnsafe(nowMs - SESSION_LOOKBACK_MS)),
+    );
+    const summary = yield* usage.readSummary({
+      sinceDay: day,
+      untilDay: day,
+      timeZone,
+      sessionIds,
+    });
     const spentUsd = summary.buckets.reduce((total, bucket) => total + bucket.costUsd, 0);
+    yield* Ref.set(lastSpentUsd, spentUsd);
     const hit = spendingCapHit(spentUsd, capUsd);
     const previous = yield* Ref.getAndSet(currentHit, hit);
     if (hit === undefined || previous !== undefined) return;

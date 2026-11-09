@@ -34,6 +34,15 @@ import {
   ChatGptHandoffState,
 } from "./providerSetup.ts";
 import * as Schema from "effect/Schema";
+import {
+  Room,
+  RoomCreateInput,
+  RoomDeleteInput,
+  RoomError,
+  RoomListResult,
+  RoomSendInput,
+  RoomSetPausedInput,
+} from "./room.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -543,6 +552,12 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+
+  roomsSubscribe: "rooms.subscribe",
+  roomsCreate: "rooms.create",
+  roomsSend: "rooms.send",
+  roomsSetPaused: "rooms.setPaused",
+  roomsDelete: "rooms.delete",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1961,6 +1976,36 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsRoomsSubscribeRpc = Rpc.make(WS_METHODS.roomsSubscribe, {
+  payload: Schema.Struct({}),
+  success: RoomListResult,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsRoomsCreateRpc = Rpc.make(WS_METHODS.roomsCreate, {
+  payload: RoomCreateInput,
+  success: Room,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+});
+
+const WsRoomsSendRpc = Rpc.make(WS_METHODS.roomsSend, {
+  payload: RoomSendInput,
+  success: Room,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+});
+
+const WsRoomsSetPausedRpc = Rpc.make(WS_METHODS.roomsSetPaused, {
+  payload: RoomSetPausedInput,
+  success: Room,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+});
+
+const WsRoomsDeleteRpc = Rpc.make(WS_METHODS.roomsDelete, {
+  payload: RoomDeleteInput,
+  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+});
+
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
   payload: ScheduledTaskListInput,
   success: ScheduledTaskListResult,
@@ -2109,6 +2154,11 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshUsageRatesRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
+  WsRoomsSubscribeRpc,
+  WsRoomsCreateRpc,
+  WsRoomsSendRpc,
+  WsRoomsSetPausedRpc,
+  WsRoomsDeleteRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

@@ -134,6 +134,7 @@ export const UsageSummaryInput = Schema.Struct({
   untilTime: Schema.optional(TrimmedNonEmptyString),
   awaitRefresh: Schema.optional(Schema.Boolean),
   modelFilter: Schema.optional(UsageModelFilter),
+  sessionIds: Schema.optional(Schema.Array(Schema.String)),
 });
 export type UsageSummaryInput = typeof UsageSummaryInput.Type;
 

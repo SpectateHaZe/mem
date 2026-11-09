@@ -70,6 +70,7 @@ export interface AggregateOptions {
   readonly priceOverrides?: RateTable;
   readonly modelAliases?: ReadonlyMap<string, string>;
   readonly modelFilter?: UsageModelFilter;
+  readonly sessionIds?: ReadonlySet<string>;
   readonly resolution?: UsageResolution;
   readonly sinceTimeMs?: number;
   readonly untilTimeMs?: number;
@@ -165,6 +166,7 @@ export class UsageAggregator {
 
   add(input: UsageRecord, sourcePath?: string): boolean {
     if (!keepsUsageRecord(this.#options.modelFilter, input)) return false;
+    if (this.#options.sessionIds?.has(input.sessionId) === false) return false;
     const record = this.#mapModel(input);
     if (record.dedupeKey !== null) {
       if (this.#seen.has(record.dedupeKey)) {

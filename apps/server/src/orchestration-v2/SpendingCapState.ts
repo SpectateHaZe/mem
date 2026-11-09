@@ -14,3 +14,4 @@ export const startsWork = (events: ReadonlyArray<OrchestrationV2DomainEvent>) =>
 
 // shortcut: one cap state per server process, so a per-project cap would need this keyed.
 export const currentHit = Ref.makeUnsafe<SpendingCapHit | undefined>(undefined);
+export const lastSpentUsd = Ref.makeUnsafe(0);

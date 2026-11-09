@@ -517,6 +517,10 @@ export interface ProjectionStoreV2Shape {
   >;
   /** Threads that are not deleted, archived ones included. */
   readonly countThreads: () => Effect.Effect<number, ProjectionStoreV2Error>;
+  /** Native provider session ids of provider threads updated since `sinceIso`. */
+  readonly listRecentNativeSessionIds: (
+    sinceIso: string,
+  ) => Effect.Effect<ReadonlyArray<string>, ProjectionStoreV2Error>;
   /** Every active thread, in shell order. */
   readonly listActiveShellIndex: () => Effect.Effect<
     ReadonlyArray<ActiveShellIndexEntry>,
@@ -7222,6 +7226,18 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows[0]?.count ?? 0;
     }, Effect.mapError(shellSnapshotReadError));
 
+    const listRecentNativeSessionIds = Effect.fn("ProjectionStore.listRecentNativeSessionIds")(
+      function* (sinceIso: string) {
+        const rows = yield* sql<{ readonly native_id: string }>`
+          SELECT DISTINCT json_extract(payload_json, '$.nativeThreadRef.nativeId') AS native_id
+          FROM orchestration_v2_projection_provider_threads
+          WHERE updated_at >= ${sinceIso} AND native_id IS NOT NULL
+        `;
+        return rows.map((row) => row.native_id);
+      },
+      Effect.mapError(shellSnapshotReadError),
+    );
+
     const listActiveShellIndex = Effect.fn("ProjectionStore.listActiveShellIndex")(function* () {
       const rows = yield* sql<{
         readonly thread_id: string;
@@ -7498,6 +7514,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       getPullRequestSnapshot: readOnReader(getPullRequestSnapshot),
       listActiveSubagentThreadIds: readOnReader(listActiveSubagentThreadIds),
       countThreads: readOnReader(countThreads),
+      listRecentNativeSessionIds: readOnReader(listRecentNativeSessionIds),
       listActiveShellIndex: readOnReader(listActiveShellIndex),
       readShellSnapshot: readOnReader(readShellSnapshot),
       listOlderSettledThreads: readOnReader(listOlderSettledThreads),
