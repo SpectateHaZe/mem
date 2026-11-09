@@ -42,7 +42,6 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
 
   const submit = () => {
     if (option === undefined || !canAdd) return;
-    setText("");
     void add({
       environmentId,
       input: {
@@ -50,6 +49,8 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
         text: text.trim(),
         modelSelection: option.modelSelection,
       },
+    }).then((result) => {
+      if (result._tag === "Success") setText("");
     });
   };
 

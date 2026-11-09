@@ -194,7 +194,7 @@ export const OpenCodeDriver: ProviderDriver<
     instanceId,
     displayName,
     accentColor,
-    environment,
+    environment: configuredEnvironment,
     enabled,
     config,
   }) {
@@ -206,6 +206,20 @@ export const OpenCodeDriver: ProviderDriver<
     const latestVersions = yield* ProviderLatestVersions.ProviderLatestVersions;
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
+    // Own data folder: a standalone OpenCode database must not block Mem, or be changed by it.
+    const hasDataHome =
+      configuredEnvironment?.some((variable) => variable.name === "XDG_DATA_HOME") ||
+      (yield* HostProcess.Environment)["XDG_DATA_HOME"];
+    const environment = hasDataHome
+      ? configuredEnvironment
+      : [
+          ...(configuredEnvironment ?? []),
+          {
+            name: "XDG_DATA_HOME",
+            value: pathService.join(yield* HostProcess.HomeDirectory, ".mem", "opencode-data"),
+            sensitive: false,
+          },
+        ];
     const processEnv = yield* mergeProviderInstanceEnvironment(environment);
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
