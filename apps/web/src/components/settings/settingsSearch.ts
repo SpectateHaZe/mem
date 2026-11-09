@@ -496,6 +496,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["discord rich presence rpc activity status model agent"],
   },
   {
+    id: "import-conversations",
+    title: "Import conversations",
+    to: "/settings/threads",
+    searchTerms: ["import claude code codex chat history sessions threads migrate"],
+  },
+  {
     id: "discord-show-project",
     title: "Discord project name",
     to: "/settings/threads",

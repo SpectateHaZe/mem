@@ -1675,6 +1675,18 @@ export function ThreadsSettingsPanel() {
 
   return (
     <SettingsPageContainer>
+      <SettingsSection id="import-conversations" title="Import">
+        <SettingsRow
+          {...searchableSetting("import-conversations")}
+          description="Bring in recent Claude Code and Codex conversations from your projects. Ones already imported are skipped."
+          control={
+            <Button size="xs" variant="outline" onClick={() => void navigate({ to: "/welcome" })}>
+              Import
+            </Button>
+          }
+        />
+      </SettingsSection>
+
       <SettingsSection id="new-projects" title="New projects">
         <SettingsRow
           serverScoped
