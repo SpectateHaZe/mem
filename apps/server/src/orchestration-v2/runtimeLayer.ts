@@ -416,7 +416,7 @@ export const layerProduction = Layer.mergeAll(
   GuestShareService.layer.pipe(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
   ),
-  DiscordPresence.layer.pipe(Layer.provide(ProjectionStore.layer)),
+  DiscordPresence.layer.pipe(Layer.provide(Layer.merge(ProjectionStore.layer, ProjectStore.layer))),
   SpendingCap.layer.pipe(
     Layer.provide(
       Layer.mergeAll(

@@ -20,7 +20,9 @@ import {
   DEFAULT_UNIFIED_SETTINGS,
   type DiffLayout,
   MAX_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  MAX_USAGE_WARNING_THRESHOLD_PERCENT,
   MIN_SIDEBAR_AUTO_SETTLE_AFTER_DAYS,
+  MIN_USAGE_WARNING_THRESHOLD_PERCENT,
   type ResponseStreamingMode,
   type QuitConfirmationMode,
   SidebarProjectSortOrder,
@@ -40,9 +42,12 @@ import {
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateDisabledReason,
   getDesktopUpdateInstallConfirmationMessage,
+  getMacManualUpdateNotice,
+  getMacManualUpdateNoticeDescription,
   isDesktopUpdateButtonDisabled,
   resolveDesktopUpdateButtonAction,
 } from "../../components/desktopUpdate.logic";
+import { openDesktopUpdateReleaseNotes } from "../desktopUpdate.toast";
 import { ProviderModelPicker } from "../chat/ProviderModelPicker";
 import { TraitsPicker } from "../chat/TraitsPicker";
 import { isElectron } from "../../env";
@@ -198,6 +203,11 @@ function AboutVersionSection() {
 
     const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
 
+    if (macNotice !== null) {
+      void openDesktopUpdateReleaseNotes(bridge, macNotice.releaseUrl);
+      return;
+    }
+
     if (action === "download") {
       void bridge.downloadUpdate().catch((error: unknown) => {
         toastManager.add(
@@ -280,13 +290,28 @@ function AboutVersionSection() {
   };
 
   const action = updateState ? resolveDesktopUpdateButtonAction(updateState) : "none";
-  const buttonTooltip = updateState ? getDesktopUpdateButtonTooltip(updateState) : null;
+  // On an unsigned mac the app cannot install for itself, so its update row opens the release page.
+  const macNotice =
+    hasDesktopBridge && updateState
+      ? getMacManualUpdateNotice(updateState, window.desktopBridge?.getClientPlatform())
+      : null;
+  const buttonTooltip = macNotice
+    ? null
+    : updateState
+      ? getDesktopUpdateButtonTooltip(updateState)
+      : null;
   const buttonDisabled =
-    action === "none"
-      ? !canCheckForUpdate(updateState)
-      : isDesktopUpdateButtonDisabled(updateState);
+    macNotice !== null
+      ? false
+      : action === "none"
+        ? !canCheckForUpdate(updateState)
+        : isDesktopUpdateButtonDisabled(updateState);
 
-  const actionLabel: Record<string, string> = { download: "Download", install: "Install" };
+  const actionLabel: Record<string, string> = {
+    download: "Download",
+    install: "Install",
+    ...(macNotice !== null ? { none: "View Release" } : {}),
+  };
   const statusLabel: Record<string, string> = {
     checking: "Checking…",
     downloading: "Downloading…",
@@ -296,10 +321,12 @@ function AboutVersionSection() {
   const buttonLabel =
     actionLabel[action] ?? statusLabel[updateState?.status ?? ""] ?? "Check for Updates";
   const description =
-    action === "download" || action === "install"
-      ? "Update available."
-      : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
-        "Current version of the application.");
+    macNotice !== null
+      ? getMacManualUpdateNoticeDescription(macNotice)
+      : action === "download" || action === "install"
+        ? "Update available."
+        : (getDesktopUpdateDisabledReason(updateState, updatesDenial) ??
+          "Current version of the application.");
 
   return (
     <>
@@ -504,6 +531,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.discordClientId !== DEFAULT_UNIFIED_SETTINGS.discordClientId
       ? ["Discord status"]
       : []),
+    ...(settings.discordPresenceShowProjectName !==
+    DEFAULT_UNIFIED_SETTINGS.discordPresenceShowProjectName
+      ? ["Discord project name"]
+      : []),
     ...(settings.computerUseMode !== DEFAULT_UNIFIED_SETTINGS.computerUseMode
       ? ["Computer control"]
       : []),
@@ -518,6 +549,13 @@ export function useSettingsRestore(onRestored?: () => void) {
       ? ["Snooze options"]
       : []),
     ...(settings.wordWrap !== DEFAULT_UNIFIED_SETTINGS.wordWrap ? ["Word wrap"] : []),
+    ...(settings.usageWarningsEnabled !== DEFAULT_UNIFIED_SETTINGS.usageWarningsEnabled
+      ? ["Usage limit warnings"]
+      : []),
+    ...(settings.usageWarningsThresholdPercent !==
+    DEFAULT_UNIFIED_SETTINGS.usageWarningsThresholdPercent
+      ? ["Usage warning threshold"]
+      : []),
     ...(settings.persistComposerContextStrip !==
     DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip
       ? ["Composer context"]
@@ -651,6 +689,8 @@ export function useSettingsRestore(onRestored?: () => void) {
       notificationMode: DEFAULT_UNIFIED_SETTINGS.notificationMode,
       inAppNotificationsEnabled: DEFAULT_UNIFIED_SETTINGS.inAppNotificationsEnabled,
       wordWrap: DEFAULT_UNIFIED_SETTINGS.wordWrap,
+      usageWarningsEnabled: DEFAULT_UNIFIED_SETTINGS.usageWarningsEnabled,
+      usageWarningsThresholdPercent: DEFAULT_UNIFIED_SETTINGS.usageWarningsThresholdPercent,
       persistComposerContextStrip: DEFAULT_UNIFIED_SETTINGS.persistComposerContextStrip,
       diffFilesCollapsed: DEFAULT_UNIFIED_SETTINGS.diffFilesCollapsed,
       diffIgnoreWhitespace: DEFAULT_UNIFIED_SETTINGS.diffIgnoreWhitespace,
@@ -672,6 +712,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
       discordClientId: DEFAULT_UNIFIED_SETTINGS.discordClientId,
+      discordPresenceShowProjectName: DEFAULT_UNIFIED_SETTINGS.discordPresenceShowProjectName,
       computerUseMode: DEFAULT_UNIFIED_SETTINGS.computerUseMode,
       obscuraEnabled: DEFAULT_UNIFIED_SETTINGS.obscuraEnabled,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
@@ -788,6 +829,46 @@ export function GeneralSettingsPanel() {
           }
         />
         <CompletionChimeSettings />
+        <SettingsRow
+          {...searchableSetting("usage-limit-warnings")}
+          description="Show one toast when a provider's usage window is nearly used up, before it runs out."
+          control={
+            <Switch
+              checked={settings.usageWarningsEnabled}
+              onCheckedChange={(checked) => updateSettings({ usageWarningsEnabled: checked })}
+              aria-label="Usage limit warnings"
+            />
+          }
+        />
+        {settings.usageWarningsEnabled ? (
+          <SettingsRow
+            {...searchableSetting("usage-warning-threshold")}
+            description="Warn when this percent of a provider's usage window remains (5 to 50)."
+            control={
+              <DraftInput
+                size="sm"
+                type="number"
+                min={MIN_USAGE_WARNING_THRESHOLD_PERCENT}
+                max={MAX_USAGE_WARNING_THRESHOLD_PERCENT}
+                step={5}
+                className="w-full sm:w-24"
+                inputMode="numeric"
+                value={String(settings.usageWarningsThresholdPercent)}
+                onCommit={(next) => {
+                  const parsed = Number(next);
+                  if (
+                    Number.isInteger(parsed) &&
+                    parsed >= MIN_USAGE_WARNING_THRESHOLD_PERCENT &&
+                    parsed <= MAX_USAGE_WARNING_THRESHOLD_PERCENT
+                  ) {
+                    updateSettings({ usageWarningsThresholdPercent: parsed });
+                  }
+                }}
+                aria-label="Usage warning threshold percent"
+              />
+            }
+          />
+        ) : null}
       </SettingsSection>
 
       <SettingsSection id="sidebar" title="Sidebar">
@@ -1664,7 +1745,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("computer-use-mode")}
-          description="What agents in full-access threads may do on this Windows desktop. Full control lets them see the screen and use your mouse and keyboard."
+          description="What agents in full-access threads may do on the server host's desktop. Full control lets them see the screen and use your mouse and keyboard."
           settingKeys={["computerUseMode"]}
           control={
             <Select
@@ -1707,7 +1788,7 @@ export function ThreadsSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("discord-status")}
-          description="Shows how many agents are working on your Discord profile. Project and thread names are never shared. Clear the Application ID to turn it off."
+          description="Shows how many agents are working on your Discord profile, and which model they use. Thread names are never shared. Clear the Application ID to turn it off."
           settingKeys={["discordClientId"]}
           control={
             <DraftInput
@@ -1721,6 +1802,22 @@ export function ThreadsSettingsPanel() {
               }}
               placeholder="Off"
               aria-label="Discord Application ID"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("discord-show-project")}
+          description="Adds the project's name to the Discord status. Your project names can be private, so this stays off by default."
+          settingKeys={["discordPresenceShowProjectName"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["discordPresenceShowProjectName"]}
+              checked={settings.discordPresenceShowProjectName}
+              onCheckedChange={(checked) =>
+                updateSettings({ discordPresenceShowProjectName: Boolean(checked) })
+              }
+              aria-label="Show project name in Discord status"
             />
           }
         />

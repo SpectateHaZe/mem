@@ -26,6 +26,7 @@ import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
 import { readOpenCodeGoUsageLimits, readStoredApiKey } from "./usageLimits.ts";
 import { loadOpenCode2Catalog } from "./openCode2Catalog.ts";
+import { resolveOpenCodeBinaryPath } from "./binaryPath.ts";
 import {
   checkOpenCodeProviderStatus,
   loadOpenCode2Workspace,
@@ -69,6 +70,9 @@ import {
 const decodeOpenCodeSettings = Schema.decodeSync(OpenCodeSettings);
 
 const DRIVER_KIND = ProviderDriverKind.make("opencode");
+
+/** Set by the desktop app to the OpenCode binary bundled with the packaged app. */
+const BUNDLED_OPENCODE_BINARY_ENV = "T3CODE_BUNDLED_OPENCODE_PATH";
 
 function isOpenCodeNativeCommandPath(commandPath: string): boolean {
   const normalized = normalizeCommandPath(commandPath);
@@ -208,9 +212,10 @@ export const OpenCodeDriver: ProviderDriver<
     const host = yield* ProviderHost.ProviderHost;
     // Own data folder: a standalone OpenCode database must not block Mem, or be changed by it.
     const homeDirectory = yield* HostProcess.HomeDirectory;
+    const hostEnvironment = yield* HostProcess.Environment;
     const hasDataHome =
       configuredEnvironment?.some((variable) => variable.name === "XDG_DATA_HOME") ||
-      (yield* HostProcess.Environment)["XDG_DATA_HOME"];
+      hostEnvironment["XDG_DATA_HOME"];
     const environment = hasDataHome
       ? configuredEnvironment
       : [
@@ -250,10 +255,19 @@ export const OpenCodeDriver: ProviderDriver<
       accentColor,
       continuationGroupKey: continuationIdentity.continuationKey,
     });
+    const bundledBinaryPath = hostEnvironment[BUNDLED_OPENCODE_BINARY_ENV]?.trim() || undefined;
+    const bundledBinaryPathExists =
+      bundledBinaryPath !== undefined &&
+      (yield* fileSystem.exists(bundledBinaryPath).pipe(Effect.orElseSucceed(() => false)));
     const effectiveConfig = {
       ...config,
       enabled,
-      binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+      binaryPath:
+        resolveOpenCodeBinaryPath({
+          configuredPath: expandHomePath(config.binaryPath, homeDirectory),
+          bundledPath: bundledBinaryPath,
+          bundledPathExists: bundledBinaryPathExists,
+        }) ?? config.binaryPath,
       // The instance registry has already read a referenced password from its secret provider.
       serverPassword: settingsSecretLiteral(config.serverPassword),
     } satisfies OpenCodeSettings;

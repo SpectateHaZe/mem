@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vite-plus/test";
+import * as Schema from "effect/Schema";
+import { afterEach, describe, expect, it, vi } from "vite-plus/test";
 import type { DesktopUpdateState } from "@t3tools/contracts";
 
 import {
@@ -6,8 +7,11 @@ import {
   getDesktopUpdateButtonTooltip,
   getDesktopUpdateReleaseHistoryUrl,
   getDesktopUpdateReleaseUrl,
+  getMacManualUpdateNotice,
+  macManualUpdateDismissedKey,
   resolveDesktopUpdateButtonAction,
 } from "./desktopUpdate.logic";
+import { getLocalStorageItem, writeLocalStorageValue } from "../hooks/useLocalStorage";
 
 const baseState: DesktopUpdateState = {
   enabled: true,
@@ -90,3 +94,82 @@ describe("canCheckForUpdate", () => {
     ).toBe(true);
   });
 });
+
+describe("mac manual update notice", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  const disabledMacState = {
+    ...baseState,
+    enabled: false,
+    status: "disabled" as const,
+    currentVersion: "0.1.9",
+    manualUpdate: {
+      version: "0.1.10",
+      releaseUrl: "https://github.com/SpectateHaZe/mem/releases/tag/v0.1.10",
+    },
+  };
+
+  it("shows the release-page offer on a mac only when it is newer than the running build", () => {
+    expect(getMacManualUpdateNotice(disabledMacState, "darwin")).toEqual(
+      disabledMacState.manualUpdate,
+    );
+    expect(
+      getMacManualUpdateNotice({ ...disabledMacState, currentVersion: "0.1.10" }, "darwin"),
+    ).toBeNull();
+    expect(
+      getMacManualUpdateNotice(
+        {
+          ...disabledMacState,
+          manualUpdate: { version: "0.1.9", releaseUrl: "https://example.com" },
+        },
+        "darwin",
+      ),
+    ).toBeNull();
+  });
+
+  it("shows nothing away from a mac, away from a disabled updater, or without an offer", () => {
+    expect(getMacManualUpdateNotice(disabledMacState, "win32")).toBeNull();
+    expect(getMacManualUpdateNotice(disabledMacState, null)).toBeNull();
+    expect(
+      getMacManualUpdateNotice({ ...disabledMacState, status: "available" }, "darwin"),
+    ).toBeNull();
+    const { manualUpdate: _omitted, ...withoutOffer } = disabledMacState;
+    expect(getMacManualUpdateNotice(withoutOffer, "darwin")).toBeNull();
+  });
+
+  it("returns for a newer release after a version was dismissed", () => {
+    const localStorageStub = createLocalStorageStub();
+    vi.stubGlobal("window", { localStorage: localStorageStub });
+    writeLocalStorageValue(
+      macManualUpdateDismissedKey("0.1.9"),
+      true,
+      false,
+      Schema.Boolean as Schema.Codec<boolean, boolean>,
+    );
+
+    expect(getLocalStorageItem(macManualUpdateDismissedKey("0.1.9"), Schema.Boolean)).toBe(true);
+    expect(getLocalStorageItem(macManualUpdateDismissedKey("0.1.10"), Schema.Boolean)).toBeNull();
+  });
+});
+
+function createLocalStorageStub(): Storage {
+  const store = new Map<string, string>();
+  return {
+    clear: () => {
+      store.clear();
+    },
+    getItem: (key) => store.get(key) ?? null,
+    key: (index) => [...store.keys()][index] ?? null,
+    get length() {
+      return store.size;
+    },
+    removeItem: (key) => {
+      store.delete(key);
+    },
+    setItem: (key, value) => {
+      store.set(key, value);
+    },
+  };
+}

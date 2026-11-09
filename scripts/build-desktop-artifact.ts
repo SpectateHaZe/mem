@@ -43,9 +43,17 @@ import {
 import { loadRepoEnv } from "./lib/public-config.ts";
 import { selectDesktopRuntimeExternalDependencies } from "./lib/desktop-external-packages.ts";
 import { resolveCatalogDependencies } from "./lib/resolve-catalog.ts";
+import {
+  downloadOpenCodeBundleFile,
+  OPENCODE_BUNDLE_VERSION,
+  openCodeBundleAssetUrl,
+  resolveOpenCodeBundleAsset,
+  verifyOpenCodeBundleChecksum,
+} from "./lib/opencode-bundle.ts";
 
 import * as NodeRuntime from "@effect/platform-node/NodeRuntime";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as NodeHttpClient from "@effect/platform-node/NodeHttpClient";
 import * as Config from "effect/Config";
 import * as Duration from "effect/Duration";
 import * as Effect from "effect/Effect";
@@ -749,6 +757,7 @@ const WindowsPackagedPayloadValidationReason = Schema.Literals([
   "sidecar-invalid",
   "unpacked-native-missing",
   "resource-monitor-missing",
+  "opencode-binary-missing",
   "wsl-runtime-missing",
   "wsl-runtime-invalid",
   "file-limit-exceeded",
@@ -774,6 +783,9 @@ export class WindowsPackagedPayloadValidationError extends Schema.TaggedError<Wi
     }
     if (this.reason === "resource-monitor-missing") {
       return "Windows packaged payload is missing the resource monitor executable.";
+    }
+    if (this.reason === "opencode-binary-missing") {
+      return `Windows packaged payload is missing the bundled OpenCode v${OPENCODE_BUNDLE_VERSION} binary or its license.`;
     }
     if (this.reason === "wsl-runtime-missing") {
       return "Windows packaged payload is missing the WSL runtime archive or SHA-256 sidecar.";
@@ -1001,6 +1013,11 @@ export const DESKTOP_FILE_EXCLUSIONS = [
   "!apps/desktop/prod-resources/windows-server/**/*",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz",
   "!apps/desktop/prod-resources/wsl-runtime.tar.gz.sha256",
+  // The OpenCode binary and its license ship through extraResources.
+  "!apps/desktop/resources/opencode",
+  "!apps/desktop/resources/opencode/**/*",
+  "!apps/desktop/prod-resources/opencode",
+  "!apps/desktop/prod-resources/opencode/**/*",
   "!apps/desktop/gnome-extension",
   "!apps/desktop/gnome-extension/**/*",
 ] as const;
@@ -1099,6 +1116,15 @@ export const DESKTOP_EXTRA_RESOURCES = [
   {
     from: "apps/desktop/prod-resources/resource-monitor",
     to: "resource-monitor",
+  },
+] as const;
+// Ships next to the staged binary; see OPENCODE_RESOURCE_DIR_NAME.
+export const OPENCODE_RESOURCE_DIR_NAME = "opencode";
+export const OPENCODE_LICENSE_FILE_NAME = "LICENSE";
+export const OPENCODE_EXTRA_RESOURCES = [
+  {
+    from: `apps/desktop/prod-resources/${OPENCODE_RESOURCE_DIR_NAME}`,
+    to: OPENCODE_RESOURCE_DIR_NAME,
   },
 ] as const;
 export const LINUX_CAPTURE_EXTRA_RESOURCES = [
@@ -2803,6 +2829,7 @@ export const createBuildConfig = Effect.fn("createBuildConfig")(function* (
       : { asarUnpack: ["**/node_modules/@transcribe-cpp/**/*.{dylib,so,so.*}"] }),
     extraResources: [
       ...DESKTOP_EXTRA_RESOURCES,
+      ...(resolveOpenCodeBundleAsset({ platform, arch }) ? OPENCODE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_CAPTURE_EXTRA_RESOURCES : []),
       ...(platform === "linux" ? LINUX_BROWSER_SECRET_EXTRA_RESOURCES : []),
       ...(platform === "win" ? WINDOWS_SERVER_EXTRA_RESOURCES : []),
@@ -3417,6 +3444,27 @@ export const validateWindowsPackagedPayload = Effect.fn(
     });
   }
 
+  const opencodeAsset = resolveOpenCodeBundleAsset({ platform: "win", arch: input.targetArch });
+  if (opencodeAsset) {
+    const opencodeFiles = [
+      path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, opencodeAsset.binaryName),
+      path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, OPENCODE_LICENSE_FILE_NAME),
+    ];
+    const missingOpencodeFiles: string[] = [];
+    for (const filePath of opencodeFiles) {
+      if (!(yield* isFile(filePath))) {
+        missingOpencodeFiles.push(`${OPENCODE_RESOURCE_DIR_NAME}/${path.basename(filePath)}`);
+      }
+    }
+    if (missingOpencodeFiles.length > 0) {
+      return yield* new WindowsPackagedPayloadValidationError({
+        reason: "opencode-binary-missing",
+        packagedAppDir,
+        missingFiles: missingOpencodeFiles,
+      });
+    }
+  }
+
   const wslArchivePath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_NAME);
   const wslArchiveHashPath = path.join(resourcesDir, WSL_RUNTIME_ARCHIVE_HASH_NAME);
   const [hasWslArchive, hasWslArchiveHash] = yield* Effect.all([
@@ -3547,8 +3595,86 @@ export class MacPackagedAppMissingError extends Schema.TaggedError<MacPackagedAp
   }
 }
 
+export class MacOpenCodeBundleMissingError extends Schema.TaggedError<MacOpenCodeBundleMissingError>()(
+  "MacOpenCodeBundleMissingError",
+  { appPath: Schema.String, missingFiles: Schema.Array(Schema.String) },
+) {
+  override get message(): string {
+    return `macOS packaged app is missing the bundled OpenCode v${OPENCODE_BUNDLE_VERSION} files at ${this.appPath}: ${this.missingFiles.join(", ")}.`;
+  }
+}
+
+export class OpenCodeBundleLicenseMissingError extends Schema.TaggedError<OpenCodeBundleLicenseMissingError>()(
+  "OpenCodeBundleLicenseMissingError",
+  { licensePath: Schema.String },
+) {
+  override get message(): string {
+    return `OpenCode license text is missing at ${this.licensePath}.`;
+  }
+}
+
+export const stageOpenCodeBinary = Effect.fn("stageOpenCodeBinary")(function* (input: {
+  readonly repoRoot: string;
+  readonly stageResourcesDir: string;
+  readonly platform: typeof BuildPlatform.Type;
+  readonly arch: typeof BuildArch.Type;
+  readonly verbose: boolean;
+}) {
+  const asset = resolveOpenCodeBundleAsset({ platform: input.platform, arch: input.arch });
+  if (!asset) return;
+  const fs = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const destinationDir = path.join(input.stageResourcesDir, OPENCODE_RESOURCE_DIR_NAME);
+  const destinationPath = path.join(destinationDir, asset.binaryName);
+  yield* fs.makeDirectory(destinationDir, { recursive: true });
+
+  const licensePath = path.join(destinationDir, OPENCODE_LICENSE_FILE_NAME);
+  if (!(yield* fs.exists(licensePath).pipe(Effect.orElseSucceed(() => false)))) {
+    return yield* new OpenCodeBundleLicenseMissingError({
+      licensePath: path.join(
+        input.repoRoot,
+        "apps/desktop/resources",
+        OPENCODE_RESOURCE_DIR_NAME,
+        OPENCODE_LICENSE_FILE_NAME,
+      ),
+    });
+  }
+
+  yield* Effect.log(
+    `[desktop-artifact] Downloading OpenCode v${OPENCODE_BUNDLE_VERSION} (${asset.assetName})...`,
+  );
+  const downloadDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3code-opencode-bundle-" });
+  const assetPath = path.join(downloadDir, asset.assetName);
+  yield* downloadOpenCodeBundleFile({
+    url: openCodeBundleAssetUrl(asset.assetName),
+    destinationPath: assetPath,
+  });
+  yield* verifyOpenCodeBundleChecksum({
+    filePath: assetPath,
+    assetName: asset.assetName,
+    expectedSha256: asset.sha256,
+  });
+  // Both release runners ship bsdtar, which reads the release's zip layout.
+  yield* runCommand(ChildProcess.make("tar", ["-xf", assetPath, "-C", downloadDir]), {
+    label: `tar -xf ${asset.assetName}`,
+    verbose: input.verbose,
+  });
+  yield* fs.remove(destinationPath, { force: true }).pipe(Effect.ignore);
+  yield* fs.copyFile(path.join(downloadDir, asset.binaryName), destinationPath);
+  if (input.platform !== "win") {
+    yield* fs.chmod(destinationPath, 0o755);
+  }
+  yield* Effect.log(
+    `[desktop-artifact] Staged the bundled OpenCode v${OPENCODE_BUNDLE_VERSION} binary.`,
+  );
+});
+
 export const validateMacPackagedPayload = Effect.fn("desktopArtifact.validateMacPackagedPayload")(
-  function* (input: { readonly stageDistDir: string; readonly verbose?: boolean }) {
+  function* (input: {
+    readonly stageDistDir: string;
+    readonly expectOpenCodeBinary?: boolean;
+    readonly verbose?: boolean;
+  }) {
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const asarPaths: string[] = [];
@@ -3567,6 +3693,26 @@ export const validateMacPackagedPayload = Effect.fn("desktopArtifact.validateMac
     }
     for (const asarPath of asarPaths) {
       yield* verifyPackagedBundleIsSelfContained({ asarPath, verbose: input.verbose ?? false });
+    }
+    if (input.expectOpenCodeBinary === true) {
+      for (const asarPath of asarPaths) {
+        const resourcesDir = path.dirname(asarPath);
+        const appPath = path.dirname(path.dirname(resourcesDir));
+        const opencodeFiles = [
+          path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, "opencode"),
+          path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, OPENCODE_LICENSE_FILE_NAME),
+        ];
+        const missingFiles: string[] = [];
+        for (const filePath of opencodeFiles) {
+          const stat = yield* fs.stat(filePath).pipe(Effect.orElseSucceed(() => null));
+          if (stat?.type !== "File") {
+            missingFiles.push(path.basename(filePath));
+          }
+        }
+        if (missingFiles.length > 0) {
+          return yield* new MacOpenCodeBundleMissingError({ appPath, missingFiles });
+        }
+      }
     }
     yield* Effect.log(
       `[desktop-artifact] Validated macOS payload (${String(asarPaths.length)} app bundle(s)).`,
@@ -3789,6 +3935,13 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
       });
   }
   yield* stageBrowserSecret({
+    repoRoot,
+    stageResourcesDir,
+    platform: options.platform,
+    arch: options.arch,
+    verbose: options.verbose,
+  });
+  yield* stageOpenCodeBinary({
     repoRoot,
     stageResourcesDir,
     platform: options.platform,
@@ -4073,7 +4226,12 @@ const buildDesktopArtifactUnlocked = Effect.fn("buildDesktopArtifactUnlocked")(f
   }
   // x64 builds on arm64 runners; the arm64 check covers the shared JS bundle.
   if (options.platform === "mac" && options.arch === "arm64" && hostPlatform === "darwin") {
-    yield* validateMacPackagedPayload({ stageDistDir, verbose: options.verbose });
+    yield* validateMacPackagedPayload({
+      stageDistDir,
+      expectOpenCodeBinary:
+        resolveOpenCodeBundleAsset({ platform: "mac", arch: options.arch }) !== undefined,
+      verbose: options.verbose,
+    });
   }
 
   const copiedArtifacts = yield* copyDesktopBuildArtifacts(
@@ -4204,7 +4362,11 @@ const buildDesktopArtifactCli = Command.make("build-desktop-artifact", {
   Command.withHandler((input) => Effect.flatMap(resolveBuildOptions(input), buildDesktopArtifact)),
 );
 
-const cliRuntimeLayer = Layer.mergeAll(Logger.layer([Logger.consolePretty()]), NodeServices.layer);
+const cliRuntimeLayer = Layer.mergeAll(
+  Logger.layer([Logger.consolePretty()]),
+  NodeServices.layer,
+  NodeHttpClient.layerFetch,
+);
 
 if (import.meta.main) {
   Command.run(buildDesktopArtifactCli, { version: "0.0.0" }).pipe(

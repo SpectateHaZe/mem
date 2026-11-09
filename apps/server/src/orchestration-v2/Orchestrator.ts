@@ -734,6 +734,27 @@ function isLiveRun(run: OrchestrationV2Run): boolean {
   return run.status === "preparing" || run.status === "starting" || run.status === "running";
 }
 
+// Each automatic resume can hit the next limit window too, re-arming the
+// recovery forever; the chain bounds that spend. Any run that is not an
+// automatic resume — a user message, a manual retry — breaks it until the
+// next failure arms a fresh one.
+const MAX_AUTOMATIC_LIMIT_RESUMES = 3;
+
+function automaticLimitResumeChain(runs: readonly OrchestrationV2Run[]): number {
+  const byId = new Map(runs.map((run) => [run.id, run]));
+  let count = 0;
+  let current = latestExecutedRun(runs);
+  while (
+    count < MAX_AUTOMATIC_LIMIT_RESUMES &&
+    current?.usageLimitContinuationOfRunId !== undefined
+  ) {
+    count += 1;
+    // A continuation always points at an earlier run, so this walk terminates.
+    current = byId.get(current.usageLimitContinuationOfRunId) ?? null;
+  }
+  return count;
+}
+
 function hasLiveRun(projection: Pick<OrchestrationV2ThreadProjection, "runs">): boolean {
   return projection.runs.some(isLiveRun);
 }
@@ -5768,6 +5789,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const failure = latestRootProviderFailure(run, projection.turnItems);
       const recovery = projection.thread.limitRecovery;
       const now = yield* DateTime.now;
+      const resumeChain = automaticLimitResumeChain(projection.runs);
+      const identityCurrent =
+        recovery?.autoResume === true &&
+        recovery.requestId === command.usageLimitRecoveryRequestId &&
+        recovery.runId === command.usageLimitContinuationOfRunId;
       if (
         run?.id !== command.usageLimitContinuationOfRunId ||
         failure?.class !== "usage_limit" ||
@@ -5777,6 +5803,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         recovery.runId !== run.id ||
         recovery.resetAt !== failure.resetAt ||
         Date.parse(recovery.resetAt) > DateTime.toEpochMillis(now) ||
+        resumeChain >= MAX_AUTOMATIC_LIMIT_RESUMES ||
         projection.thread.archivedAt !== null ||
         projection.thread.deletedAt !== null ||
         projection.thread.settledOverride === "settled" ||
@@ -5785,6 +5812,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         (projection.thread.snoozedUntil != null &&
           DateTime.toEpochMillis(projection.thread.snoozedUntil) > DateTime.toEpochMillis(now))
       ) {
+        // A cap rejection disarms a current recovery so the sweep stops offering
+        // it; rotating the request id keeps a later manual re-enable off the
+        // receipt dedupe of the rejected command.
+        const disarmCap =
+          identityCurrent &&
+          resumeChain >= MAX_AUTOMATIC_LIMIT_RESUMES &&
+          recovery.runId === run?.id &&
+          recovery.resetAt === failure?.resetAt
+            ? { limitRecovery: { ...recovery, autoResume: false, requestId: command.commandId } }
+            : {};
         yield* emit(
           events,
           command,
@@ -5794,13 +5831,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           occurredAt: now,
           payload: {
             ...projection.thread,
-            ...(recovery?.autoResume &&
-            recovery.requestId === command.usageLimitRecoveryRequestId &&
-            recovery.runId === command.usageLimitContinuationOfRunId &&
+            ...(identityCurrent &&
+            resumeChain < MAX_AUTOMATIC_LIMIT_RESUMES &&
             projection.thread.snoozedUntil != null &&
             DateTime.toEpochMillis(projection.thread.snoozedUntil) > DateTime.toEpochMillis(now)
               ? { limitRecovery: { ...recovery, requestId: command.commandId } }
-              : {}),
+              : disarmCap),
           },
         });
         return;

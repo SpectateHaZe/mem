@@ -139,12 +139,13 @@ const registerGrokAcpExtensions: NonNullable<AcpAdapterV2Flavor["registerExtensi
   runtime,
   requestUserInput,
   applyBackgroundTaskMutation,
+  reportTurnSample,
   finishSubagent,
   captureProposedPlan,
   lastProposedPlanMarkdown,
 }) =>
   registerXAiBackgroundTaskTracking(runtime, applyBackgroundTaskMutation).pipe(
-    Effect.andThen(registerXAiSubagentFinished(runtime, finishSubagent)),
+    Effect.andThen(registerXAiSubagentFinished(runtime, finishSubagent, reportTurnSample)),
     Effect.andThen(registerGrokAskUserQuestionExtensions({ runtime, requestUserInput })),
     Effect.andThen(
       registerGrokExitPlanModeExtensions({
@@ -257,6 +258,8 @@ export function makeGrokAcpAdapterFlavor(
       );
     },
     resolveModelId: (selection) => resolveGrokAcpBaseModelId(selection.model),
+    // Grok reports one usage-and-cost sample per prompt on `_x.ai/session_notification`.
+    acceptsExtensionTurnSamples: true,
     getModelContextWindow: (selection, session) => {
       if (selection.instanceId !== options.instanceId) return undefined;
       const modelId = resolveGrokAcpBaseModelId(selection.model);

@@ -45,6 +45,10 @@ it("gates each mode", () => {
   assert.equal(computerUseRefusal("view", "win32", false), undefined);
   assert.isString(computerUseRefusal("view", "win32", true));
   assert.isString(computerUseRefusal("off", "win32", false));
+  assert.equal(computerUseRefusal("full", "darwin", true), undefined);
+  assert.equal(computerUseRefusal("view", "darwin", false), undefined);
+  assert.isString(computerUseRefusal("view", "darwin", true));
+  assert.isString(computerUseRefusal("off", "darwin", false));
   assert.isString(computerUseRefusal("full", "linux", false));
 });
 

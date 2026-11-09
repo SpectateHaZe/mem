@@ -4,8 +4,10 @@ import type {
   ServerProviderUsageWindow,
   UsageLimitSourceSnapshots,
 } from "@t3tools/contracts";
+import { PROVIDER_DISPLAY_NAMES } from "@t3tools/contracts";
 import {
   collectProviderUsageLimits,
+  findOpenCodeGoLimits,
   formatDuration,
   formatResetsIn,
   type LimitPace,
@@ -27,6 +29,7 @@ import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 
 const PACE_LABEL: Record<LimitPace, string> = {
@@ -45,7 +48,7 @@ export interface ThreadDetailsUsageInput {
 
 type UsageTone = "error" | "warning" | null;
 
-/** The selected provider's limit windows. Each row reads as room left. */
+/** The selected provider's limit windows, plus OpenCode Go windows when another instance has them. */
 export function ThreadDetailsUsage({
   providerInstanceId,
   providers,
@@ -62,8 +65,13 @@ export function ThreadDetailsUsage({
   const limits =
     report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
     providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits;
-  if (!limits) return null;
-  const notice = limitsNotice(limits);
+  const goGroup = findOpenCodeGoLimits(providerInstanceId, providers);
+  if (!limits && !goGroup) return null;
+  const notice = limits ? limitsNotice(limits) : null;
+  const selected = providers.find((provider) => provider.instanceId === providerInstanceId) ?? null;
+  const goWindows = goGroup
+    ? goGroup.limits.windows.filter((window) => window.id.startsWith("go_"))
+    : [];
 
   return (
     <ThreadDetailsSection
@@ -72,17 +80,37 @@ export function ThreadDetailsUsage({
       showHeading={false}
     >
       <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        {notice ? (
-          <UsageRow
-            label="Limits"
-            fill={null}
-            tone={null}
-            value="Unavailable"
-            tooltip={<span className="text-foreground">{notice}</span>}
+        {goGroup && selected && limits ? (
+          <UsageGroupHeading
+            provider={selected}
+            label={
+              selected.displayName?.trim() ||
+              PROVIDER_DISPLAY_NAMES[selected.driver] ||
+              selected.driver
+            }
           />
-        ) : (
-          limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
-        )}
+        ) : null}
+        {limits ? (
+          notice ? (
+            <UsageRow
+              label="Limits"
+              fill={null}
+              tone={null}
+              value="Unavailable"
+              tooltip={<span className="text-foreground">{notice}</span>}
+            />
+          ) : (
+            limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
+          )
+        ) : null}
+        {goGroup ? (
+          <>
+            <UsageGroupHeading provider={goGroup.provider} label="OpenCode Go" />
+            {goWindows.map((window) => (
+              <LimitRow key={`opencode-go:${window.id}`} window={window} now={now} />
+            ))}
+          </>
+        ) : null}
       </div>
     </ThreadDetailsSection>
   );
@@ -90,8 +118,10 @@ export function ThreadDetailsUsage({
 
 /** Pay-per-use tokens and spend for the whole session. Hidden when nothing was billed. */
 export function ThreadDetailsSessionUsage({ usage }: { readonly usage: SessionUsage }) {
-  const tokens = formatTokens(usage.totalTokens);
+  const tokens = usage.totalTokens > 0 ? formatTokens(usage.totalTokens) : null;
   const cost = usage.costUsd === null ? null : formatUsd(usage.costUsd);
+  // A billed cost alone still shows; the provider simply reported no token counts.
+  const value: string = cost === null ? (tokens ?? "") : tokens ? `${tokens} · ${cost}` : cost;
   return (
     <ThreadDetailsSection
       headingId="thread-details-session-usage-heading"
@@ -103,12 +133,14 @@ export function ThreadDetailsSessionUsage({ usage }: { readonly usage: SessionUs
           label="Tokens"
           fill={null}
           tone={null}
-          value={cost === null ? tokens : `${tokens} · ${cost}`}
-          ariaValue={cost === null ? tokens : `${tokens}, ${cost}`}
+          value={value}
+          ariaValue={value}
           tooltip={
             <>
               <span className="text-foreground">
-                {usage.totalTokens.toLocaleString("en-US")} tokens used
+                {usage.totalTokens > 0
+                  ? `${usage.totalTokens.toLocaleString("en-US")} tokens used`
+                  : "Provider reported no token counts"}
               </span>
               {cost !== null ? <span className="text-muted-foreground">{cost} spent</span> : null}
             </>
@@ -192,7 +224,8 @@ function LimitRow({
       label={window.label}
       fill={left}
       tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
-      value={resetsIn ? `${left}% · ${resetsIn}` : `${left}%`}
+      value={`${left}%`}
+      detail={resetsIn ? `${resetsIn.charAt(0).toUpperCase()}${resetsIn.slice(1)}` : null}
       ariaValue={resetsIn ? `${left}% left, ${resetsIn}` : `${left}% left`}
       tooltip={
         <>
@@ -212,6 +245,22 @@ function LimitRow({
   );
 }
 
+/** Names one provider's block of rows, so Go usage never reads as the thread provider's. */
+function UsageGroupHeading({ provider, label }: { provider: ServerProvider; label: string }) {
+  return (
+    <div className="col-span-3 flex items-center gap-1.5 px-2.5 pt-1.5 text-muted-foreground">
+      <ProviderInstanceIcon
+        driverKind={provider.driver}
+        displayName={provider.displayName ?? label}
+        accentColor={provider.accentColor}
+        className="size-3.5"
+        iconClassName="size-3.5"
+      />
+      <span className="truncate text-2xs font-medium">{label}</span>
+    </div>
+  );
+}
+
 /** One label, hairline, and value row; the whole row opens the details tooltip. */
 function UsageRow({
   label,
@@ -220,6 +269,7 @@ function UsageRow({
   tick = null,
   value,
   ariaValue = value,
+  detail = null,
   tooltip,
   muted = false,
 }: {
@@ -231,6 +281,8 @@ function UsageRow({
   readonly tick?: number | null;
   readonly value: string;
   readonly ariaValue?: string;
+  /** Second line under the bar, for reset times too long to sit beside it. */
+  readonly detail?: string | null;
   readonly tooltip: ReactNode;
   readonly muted?: boolean;
 }) {
@@ -241,7 +293,7 @@ function UsageRow({
           <div
             tabIndex={0}
             aria-label={`${label}: ${ariaValue}`}
-            className="col-span-3 grid h-6 cursor-default grid-cols-subgrid items-center rounded-lg px-2.5 outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]"
+            className="col-span-3 grid min-h-6 cursor-default grid-cols-subgrid items-center rounded-lg px-2.5 py-1 outline-none hover:bg-black/[0.035] focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring data-popup-open:bg-black/[0.035] dark:hover:bg-white/[0.08] dark:data-popup-open:bg-white/[0.08]"
           />
         }
       >
@@ -275,7 +327,7 @@ function UsageRow({
         <span
           className={cn(
             // Text-only rows span the bar column so they never widen the shared value column.
-            "text-end font-medium tabular-nums",
+            "truncate text-end font-medium tabular-nums",
             fill === null && "col-span-2",
             tone === "error"
               ? "text-error-foreground"
@@ -288,6 +340,11 @@ function UsageRow({
         >
           {value}
         </span>
+        {detail ? (
+          <span className="col-span-3 truncate text-end text-muted-foreground tabular-nums">
+            {detail}
+          </span>
+        ) : null}
       </TooltipTrigger>
       {/* Rows sit 8px inside the card; clear its edge instead of overlapping it. */}
       <TooltipPopup side="left" sideOffset={16}>

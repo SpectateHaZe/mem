@@ -85,18 +85,50 @@ export function deriveSessionUsage(input: {
     Pick<OrchestrationV2ProviderTurn, "providerThreadId" | "turnTokenUsage">
   >;
   readonly providerThreads: ReadonlyArray<
-    Pick<OrchestrationV2ProviderThread, "id" | "providerInstanceId" | "contextUsage">
+    Pick<
+      OrchestrationV2ProviderThread,
+      "id" | "providerInstanceId" | "contextUsage" | "sessionCost"
+    >
   >;
   readonly providers: ReadonlyArray<Pick<ServerProvider, "instanceId" | "driver" | "auth">>;
 }): SessionUsage | null {
   const providersById = new Map(input.providers.map((provider) => [provider.instanceId, provider]));
   const billableThreadIds = new Set<OrchestrationV2ProviderThread["id"]>();
+  // Per-thread cost the provider attributed to single turns. Defined values only, so threads
+  // whose provider reports no per-turn cost fall back to the session-level usage cost below.
+  const turnCostUsdByThread = new Map<OrchestrationV2ProviderThread["id"], number>();
+  for (const turn of input.providerTurns) {
+    const costUsd = turn.turnTokenUsage?.costUsd;
+    if (costUsd === undefined || !Number.isFinite(costUsd) || costUsd < 0) continue;
+    turnCostUsdByThread.set(
+      turn.providerThreadId,
+      (turnCostUsdByThread.get(turn.providerThreadId) ?? 0) + costUsd,
+    );
+  }
   let costUsd = 0;
   let hasCost = false;
   for (const thread of input.providerThreads) {
     const provider = providersById.get(thread.providerInstanceId);
     if (provider === undefined || isSubscriptionBilledProvider(provider)) continue;
     billableThreadIds.add(thread.id);
+    const turnCostUsd = turnCostUsdByThread.get(thread.id);
+    if (turnCostUsd !== undefined) {
+      costUsd += turnCostUsd;
+      hasCost = true;
+      continue;
+    }
+    // Threads without per-turn cost use the provider's session ledger, then its usage snapshot.
+    const sessionCost = thread.sessionCost;
+    if (
+      sessionCost !== undefined &&
+      sessionCost !== null &&
+      sessionCost.currency === "USD" &&
+      Number.isFinite(sessionCost.amount)
+    ) {
+      costUsd += sessionCost.amount;
+      hasCost = true;
+      continue;
+    }
     const cost = thread.contextUsage?.cost;
     if (cost !== undefined && cost.currency === "USD" && Number.isFinite(cost.amount)) {
       costUsd += cost.amount;
@@ -129,8 +161,8 @@ export function deriveSessionUsage(input: {
     totalTokens += turnTokens;
     hasTokens = true;
   }
-  // A provider that reports no token counts leaves nothing to show.
-  if (!hasTokens) return null;
+  // A provider that reports no token counts still shows its billed cost.
+  if (!hasTokens && !hasCost) return null;
   return { totalTokens, costUsd: hasCost ? costUsd : null };
 }
 

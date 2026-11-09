@@ -22,11 +22,14 @@ import {
   makeXAiAskUserQuestionResponse,
   makeXAiPromptCompletionRuntime,
   normalizeXAiAcpToolCallState,
+  registerXAiSubagentFinished,
   xAiBackgroundTaskLifecycleMutation,
   xAiPromptCompleteFromSessionUpdate,
   xAiSubagentFinishedNotice,
+  xAiTurnCostSample,
   XAiAskUserQuestionRequest,
 } from "./xaiAcpExtension.ts";
+import { GROK_COST_USD_TICKS_PER_DOLLAR } from "./usage.ts";
 import * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import {
   type AcpToolCallState,
@@ -1293,6 +1296,112 @@ describe("XAiAcpExtension", () => {
     expect(finished({})).toBeNull();
     expect(finished({ status: "completed", child_session_id: undefined })).toBeNull();
   });
+
+  describe("xAiTurnCostSample", () => {
+    const sample = (update: Record<string, unknown>) =>
+      xAiTurnCostSample({
+        sessionId: "root-session",
+        update: {
+          sessionUpdate: "turn_completed",
+          prompt_id: "t3-xai-prompt-1",
+          ...update,
+        } as never,
+      });
+
+    it("converts a completed turn's cost ticks with its prompt id", () => {
+      expect(
+        sample({
+          usage: {
+            inputTokens: 22,
+            outputTokens: 3,
+            totalTokens: 25,
+            costUsdTicks: GROK_COST_USD_TICKS_PER_DOLLAR,
+          },
+        }),
+      ).toEqual({ sessionId: "root-session", promptId: "t3-xai-prompt-1", costUsd: 1 });
+    });
+
+    it.each([
+      [
+        "an incomplete sample",
+        { usage: { inputTokens: 1, outputTokens: 1, usageIsIncomplete: true, costUsdTicks: 5 } },
+      ],
+      ["a missing cost", { usage: { inputTokens: 10, outputTokens: 0 } }],
+      ["a zero-cost turn", { usage: { inputTokens: 10, outputTokens: 2, costUsdTicks: 0 } }],
+      [
+        "a wake completion",
+        {
+          prompt_id: "task-completed-0001",
+          usage: { inputTokens: 1, outputTokens: 1, costUsdTicks: 5 },
+        },
+      ],
+      [
+        "a non-turn update",
+        {
+          sessionUpdate: "subagent_finished",
+          usage: { inputTokens: 1, outputTokens: 1, costUsdTicks: 5 },
+        },
+      ],
+    ])("rejects %s", (_name, update) => {
+      expect(sample(update)).toBeNull();
+    });
+  });
+
+  it.effect("reports a turn's cost through the shared notification slot", () =>
+    Effect.gen(function* () {
+      const handlers = new Map<string, (params: unknown) => Effect.Effect<void>>();
+      const hungPrompt = yield* Deferred.make<never>();
+      const finished: unknown[] = [];
+      const samples: unknown[] = [];
+      const baseRuntime = {
+        start: () =>
+          Effect.succeed({
+            sessionId: "root-session",
+            initializeResult: {},
+            sessionSetupResult: {},
+            modelConfigId: undefined,
+          }),
+        prompt: () => Deferred.await(hungPrompt),
+        cancel: Effect.void,
+        handleExtNotification: (
+          method: string,
+          _schema: unknown,
+          handler: (params: unknown) => Effect.Effect<void>,
+        ) => {
+          handlers.set(method, handler);
+          return Effect.void;
+        },
+        handleExtRequest: () => Effect.void,
+      } as unknown as AcpSessionRuntime.AcpSessionRuntime["Service"];
+
+      const runtime = yield* makeXAiPromptCompletionRuntime(baseRuntime);
+      yield* registerXAiSubagentFinished(
+        runtime,
+        (notice) => Effect.sync(() => finished.push(notice)),
+        (sample) => Effect.sync(() => samples.push(sample)),
+      );
+      const sessionNotificationHandler = handlers.get("_x.ai/session_notification");
+      expect(sessionNotificationHandler).toBeDefined();
+      yield* sessionNotificationHandler!({
+        sessionId: "root-session",
+        update: {
+          sessionUpdate: "turn_completed",
+          prompt_id: "t3-xai-prompt-1",
+          stop_reason: "end_turn",
+          usage: {
+            inputTokens: 22,
+            outputTokens: 3,
+            totalTokens: 25,
+            costUsdTicks: GROK_COST_USD_TICKS_PER_DOLLAR,
+          },
+        },
+      });
+      expect(samples).toEqual([
+        { sessionId: "root-session", promptId: "t3-xai-prompt-1", costUsd: 1 },
+      ]);
+      expect(finished).toEqual([]);
+    }),
+  );
 
   it.effect("settles a hung prompt from released _x.ai/session_notification turns", () =>
     Effect.gen(function* () {

@@ -6,6 +6,7 @@ import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 
+import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -96,6 +97,7 @@ export const discordIpcPathCandidates = (
 
 export interface DiscordActivity {
   readonly details: string;
+  readonly state?: string;
   readonly timestamps: { readonly start: number };
   readonly assets?: {
     readonly large_image: string;
@@ -103,26 +105,85 @@ export interface DiscordActivity {
   };
 }
 
+// Discord rejects presence fields shorter than 2 or longer than 128 characters.
+const DISCORD_FIELD_MAX_LENGTH = 128;
+const DISCORD_FIELD_MIN_LENGTH = 2;
+// Two parts and their separator must fit the field, so each part stays well under the maximum.
+const STATE_PART_MAX_LENGTH = Math.floor((DISCORD_FIELD_MAX_LENGTH - 8) / 2);
+
+/** Keeps a field within Discord's limits; an ellipsis takes the room of one character. */
+const truncateDiscordText = (value: string): string =>
+  value.length > DISCORD_FIELD_MAX_LENGTH
+    ? cutBeforeEllipsis(value, DISCORD_FIELD_MAX_LENGTH)
+    : value;
+
+const truncateStatePart = (value: string): string =>
+  value.length > STATE_PART_MAX_LENGTH ? cutBeforeEllipsis(value, STATE_PART_MAX_LENGTH) : value;
+
+// Surrogates are counted as two characters here but one character on Discord, and a
+// cut between a pair's halves would send Discord an invalid lone surrogate.
+const cutsSurrogatePair = (value: string, end: number): boolean => {
+  const previous = value.charCodeAt(end - 1);
+  const next = value.charCodeAt(end);
+  return previous >= 0xd800 && previous <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+};
+
+const cutBeforeEllipsis = (value: string, maxLength: number): string => {
+  const end = maxLength - 1;
+  return `${value.slice(0, cutsSurrogatePair(value, end) ? end - 1 : end)}…`;
+};
+
 /**
- * Never names a project or thread: Discord shows this to the user's friends.
+ * One distinct value, or the first with a "+n more", so a field never becomes
+ * an unreadable list. Blank values drop before counting.
+ */
+const distinctStateParts = (values: ReadonlyArray<string>): ReadonlyArray<string> => {
+  const seen = new Set<string>();
+  for (const value of values) {
+    const trimmed = value.trim();
+    if (trimmed !== "") seen.add(trimmed);
+  }
+  return [...seen];
+};
+
+const summarizeStatePart = (values: ReadonlyArray<string>): string | undefined => {
+  const distinct = distinctStateParts(values);
+  if (distinct.length === 0) return undefined;
+  if (distinct.length === 1) return truncateStatePart(distinct[0]!);
+  return `${truncateStatePart(distinct[0]!)} +${distinct.length - 1} more`;
+};
+
+/**
+ * Never names a thread: Discord shows this to the user's friends, so project
+ * names only appear when the user turns them on.
  * Zero live agents clears the presence instead of leaving a stale count.
  * A large image key must already be registered on the Discord application.
  */
 export const presenceActivity = (
   liveAgents: number,
   startedAtMs: number,
-  largeImageKey?: string,
+  options: {
+    readonly modelNames?: ReadonlyArray<string>;
+    readonly projectNames?: ReadonlyArray<string>;
+    readonly largeImageKey?: string;
+  } = {},
 ): DiscordActivity | null => {
   const agents = Number.isFinite(liveAgents) ? Math.max(0, Math.floor(liveAgents)) : 0;
   if (agents === 0) return null;
+  const state = truncateDiscordText(
+    [summarizeStatePart(options.projectNames ?? []), summarizeStatePart(options.modelNames ?? [])]
+      .filter((part) => part !== undefined)
+      .join(" · "),
+  );
   const activity: DiscordActivity = {
     details: agents === 1 ? "1 agent working" : `${agents} agents working`,
+    ...(state.length < DISCORD_FIELD_MIN_LENGTH ? {} : { state }),
     timestamps: { start: Math.floor(startedAtMs) },
   };
-  if (largeImageKey === undefined || largeImageKey === "") return activity;
+  if (options.largeImageKey === undefined || options.largeImageKey === "") return activity;
   return {
     ...activity,
-    assets: { large_image: largeImageKey, large_text: DISCORD_APP_NAME },
+    assets: { large_image: options.largeImageKey, large_text: DISCORD_APP_NAME },
   };
 };
 
@@ -304,6 +365,7 @@ class DiscordIpc {
 const makeSweep = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const projects = yield* ProjectStore.ProjectStoreV2;
   const ipc = new DiscordIpc(
     discordIpcPathCandidates(yield* HostProcess.Platform, yield* HostProcess.Environment),
   );
@@ -314,7 +376,7 @@ const makeSweep = Effect.gen(function* () {
 
   return Effect.fn("DiscordPresence.sweep")(function* () {
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-    const { discordClientId } = yield* settings.getSettings;
+    const { discordClientId, discordPresenceShowProjectName } = yield* settings.getSettings;
     const clientId = discordClientId.trim();
     // Settings changes apply on the next tick instead of after the presence interval.
     if (clientId === lastClientId && nowMs - lastCheckMs < CHECK_INTERVAL_MS) return;
@@ -323,17 +385,31 @@ const makeSweep = Effect.gen(function* () {
     lastCheckMs = nowMs;
 
     // shortcut: mayBeLive also counts threads only watching a PR, so the count can run high.
-    const liveAgents =
+    const liveThreads =
       clientId === ""
-        ? 0
-        : (yield* projections.listActiveShellIndex()).filter((thread) => thread.mayBeLive).length;
-    if (liveAgents === 0) {
+        ? []
+        : (yield* projections.listActiveShellIndex()).filter((thread) => thread.mayBeLive);
+    if (liveThreads.length === 0) {
       activityStartedAtMs = undefined;
       ipc.update(clientId, null);
       return;
     }
     activityStartedAtMs ??= nowMs;
-    ipc.update(clientId, presenceActivity(liveAgents, activityStartedAtMs));
+    // Project names are opt-in: list them in thread order, so the first live thread's project leads.
+    const projectIds = [...new Set(liveThreads.map((thread) => thread.projectId))];
+    const projectNames =
+      discordPresenceShowProjectName && projectIds.length > 0
+        ? (yield* projects.list({ projectIds })).map((project) => project.title)
+        : [];
+    ipc.update(
+      clientId,
+      presenceActivity(liveThreads.length, activityStartedAtMs, {
+        modelNames: liveThreads
+          .map((thread) => thread.modelName)
+          .filter((name): name is string => name !== null),
+        projectNames,
+      }),
+    );
   });
 });
 

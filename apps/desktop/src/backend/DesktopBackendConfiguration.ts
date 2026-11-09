@@ -201,6 +201,19 @@ const resolveResourceMonitorPath = Effect.fn(
   return Option.none<string>();
 });
 
+const resolveBundledOpenCodePath = Effect.fn(
+  "desktop.backendConfiguration.resolveBundledOpenCodePath",
+)(function* () {
+  const environment = yield* DesktopEnvironment.DesktopEnvironment;
+  const fileSystem = yield* FileSystem.FileSystem;
+  if (!environment.isPackaged) return Option.none<string>();
+  const binaryName = environment.platform === "win32" ? "opencode.exe" : "opencode";
+  const candidate = environment.path.join(environment.resourcesPath, "opencode", binaryName);
+  return (yield* fileSystem.exists(candidate).pipe(Effect.orElseSucceed(() => false)))
+    ? Option.some(candidate)
+    : Option.none<string>();
+});
+
 const readPersistedBackendObservabilitySettings = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const environment = yield* DesktopEnvironment.DesktopEnvironment;
@@ -486,6 +499,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
   function* (
     input: SharedBootstrapInput & {
       readonly resourceMonitorPath: Option.Option<string>;
+      readonly bundledOpenCodePath: Option.Option<string>;
       readonly cliPath: Option.Option<string>;
       readonly shellEnvironmentPrepared: boolean;
     },
@@ -536,6 +550,7 @@ const resolvePrimaryStartConfig = Effect.fn("desktop.backendConfiguration.resolv
         ELECTRON_RUN_AS_NODE: "1",
         T3CODE_DESKTOP_SHELL_DISCOVERY_PENDING: "1",
         T3CODE_CLI_PATH: Option.getOrUndefined(input.cliPath),
+        T3CODE_BUNDLED_OPENCODE_PATH: Option.getOrUndefined(input.bundledOpenCodePath),
       },
       extendEnv: true,
       bootstrap,
@@ -783,6 +798,10 @@ export const make = Effect.gen(function* () {
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
     );
+    const bundledOpenCodePath = yield* resolveBundledOpenCodePath().pipe(
+      Effect.provideService(FileSystem.FileSystem, fileSystem),
+      Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
+    );
     const cliPath = yield* DesktopCliShim.install.pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(DesktopEnvironment.DesktopEnvironment, environment),
@@ -791,6 +810,7 @@ export const make = Effect.gen(function* () {
     return yield* resolvePrimaryStartConfig({
       ...shared,
       resourceMonitorPath,
+      bundledOpenCodePath,
       cliPath,
       shellEnvironmentPrepared,
     }).pipe(

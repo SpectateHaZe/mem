@@ -14,7 +14,7 @@ Mem is a desktop app for running coding agents, built as a fork of [T3 Code](htt
 - **Computer control.** Agents in full-access threads can see the screen and use the mouse and keyboard on Windows. It defaults to full control; Settings → Threads has View only and Off.
 - **More models.** DeepSeek and OpenCode's free models, alongside Codex, Claude, Cursor, Grok, Antigravity, Kiro and others.
 - **Obscura.** An optional headless browser for reading web pages. It's off by default and downloads about 41 MB the first time an agent uses it.
-- **Discord status.** Shows how many agents are working on your Discord profile, without project names. It is on by default; clear the Application ID in Settings → Threads to turn it off.
+- **Discord status.** Shows how many agents are working on your Discord profile, and which model they use. Project names stay private unless you turn them on in Settings → Threads. On by default; clear the Application ID to turn it off.
 
 > [!WARNING]
 > With computer control on, an agent in a full-access thread can do anything you can do at your desk. Use View only or Off if that isn't what you want, and don't leave sensitive apps open during unattended runs.

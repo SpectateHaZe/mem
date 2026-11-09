@@ -169,3 +169,96 @@ it("keeps a docked picker open after a pick and hands focus to that model's effo
   await userEvent.keyboard("{Escape}");
   await expect.element(search).not.toBeInTheDocument();
 });
+
+it("groups OpenCode models per catalog source, once per id, keeping the picked id", async () => {
+  const instanceId = ProviderInstanceId.make("opencode");
+  const instanceEntries = deriveProviderInstanceEntries([
+    {
+      instanceId,
+      driver: ProviderDriverKind.make("opencode"),
+      enabled: true,
+      installed: true,
+      version: null,
+      status: "ready",
+      auth: { status: "authenticated" },
+      checkedAt: "2026-01-01T00:00:00.000Z",
+      models: [],
+      slashCommands: [],
+      skills: [],
+    },
+  ]);
+  const options = new Map([
+    [
+      instanceId,
+      [
+        { slug: "opencode-go/glm-5.3-flash", name: "GLM-5.3 Flash", subProvider: "OpenCode Go" },
+        { slug: "opencode-go/glm-5.3-flash", name: "GLM-5.3 Flash", subProvider: "OpenCode Go" },
+        { slug: "opencode-go/gpt-6-luna", name: "GPT-6 Luna", subProvider: "OpenCode Go" },
+        { slug: "opencode/glm-5.3-flash", name: "GLM-5.3 Flash", subProvider: "OpenCode Zen" },
+        { slug: "deepseek/glm-5.3", name: "GLM-5.3", subProvider: "Deepseek" },
+      ],
+    ],
+  ]);
+
+  function Picker() {
+    const [model, setModel] = useState("opencode-go/glm-5.3-flash");
+    return (
+      <>
+        <output aria-label="Selected model">{model}</output>
+        <ProviderModelPicker
+          environmentId={null}
+          activeInstanceId={instanceId}
+          model={model}
+          lockedProvider={null}
+          instanceEntries={instanceEntries}
+          modelOptionsByInstance={options}
+          triggerAriaLabel="Choose model"
+          onInstanceModelChange={(_, selected) => setModel(selected)}
+        />
+      </>
+    );
+  }
+
+  await using screen = await render(<Picker />);
+  const optionText = () =>
+    page
+      .getByRole("option")
+      .elements()
+      .map((row) => row.textContent ?? "");
+  const flashRows = () => optionText().filter((text) => text.startsWith("GLM-5.3 Flash"));
+  await page.getByRole("button", { name: "Choose model" }).click();
+  await expect.element(page.getByText("OpenCode Go")).toBeVisible();
+  await expect.element(page.getByText("OpenCode Zen")).toBeVisible();
+  await expect.element(page.getByText("Deepseek")).toBeVisible();
+  await expect
+    .element(screen.getByRole("status", { name: "Selected model" }))
+    .toHaveTextContent("opencode-go/glm-5.3-flash");
+  await vi.waitFor(() => expect(flashRows()).toHaveLength(2));
+  await vi.waitFor(() =>
+    expect(optionText().filter((text) => text.startsWith("GPT-6 Luna"))).toHaveLength(1),
+  );
+
+  const deepseekRow = page
+    .getByRole("option")
+    .elements()
+    .filter((row): row is HTMLElement => row instanceof HTMLElement)
+    .find((row) => row.textContent === "GLM-5.3, OpenCode");
+  expect(deepseekRow).toBeDefined();
+  deepseekRow?.click();
+  await expect
+    .element(screen.getByRole("status", { name: "Selected model" }))
+    .toHaveTextContent("deepseek/glm-5.3");
+
+  await page.getByRole("button", { name: "Choose model" }).click();
+  const search = page.getByPlaceholder("Search models...");
+  await expect.element(search).toHaveFocus();
+  await search.fill("go glm");
+  await expect.element(page.getByText("OpenCode Zen")).not.toBeInTheDocument();
+  await expect.element(page.getByText("Deepseek")).not.toBeInTheDocument();
+  await vi.waitFor(() => {
+    expect(flashRows()).toHaveLength(1);
+    const texts = optionText();
+    expect(texts.some((text) => text.includes("Zen") || text.includes("Luna"))).toBe(false);
+    expect(texts.some((text) => text.startsWith("GLM-5.3,"))).toBe(false);
+  });
+});

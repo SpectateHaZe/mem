@@ -80,6 +80,97 @@ it("clears the status when no agent is working", () => {
   assert.equal(presenceActivity(3, 1_700_000_000_000)?.details, "3 agents working");
 });
 
+it("keeps the details count and shows one model in state", () => {
+  const activity = presenceActivity(2, 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
+  assert.equal(activity?.details, "2 agents working");
+  assert.equal(activity?.state, "gpt-5.4");
+});
+
+it("summarizes several distinct models as first with n more", () => {
+  const activity = presenceActivity(3, 1_700_000_000_000, {
+    modelNames: ["gpt-5.4", "claude-sonnet-4", "gpt-5.4"],
+  });
+  assert.equal(activity?.state, "gpt-5.4 +1 more");
+});
+
+it("shows the project name only when the caller passes it", () => {
+  const hidden = presenceActivity(1, 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
+  assert.equal(hidden?.state, "gpt-5.4");
+
+  const shown = presenceActivity(1, 1_700_000_000_000, {
+    modelNames: ["gpt-5.4"],
+    projectNames: ["My Private Project"],
+  });
+  assert.equal(shown?.state, "My Private Project · gpt-5.4");
+});
+
+it("summarizes several distinct projects as first with n more", () => {
+  const activity = presenceActivity(2, 1_700_000_000_000, {
+    projectNames: ["Alpha", "Beta", "Alpha"],
+  });
+  assert.equal(activity?.state, "Alpha +1 more");
+});
+
+it("truncates long model and project names to Discord's limits", () => {
+  const longModel = "b".repeat(500);
+  const longProject = "p".repeat(500);
+  const one = presenceActivity(1, 1_700_000_000_000, { modelNames: [longModel] });
+  assert.equal(one?.state, `${"b".repeat(59)}…`);
+  assert.equal(one?.state?.length, 60);
+
+  const both = presenceActivity(1, 1_700_000_000_000, {
+    modelNames: [longModel],
+    projectNames: [longProject],
+  });
+  const state = both?.state ?? "";
+  assert.isAtMost(state.length, 128);
+  assert.isAtLeast(state.length, 2);
+  assert.isTrue(state.startsWith(`${"p".repeat(59)}… · ${"b".repeat(59)}…`));
+
+  // Two "+n more" parts overflow the composed field, so its own truncation kicks in.
+  const maximal = presenceActivity(1, 1_700_000_000_000, {
+    modelNames: [longModel, "m"],
+    projectNames: [longProject, "q"],
+  });
+  const maximalState = maximal?.state ?? "";
+  assert.equal(maximalState.length, 128);
+  assert.isTrue(maximalState.endsWith("…"));
+});
+
+it("truncates astral names on a whole character", () => {
+  const emoji = "🐈";
+  const one = presenceActivity(1, 1_700_000_000_000, { modelNames: [emoji.repeat(500)] });
+  assert.equal(one?.state, `${emoji.repeat(29)}…`);
+
+  // Overflow past the composed field also lands mid-pair, so both cuts stay whole.
+  const maximal = presenceActivity(1, 1_700_000_000_000, {
+    modelNames: [emoji.repeat(500), "m"],
+    projectNames: [emoji.repeat(500), "q"],
+  });
+  const state = maximal?.state ?? "";
+  assert.isAtMost(state.length, 128);
+  const loneSurrogate = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+  assert.isFalse(loneSurrogate.test(state));
+});
+
+it("omits state when the composed text is too short for Discord", () => {
+  const empty = presenceActivity(1, 1_700_000_000_000, {});
+  assert.notProperty(empty, "state");
+
+  const tooShort = presenceActivity(1, 1_700_000_000_000, { modelNames: ["x"] });
+  assert.notProperty(tooShort, "state");
+
+  const blankIgnored = presenceActivity(1, 1_700_000_000_000, {
+    modelNames: ["  "],
+    projectNames: ["My Project"],
+  });
+  assert.equal(blankIgnored?.state, "My Project");
+
+  // Two short parts together are long enough to keep.
+  const pair = presenceActivity(1, 1_700_000_000_000, { modelNames: ["x"], projectNames: ["x"] });
+  assert.equal(pair?.state, "x · x");
+});
+
 it("builds a public activity with a stable start time", () => {
   const startedAt = 1_700_000_000_123;
   const activity = presenceActivity(2, startedAt);
@@ -92,7 +183,7 @@ it("builds a public activity with a stable start time", () => {
 
 it("only adds an image when one is configured", () => {
   assert.notProperty(presenceActivity(2, 5), "assets");
-  assert.deepEqual(presenceActivity(2, 5, "mem"), {
+  assert.deepEqual(presenceActivity(2, 5, { largeImageKey: "mem" }), {
     details: "2 agents working",
     timestamps: { start: 5 },
     assets: { large_image: "mem", large_text: "Mem" },

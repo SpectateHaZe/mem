@@ -363,7 +363,7 @@ describe("deriveSessionUsage", () => {
     ).toEqual({ totalTokens: 1_650, costUsd: null });
   });
 
-  it("shows nothing when no API-billed turn reports tokens", () => {
+  it("shows a thread-level cost alone when an API-billed turn reports no tokens", () => {
     expect(
       deriveSessionUsage({
         providerTurns: [
@@ -384,6 +384,91 @@ describe("deriveSessionUsage", () => {
         ],
         providers,
       }),
-    ).toBeNull();
+    ).toEqual({ totalTokens: 0, costUsd: 0.42 });
+  });
+
+  it("adds provider-reported per-turn cost and does not double count the thread-level cost", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", { ...complete(1_000, 200), costUsd: 0.01 }),
+          turn("api-thread", { ...complete(3_000, 300), costUsd: 0.02 }),
+        ],
+        providerThreads: [thread("api-thread", openCode, 99)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 4_500, costUsd: 0.03 });
+  });
+
+  it("sums per-turn cost left out of token counters without double counting turns", () => {
+    // Threads that report no per-turn cost fall back to the session-level usage cost.
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", { ...complete(1_000, 200), costUsd: 0.01 }),
+          turn("fallback-thread", complete(500, 100)),
+        ],
+        providerThreads: [thread("api-thread", openCode), thread("fallback-thread", openCode, 0.5)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 1_800, costUsd: 0.51 });
+  });
+
+  it("keeps a billed cost when the turn skipped all token counters", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", { ...complete(1_000, 200), costUsd: 0.01 }),
+          turn("api-thread", {
+            usageStatus: "unavailable",
+            usageScope: "main_agent",
+            hasSubagents: false,
+            costUsd: 0.02,
+          }),
+        ],
+        providerThreads: [thread("api-thread", openCode)],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 1_200, costUsd: 0.03 });
+  });
+
+  it("shows a billed cost alone when the provider reports no token counts", () => {
+    const grok = ProviderInstanceId.make("grok");
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("api-thread", {
+            usageStatus: "unavailable",
+            usageScope: "main_agent",
+            hasSubagents: false,
+            costUsd: 0.15,
+          }),
+        ],
+        providerThreads: [thread("api-thread", grok)],
+        providers: [
+          {
+            instanceId: grok,
+            driver: ProviderDriverKind.make("grok"),
+            auth: { status: "authenticated" },
+          },
+        ] as unknown as ReadonlyArray<ServerProvider>,
+      }),
+    ).toEqual({ totalTokens: 0, costUsd: 0.15 });
+  });
+
+  it("ignores per-turn cost on subscription-billed threads and invalid values", () => {
+    expect(
+      deriveSessionUsage({
+        providerTurns: [
+          turn("subscription-thread", { ...complete(9_000, 900), costUsd: 5 }),
+          turn("api-thread", { ...complete(1_000, 200), costUsd: -1 }),
+        ],
+        providerThreads: [
+          thread("subscription-thread", claude),
+          thread("api-thread", openCode, 0.1),
+        ],
+        providers,
+      }),
+    ).toEqual({ totalTokens: 1_200, costUsd: 0.1 });
   });
 });

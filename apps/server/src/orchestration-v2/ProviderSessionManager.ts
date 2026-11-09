@@ -2188,6 +2188,50 @@ export const layerWithOptions = (
         let stoppedByProvider = false;
         let lastSessionStatus = entry.runtime.providerSession.status;
         return entry.runtime.events.pipe(
+          Stream.mapEffect((event) =>
+            Effect.gen(function* () {
+              // The run that owned the turn may already be finalized when its turn sample lands;
+              // persist the thread's billed cost ledger directly, outside any run subscriber.
+              if (
+                event.type !== "provider_thread.updated" ||
+                event.providerThread.sessionCost == null ||
+                event.providerThread.appThreadId === null
+              ) {
+                return event;
+              }
+              const { appThreadId, driver, providerInstanceId } = event.providerThread;
+              const now = yield* DateTime.now;
+              yield* Effect.gen(function* () {
+                const eventId = yield* idAllocator.allocate.event({
+                  threadId: appThreadId,
+                  providerSessionId: entry.runtime.providerSessionId,
+                });
+                yield* eventSink.write({
+                  events: [
+                    {
+                      id: eventId,
+                      type: "provider-thread.updated",
+                      threadId: appThreadId,
+                      driver,
+                      providerInstanceId,
+                      occurredAt: now,
+                      payload: event.providerThread,
+                    },
+                  ],
+                });
+              }).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new ProviderAdapter.ProviderAdapterEventStreamError({
+                      driver: entry.runtime.driver,
+                      providerSessionId: entry.runtime.providerSessionId,
+                      cause,
+                    }),
+                ),
+              );
+              return event;
+            }),
+          ),
           Stream.runForEach((event) => {
             if (shutdownSignal.received) return Effect.void;
             // Live output bypasses persistence and subscribers so floods cannot delay domain events.

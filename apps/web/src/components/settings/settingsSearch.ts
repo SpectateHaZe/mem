@@ -290,6 +290,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "subagent-fallback-model",
+    title: "Delegated task fallback",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [
+      "subagent fallback model out of credit insufficient balance billing quota exhausted retry",
+    ],
+    environmentOnly: true,
+  },
+  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/threads",
@@ -311,6 +321,29 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/appearance",
     searchTerms: ["appearance colors palette custom import"],
     targetId: "appearance",
+  },
+  {
+    id: "sticker-working",
+    title: "Working sticker",
+    to: "/settings/appearance",
+    searchTerms: ["sticker image working running agent busy upload custom decoration appearance"],
+    targetId: "appearance-stickers",
+  },
+  {
+    id: "sticker-needs-you",
+    title: "Needs-you sticker",
+    to: "/settings/appearance",
+    searchTerms: [
+      "sticker image waiting approval question attention needs you upload custom decoration appearance",
+    ],
+    targetId: "appearance-stickers",
+  },
+  {
+    id: "sticker-finished",
+    title: "Finished sticker",
+    to: "/settings/appearance",
+    searchTerms: ["sticker image finished completed turn done upload custom decoration appearance"],
+    targetId: "appearance-stickers",
   },
   {
     // Prefixed because the slider control already owns the `appearance-contrast` id.
@@ -460,7 +493,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     id: "discord-status",
     title: "Discord status",
     to: "/settings/threads",
-    searchTerms: ["discord rich presence rpc activity status"],
+    searchTerms: ["discord rich presence rpc activity status model agent"],
+  },
+  {
+    id: "discord-show-project",
+    title: "Discord project name",
+    to: "/settings/threads",
+    searchTerms: ["discord rich presence project name privacy share status"],
   },
   {
     id: "daily-spend-cap",
@@ -695,6 +734,22 @@ export const SETTINGS_SEARCH_ITEMS = [
     title: "In-app notifications",
     to: "/settings/general",
     searchTerms: ["notification toast popup completion input approval failure"],
+  },
+  {
+    id: "usage-limit-warnings",
+    title: "Usage limit warnings",
+    to: "/settings/general",
+    searchTerms: [
+      "usage limit credit warning toast nearly out quota percent remaining reset provider window",
+    ],
+  },
+  {
+    id: "usage-warning-threshold",
+    title: "Usage warning threshold",
+    to: "/settings/general",
+    // Hidden while warnings are off, so a search lands on the switch that shows it.
+    targetId: "usage-limit-warnings",
+    searchTerms: ["usage limit warning threshold percent left quota"],
   },
   {
     id: "completion-chime",

@@ -4,6 +4,7 @@ import * as NodeChildProcess from "node:child_process";
 import { type ComputerActInput, OrchestratorMcpFailure } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Effect from "effect/Effect";
+import * as Schema from "effect/Schema";
 
 import {
   actScript,
@@ -11,6 +12,7 @@ import {
   parseScreenshot,
   SCREENSHOT_SCRIPT,
 } from "../../../computer/computerScripts.ts";
+import { macAct, macScreenshot, MacComputerError } from "../../../computer/macComputer.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { loadCaller } from "../../threadAccess.ts";
@@ -23,6 +25,13 @@ const failure = (
   message: string,
   code: "capability_denied" | "invalid_request" | "orchestration_error",
 ) => new OrchestratorMcpFailure({ code, message });
+
+const isMacComputerError = Schema.is(MacComputerError);
+
+const macFailure = (error: unknown) =>
+  isMacComputerError(error)
+    ? failure(error.detail, error.code)
+    : failure("The macOS desktop command failed.", "orchestration_error");
 
 const requireAllowed = Effect.fn("ComputerToolkit.requireAllowed")(function* (acting: boolean) {
   const { computerUseMode } = yield* (yield* ServerSettings.ServerSettingsService).getSettings.pipe(
@@ -66,6 +75,10 @@ const runPowerShell = (script: string, keys?: string) =>
 const computer_screenshot = McpToolAccess.readsAsCaller(() =>
   Effect.gen(function* () {
     yield* requireAllowed(false);
+    if ((yield* HostProcess.Platform) === "darwin") {
+      const screenshot = yield* Effect.mapError(macScreenshot, macFailure);
+      return { screenshot: { mimeType: "image/png" as const, ...screenshot } };
+    }
     const screenshot = parseScreenshot(yield* runPowerShell(SCREENSHOT_SCRIPT));
     if (screenshot === undefined) {
       return yield* failure("Couldn't read the screen.", "orchestration_error");
@@ -77,6 +90,9 @@ const computer_screenshot = McpToolAccess.readsAsCaller(() =>
 const computer_act = McpToolAccess.actsAsCaller((input: ComputerActInput) =>
   Effect.gen(function* () {
     yield* requireAllowed(true);
+    if ((yield* HostProcess.Platform) === "darwin") {
+      return yield* Effect.mapError(macAct(input), macFailure);
+    }
     const action = actScript(input);
     if (typeof action === "string") return yield* failure(action, "invalid_request");
     yield* runPowerShell(action.script, action.keys);

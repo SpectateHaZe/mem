@@ -117,6 +117,7 @@ import {
   threadLinkFor,
 } from "./McpInvocationContext.ts";
 import * as Metrics from "../observability/Metrics.ts";
+import { creditFallbackRetryNote, isCreditExhaustionFailure } from "./delegatedTaskCredit.ts";
 import {
   interactionModeRank,
   resolveInteractionMode,
@@ -2470,6 +2471,130 @@ const make = Effect.gen(function* () {
         parent.thread.interactionMode,
         input.interactionMode,
       );
+      const retryOnFallback = Effect.fn("OrchestratorMcpService.delegateTaskFallback")(
+        function* (failed: OrchestratorMcpDelegateTaskResult, timeoutMs: number) {
+          if (failed.status !== "failed" || failed.model === null) return failed;
+          // A fire-and-forget task (completion wake "always") is owned by the
+          // server-side credit-fallback reactor; retrying here would race a second child.
+          const failedTaskRow = (yield* loadTasks(scope.thread.threadId, [failed.taskId])).find(
+            (candidate) => candidate.id === failed.taskId,
+          );
+          if (failedTaskRow === undefined || failedTaskRow.completionWake === "always") {
+            return failed;
+          }
+          const message = failed.summary ?? failed.latestTerminalSummary ?? "";
+          if (!isCreditExhaustionFailure(message)) return failed;
+          const fallback = yield* serverSettings.getSettings.pipe(
+            Effect.map((settings) => settings.subagentFallbackModelSelection),
+            Effect.orElseSucceed(() => null),
+          );
+          if (
+            fallback === null ||
+            (fallback.instanceId === failed.providerInstanceId && fallback.model === failed.model)
+          ) {
+            return failed;
+          }
+          const fallbackTarget = yield* resolveTargetRechecking({
+            parent,
+            target: {
+              providerInstanceId: fallback.instanceId,
+              model: fallback.model,
+              ...(fallback.options === undefined ? {} : { options: fallback.options }),
+            },
+            providers,
+          });
+          const retryRuntimeMode = yield* resolveRuntimeMode(
+            parent.thread.runtimeMode,
+            input.runtimeMode,
+            fallbackTarget,
+          );
+          let retryWorkspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
+          if (input.isolation === "worktree" && failed.childThreadId !== null) {
+            const worktreePath = yield* threadManagement
+              .getThreadRecords(failed.childThreadId, [])
+              .pipe(
+                Effect.map((records) => records.thread.worktreePath),
+                Effect.orElseSucceed(() => null),
+              );
+            if (worktreePath === null) return failed;
+            retryWorkspaceStrategy = { type: "existing_worktree", worktreePath };
+          }
+          if (parentRun.rootNodeId === null) return failed;
+          const retryCommandId = stableCommandId({
+            scope,
+            requestKey: key,
+            operation: "delegate-task-fallback",
+          });
+          const retryResult = yield* threadManagement
+            .dispatch({
+              type: "delegated_task.request",
+              createdBy: "agent",
+              creationSource: "mcp",
+              commandId: retryCommandId,
+              parentThreadId: scope.thread.threadId,
+              parentRunId: parentRun.id,
+              parentNodeId: parentRun.rootNodeId,
+              task: `${taskPrompt(input)}
+
+${creditFallbackRetryNote({
+  providerInstanceId: failed.providerInstanceId,
+  model: failed.model,
+})}`,
+              ...(input.title === undefined ? {} : { title: `${input.title} (retry)` }),
+              modelSelection: fallbackTarget.modelSelection,
+              runtimeMode: retryRuntimeMode,
+              interactionMode,
+              ...(retryWorkspaceStrategy === undefined
+                ? {}
+                : { workspaceStrategy: retryWorkspaceStrategy }),
+              completionWake: "settled_only",
+            })
+            .pipe(
+              Effect.mapError((error) =>
+                error._tag === "ThreadManagementProviderInstanceDisabledError"
+                  ? threadManagementFailure(error)
+                  : failure(
+                      "orchestration_error",
+                      `Unable to create fallback delegated task: ${errorMessage(error)}`,
+                    ),
+              ),
+            );
+          const retryTaskEvent = retryResult.storedEvents.find(
+            (stored) =>
+              stored.event.type === "subagent.updated" &&
+              stored.event.payload.origin === "app_owned",
+          );
+          if (retryTaskEvent?.event.type !== "subagent.updated") return failed;
+          const retryTaskId = retryTaskEvent.event.payload.id;
+          const retryChildThreadId = retryTaskEvent.event.payload.childThreadId;
+          const retryRunEvent = retryResult.storedEvents.find(
+            (stored) =>
+              stored.event.type === "run.created" && stored.event.threadId === retryChildThreadId,
+          );
+          if (
+            retryChildThreadId !== null &&
+            retryRunEvent?.event.type === "run.created" &&
+            retryRunEvent.event.payload.workspacePreparation !== undefined
+          ) {
+            yield* threadLaunch.prepareRun({
+              commandId: retryCommandId,
+              threadId: retryChildThreadId,
+              runId: retryRunEvent.event.payload.id,
+            });
+          }
+          const retryWaited = yield* waitForTask(scope, retryTaskId, timeoutMs);
+          const retried =
+            Option.isSome(retryWaited) && isTerminalTaskStatus(retryWaited.value.status)
+              ? retryWaited.value
+              : yield* readTask(scope, retryTaskId, Option.isNone(retryWaited), true);
+          const note = `Retried on ${fallback.instanceId}/${fallback.model} after ${failed.providerInstanceId}/${failed.model} ran out of credit. The retry was told to continue from existing uncommitted changes.`;
+          return {
+            ...retried,
+            summary: retried.summary === null ? note : `${note}\n\n${retried.summary}`,
+          } satisfies OrchestratorMcpDelegateTaskResult;
+        },
+        (effect, failed, _timeoutMs) => effect.pipe(Effect.orElseSucceed(() => failed)),
+      );
       let workspaceStrategy: OrchestrationV2ThreadLaunchWorkspaceStrategy | undefined;
       if (input.isolation === "worktree" && !isRetryOfAcceptedDelegation) {
         const project = yield* requireProject(parent.thread.projectId);
@@ -2569,7 +2694,7 @@ const make = Effect.gen(function* () {
       );
       const waited = yield* waitForTask(scope, taskId, timeoutMs);
       if (Option.isSome(waited) && isTerminalTaskStatus(waited.value.status)) {
-        return waited.value;
+        return yield* retryOnFallback(waited.value, timeoutMs);
       }
       // An incomplete wait gives up delivery: upgrade so a later terminal
       // wakes the parent even mid-turn.

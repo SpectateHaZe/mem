@@ -23,6 +23,7 @@ import { ThreadDetailsLowUsage } from "./ThreadDetailsLowUsage";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 import { ThreadAutomationsPanel } from "./ThreadAutomationsPanel";
 import { ThreadRelationshipsPanel } from "./ThreadRelationshipsControl";
+import { SubagentProgressPanel } from "./SubagentProgressPanel";
 import { ThreadServersPanel } from "./ThreadServersPanel";
 import {
   ThreadDetailsContext,
@@ -246,6 +247,13 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
 
               {density === "full" && !props.draftId && visible.automations ? (
                 <ThreadAutomationsPanel
+                  environmentId={props.environmentId}
+                  threadId={props.threadId}
+                />
+              ) : null}
+
+              {density === "full" && !props.draftId ? (
+                <SubagentProgressPanel
                   environmentId={props.environmentId}
                   threadId={props.threadId}
                 />

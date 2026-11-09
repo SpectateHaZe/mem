@@ -116,3 +116,101 @@ describe("limitRecoveryCommand arming", () => {
     assert.isNull(limitRecoveryCommand(thread, true, nowMs));
   });
 });
+
+const armedThread = (
+  failedAgoMs: number,
+  resetAgoMs: number,
+  overrides: Partial<ProjectionStore.ProjectionLimitRecoveryCandidate> = {},
+): ProjectionStore.ProjectionLimitRecoveryCandidate => {
+  const thread = failedThread(failedAgoMs, resetAgoMs);
+  return {
+    ...thread,
+    ...overrides,
+    limitRecovery: overrides.limitRecovery ?? {
+      runId: thread.latestRunId ?? RunId.make("run:limited"),
+      resetAt: thread.usageLimitResetAt ?? "",
+      autoResume: true,
+    },
+  };
+};
+
+describe("limitRecoveryCommand firing", () => {
+  it("fires one continue message once the reset passes", () => {
+    const command = limitRecoveryCommand(armedThread(6 * HOUR_MS, HOUR_MS), true, nowMs);
+    assert.equal(command?.type, "message.dispatch");
+    assert.isTrue(
+      command?.type === "message.dispatch" &&
+        command.text === "Continue where you left off." &&
+        command.createdBy === "agent" &&
+        command.creationSource === "server" &&
+        command.usageLimitContinuationOfRunId === RunId.make("run:limited"),
+    );
+    // The identity is deterministic, so the command receipt dedupes a
+    // re-delivered sweep decision to exactly one resume per failure.
+    const repeat = limitRecoveryCommand(armedThread(6 * HOUR_MS, HOUR_MS), true, nowMs);
+    assert(
+      repeat?.type === "message.dispatch" &&
+        command?.type === "message.dispatch" &&
+        repeat.commandId === command.commandId &&
+        repeat.messageId === command.messageId,
+    );
+  });
+
+  it("does not fire when the setting was turned off after arming", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS);
+    assert.isNull(limitRecoveryCommand(thread, false, nowMs));
+    assert.isNull(limitRecoveryCommand(thread, false, nowMs, true));
+  });
+
+  it("does not fire a reset that expired while the server was closed for over a day", () => {
+    const thread = armedThread(30 * HOUR_MS, 24 * HOUR_MS + 1);
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+
+  it("fires a reset that expired exactly 24 hours ago", () => {
+    const command = limitRecoveryCommand(armedThread(30 * HOUR_MS, 24 * HOUR_MS), true, nowMs);
+    assert.equal(command?.type, "message.dispatch");
+  });
+
+  it("does not fire a cancelled recovery", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS, {
+      limitRecovery: {
+        runId: RunId.make("run:limited"),
+        resetAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs - HOUR_MS)),
+        autoResume: false,
+      },
+    });
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+
+  it("does not fire a recovery that points at a different failure", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS, {
+      limitRecovery: {
+        runId: RunId.make("run:older"),
+        resetAt: DateTime.formatIso(DateTime.makeUnsafe(nowMs - HOUR_MS)),
+        autoResume: true,
+      },
+    });
+    // A stale recovery re-arms against the current failure instead of firing.
+    assert.equal(limitRecoveryCommand(thread, true, nowMs)?.type, "thread.metadata.update");
+  });
+
+  it("does not arm or fire a failure that is not a usage limit", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS, { lastErrorClass: "provider_error" });
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+
+  it("does not fire an archived thread", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS, {
+      archivedAt: DateTime.makeUnsafe(nowMs - HOUR_MS),
+    });
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+
+  it("does not fire while the thread is snoozed past the reset", () => {
+    const thread = armedThread(6 * HOUR_MS, HOUR_MS, {
+      snoozedUntil: DateTime.makeUnsafe(nowMs + HOUR_MS),
+    });
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+});

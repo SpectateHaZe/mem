@@ -4,6 +4,7 @@ import {
   ProviderDriverKind,
   ProviderInstanceId,
   type ServerProvider,
+  type ServerProviderUsageLimits,
   UsageLimitSourceId,
 } from "@t3tools/contracts";
 import { describe, expect, it } from "vite-plus/test";
@@ -18,9 +19,14 @@ import {
   collectLimitNotices,
   collectLimitPools,
   elapsedShare,
+  evaluateLowUsageWarnings,
   exhaustedUsageWindow,
+  findOpenCodeGoLimits,
+  formatLowUsageWarningToast,
+  gatherUsageWarningAccounts,
   paceOf,
   paceRemainingPercent,
+  remainingPercent,
   usesChatGptSharing,
   resolveNewThreadModelSelection,
 } from "./usageLimits.ts";
@@ -1515,5 +1521,326 @@ describe("ChatGPT sharing presentation", () => {
         auth: { status: "unauthenticated", subscriptionSharing: true },
       }),
     ).toBe(false);
+  });
+});
+
+describe("OpenCode Go windows beside the thread's own provider", () => {
+  const goLimits = (checkedAt: string): ServerProviderUsageLimits => ({
+    checkedAt,
+    windows: [
+      {
+        id: "go_rolling",
+        kind: "session",
+        label: "Go · Session",
+        usedPercent: 70,
+        windowDurationMins: 300,
+        resetsAt: "2026-09-03T14:00:00.000Z",
+      },
+      {
+        id: "go_weekly",
+        kind: "weekly",
+        label: "Go · Weekly",
+        usedPercent: 30,
+        resetsAt: "2026-09-05T14:00:00.000Z",
+      },
+    ],
+  });
+  const goProvider = (overrides: Partial<ServerProvider> = {}) =>
+    provider({
+      instanceId: ProviderInstanceId.make("opencode"),
+      driver: ProviderDriverKind.make("opencode"),
+      usageLimits: goLimits("2026-09-03T11:00:00.000Z"),
+      ...overrides,
+    });
+  const claude = provider({
+    instanceId: ProviderInstanceId.make("claude"),
+    driver: ProviderDriverKind.make("claudeAgent"),
+  });
+
+  it("shows another instance's Go windows on a Claude thread", () => {
+    const group = findOpenCodeGoLimits(claude.instanceId, [claude, goProvider()]);
+    expect(group?.provider.instanceId).toBe("opencode");
+    expect(group?.limits.windows.map((window) => window.id)).toEqual(["go_rolling", "go_weekly"]);
+  });
+
+  it("shows Go windows when no provider is selected", () => {
+    expect(findOpenCodeGoLimits(null, [goProvider()])?.provider.instanceId).toBe("opencode");
+  });
+
+  it("keeps Go windows off the OpenCode instance's own rows", () => {
+    const openCode = goProvider();
+    expect(findOpenCodeGoLimits(openCode.instanceId, [openCode])).toBeNull();
+  });
+
+  it("shows nothing for disabled instances, unreadable limits, or windows without Go data", () => {
+    expect(findOpenCodeGoLimits(null, [goProvider({ enabled: false })])).toBeNull();
+    expect(
+      findOpenCodeGoLimits(null, [
+        goProvider({
+          usageLimits: {
+            checkedAt: "2026-09-03T11:00:00.000Z",
+            windows: [],
+            unavailable: { reason: "unsupported" },
+          },
+        }),
+      ]),
+    ).toBeNull();
+    expect(
+      findOpenCodeGoLimits(null, [
+        goProvider({
+          usageLimits: { checkedAt: "2026-09-03T11:00:00.000Z", windows: [window] },
+        }),
+      ]),
+    ).toBeNull();
+  });
+
+  it("prefers the freshest Go snapshot among instances", () => {
+    const stale = goProvider({
+      instanceId: ProviderInstanceId.make("opencode-stale"),
+      usageLimits: goLimits("2026-09-03T10:00:00.000Z"),
+    });
+    const fresh = goProvider({
+      instanceId: ProviderInstanceId.make("opencode-fresh"),
+      usageLimits: goLimits("2026-09-03T11:30:00.000Z"),
+    });
+    expect(findOpenCodeGoLimits(null, [stale, fresh])?.provider.instanceId).toBe("opencode-fresh");
+    expect(findOpenCodeGoLimits(null, [fresh, stale])?.provider.instanceId).toBe("opencode-fresh");
+  });
+});
+
+describe("low usage warnings", () => {
+  const threshold = 10;
+
+  const lowWindow = {
+    id: "seven_day",
+    kind: "weekly",
+    label: "Weekly",
+    usedPercent: 92,
+    resetsAt: "2026-09-05T14:00:00.000Z",
+  } as const;
+
+  function account(overrides?: Partial<ServerProviderUsageLimits>) {
+    return {
+      id: "codex:primary",
+      driver: ProviderDriverKind.make("codex"),
+      name: "Codex",
+      limits: {
+        checkedAt: "2026-09-03T11:30:00.000Z",
+        windows: [lowWindow],
+        ...overrides,
+      },
+    };
+  }
+
+  it("converts percent used to percent left in the right direction", () => {
+    expect(remainingPercent({ ...lowWindow, usedPercent: 92 })).toBe(8);
+    expect(remainingPercent({ ...lowWindow, usedPercent: 8 })).toBe(92);
+    expect(remainingPercent({ ...lowWindow, usedPercent: 150 })).toBe(0);
+    expect(remainingPercent({ ...lowWindow, usedPercent: -5 })).toBe(100);
+  });
+
+  it("warns when little is left, not when little has been used", () => {
+    // 92% used leaves 8%: below the threshold, so it warns.
+    const spent = evaluateLowUsageWarnings({
+      accounts: [account()],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(spent.warnings).toHaveLength(1);
+    expect(spent.warnings[0]).toMatchObject({
+      name: "Codex",
+      windowLabel: "Weekly",
+      remainingPercent: 8,
+      resetsAtMs: Date.parse("2026-09-05T14:00:00.000Z"),
+    });
+
+    // 8% used leaves 92%: the same figure in the other direction must not warn.
+    const fresh = account();
+    const barelyTouched = evaluateLowUsageWarnings({
+      accounts: [
+        { ...fresh, limits: { ...fresh.limits, windows: [{ ...lowWindow, usedPercent: 8 }] } },
+      ],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(barelyTouched.warnings).toHaveLength(0);
+  });
+
+  it("fires once per provider, window, and reset period", () => {
+    const first = evaluateLowUsageWarnings({
+      accounts: [account()],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(first.warnings).toHaveLength(1);
+    const later = evaluateLowUsageWarnings({
+      accounts: [account()],
+      thresholdPercent: threshold,
+      now,
+      warned: first.warned,
+    });
+    expect(later.warnings).toHaveLength(0);
+    expect(later.warned).toEqual(first.warned);
+  });
+
+  it("re-arms after the window resets and runs low again", () => {
+    const first = evaluateLowUsageWarnings({
+      accounts: [account()],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(first.warnings).toHaveLength(1);
+
+    const afterReset = now + 3 * 24 * 60 * 60 * 1000;
+    const nextWindow = {
+      ...lowWindow,
+      resetsAt: "2026-09-12T14:00:00.000Z",
+    } as const;
+    const rearmed = evaluateLowUsageWarnings({
+      accounts: [account({ windows: [nextWindow] })],
+      thresholdPercent: threshold,
+      now: afterReset,
+      warned: first.warned,
+    });
+    expect(rearmed.warnings).toHaveLength(1);
+    expect(rearmed.warnings[0]?.resetsAtMs).toBe(Date.parse("2026-09-12T14:00:00.000Z"));
+    // The same key moves to the new period; the stale period is gone.
+    const key = Object.keys(first.warned)[0]!;
+    expect(rearmed.warned[key]).toBe("iso:2026-09-12T14:00:00.000Z");
+  });
+
+  it("warns once per day when the reset time is missing", () => {
+    const noResetWindow = {
+      id: lowWindow.id,
+      kind: lowWindow.kind,
+      label: lowWindow.label,
+      usedPercent: lowWindow.usedPercent,
+    } as const;
+    const constant = account({ windows: [noResetWindow] });
+    const first = evaluateLowUsageWarnings({
+      accounts: [constant],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(first.warnings).toHaveLength(1);
+    expect(first.warnings[0]?.resetsAtMs).toBeNull();
+
+    const again = evaluateLowUsageWarnings({
+      accounts: [constant],
+      thresholdPercent: threshold,
+      now,
+      warned: first.warned,
+    });
+    expect(again.warnings).toHaveLength(0);
+
+    const nextDay = now + 24 * 60 * 60 * 1000;
+    const nextMorning = evaluateLowUsageWarnings({
+      accounts: [constant],
+      thresholdPercent: threshold,
+      now: nextDay,
+      warned: first.warned,
+    });
+    expect(nextMorning.warnings).toHaveLength(1);
+  });
+
+  it("does not warn from a report that is older than the current reset period", () => {
+    const stale = account();
+    const result = evaluateLowUsageWarnings({
+      accounts: [stale],
+      thresholdPercent: threshold,
+      now: now + 3 * 24 * 60 * 60 * 1000,
+      warned: {},
+    });
+    expect(result.warnings).toHaveLength(0);
+    expect(result.warned).toEqual({});
+  });
+
+  it("takes the threshold comparison at the boundary, at or below what is left", () => {
+    const atBoundaryWindow = { ...lowWindow, usedPercent: 90 } as const;
+    const result = evaluateLowUsageWarnings({
+      accounts: [account({ windows: [atBoundaryWindow] })],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(result.warnings).toHaveLength(1);
+    expect(result.warnings[0]?.remainingPercent).toBe(10);
+  });
+
+  it("mirrors a hub account only once even when it matches a native login", () => {
+    const hubAccount = {
+      id: "cli-1",
+      driver: ProviderDriverKind.make("claudeAgent"),
+      email: "shared@example.com",
+      usageLimits: account().limits,
+    };
+    const providers = [
+      provider({
+        instanceId: ProviderInstanceId.make("claude"),
+        driver: ProviderDriverKind.make("claudeAgent"),
+        auth: { status: "authenticated", email: "shared@example.com" },
+        checkedAt: "2026-09-03T11:00:00.000Z",
+        usageLimits: account().limits,
+      }),
+    ];
+    const accounts = gatherUsageWarningAccounts({
+      providers,
+      sources: [
+        {
+          id: UsageLimitSourceId.make("hub"),
+          kind: "cliproxy",
+          label: "Hub",
+          checkedAt: "2026-09-03T11:00:00.000Z",
+          accounts: [hubAccount],
+        },
+      ],
+      now,
+    });
+    expect(accounts).toHaveLength(1);
+    expect(accounts[0]?.name).toBe("shared@example.com");
+  });
+
+  it("does not invent percentages for providers without usage limits", () => {
+    const accounts = gatherUsageWarningAccounts({
+      providers: [
+        provider({
+          instanceId: ProviderInstanceId.make("kiro"),
+          driver: ProviderDriverKind.make("kiro"),
+        }),
+      ],
+      sources: [],
+      now,
+    });
+    expect(accounts).toHaveLength(0);
+  });
+
+  it("formats the toast with the percent left and the local reset time", () => {
+    const toast = formatLowUsageWarningToast({
+      name: "Claude",
+      windowLabel: "Weekly",
+      remainingPercent: 8,
+      resetsAtMs: Date.parse("2026-09-05T14:00:00.000Z"),
+      now,
+      locale: "en-US",
+    });
+    expect(toast).toEqual({
+      title: "Claude Weekly",
+      // Rendered in the test machine's local time; only the shape is pinned here.
+      description: expect.stringMatching(/^8% left, resets [A-Za-z.]{2,4} \d{1,2}:\d{2}$/),
+    });
+
+    const withoutReset = formatLowUsageWarningToast({
+      name: "Codex",
+      windowLabel: "Session",
+      remainingPercent: 5,
+      resetsAtMs: null,
+      now,
+    });
+    expect(withoutReset).toEqual({ title: "Codex Session", description: "5% left" });
   });
 });

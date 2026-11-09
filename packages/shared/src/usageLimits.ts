@@ -884,3 +884,183 @@ export function collectProviderUsageLimits(
   }
   return { createdAt: DateTime.formatIso(DateTime.makeUnsafe(now)), accounts, notices };
 }
+
+/** Another instance's OpenCode Go windows, shown beside a thread's own provider. */
+export function findOpenCodeGoLimits(
+  selectedInstanceId: ProviderInstanceId | null,
+  providers: readonly ServerProvider[],
+): { provider: ServerProvider; limits: ServerProviderUsageLimits } | null {
+  const usable = providers
+    .filter(
+      (provider) =>
+        provider.driver === "opencode" &&
+        provider.instanceId !== selectedInstanceId &&
+        provider.enabled &&
+        provider.installed &&
+        isProviderAvailable(provider),
+    )
+    .flatMap((provider) =>
+      provider.usageLimits !== undefined &&
+      limitsNotice(provider.usageLimits) === null &&
+      provider.usageLimits.windows.some((window) => window.id.startsWith("go_"))
+        ? [{ provider, limits: provider.usageLimits }]
+        : [],
+    );
+  return (
+    [...usable].sort(
+      (left, right) => Date.parse(right.limits.checkedAt) - Date.parse(left.limits.checkedAt),
+    )[0] ?? null
+  );
+}
+
+/** One provider account whose usage is worth warning about, already deduplicated per login. */
+export interface UsageWarningAccount {
+  /** Stable within the driver; together with the driver it identifies one login or instance. */
+  readonly id: string;
+  readonly driver: ServerProvider["driver"];
+  readonly name: string;
+  readonly limits: ServerProviderUsageLimits;
+}
+
+export interface UsageLimitWarning {
+  /** Persists across reloads; one entry per provider login, window, and reset period. */
+  readonly key: string;
+  readonly driver: ServerProvider["driver"];
+  readonly name: string;
+  readonly windowId: string;
+  readonly windowLabel: string;
+  readonly remainingPercent: number;
+  /** Local epoch ms when the window resets, or null when the reset time is unknown. */
+  readonly resetsAtMs: number | null;
+}
+
+/** Store value: the reset period this key was last warned in. */
+type WarnedPeriods = Record<string, string>;
+
+const dayPeriodMarker = (now: number) =>
+  `day:${DateTime.formatIsoDateUtc(DateTime.makeUnsafe(now))}`;
+
+/**
+ * The period the window's report belongs to. A reset already in the past means the
+ * snapshot predates the reset, so there is no period to warn in.
+ */
+function usageWindowPeriod(window: ServerProviderUsageWindow, now: number): string | null {
+  const resetsAt = resetMillis(window);
+  if (resetsAt !== null) return resetsAt > now ? `iso:${window.resetsAt}` : null;
+  // Without a reset time, one warning per calendar day is the closest period we can pin.
+  return dayPeriodMarker(now);
+}
+
+function isLivePeriod(period: string, now: number): boolean {
+  if (period.startsWith("iso:")) {
+    const at = Date.parse(period.slice(4));
+    return Number.isFinite(at) && at > now;
+  }
+  if (period.startsWith("day:")) return period >= dayPeriodMarker(now);
+  return false;
+}
+
+/** Collect one warning-ready account per login, merging hub mirrors of native providers. */
+export function gatherUsageWarningAccounts(input: {
+  readonly providers: readonly ServerProvider[];
+  readonly sources: UsageLimitSourceSnapshots;
+  readonly now: number;
+}): readonly UsageWarningAccount[] {
+  const instances = new Map<ServerProvider["driver"], ServerProvider[]>();
+  for (const provider of providersWithLimits(input.providers)) {
+    const list = instances.get(provider.driver) ?? [];
+    if (list.length === 0) instances.set(provider.driver, list);
+    list.push(provider);
+  }
+  const accounts: Array<UsageWarningAccount> = [];
+  for (const group of instances.values()) {
+    // One call per driver dedupes native instances by login and lets hub rows in.
+    const report = collectProviderUsageLimits(
+      group[0]!.instanceId,
+      input.providers,
+      input.sources,
+      input.now,
+    );
+    if (!report) continue;
+    for (const account of report.accounts) {
+      accounts.push({
+        id: `${account.driver}:${account.email ?? account.id}`,
+        driver: account.driver,
+        name:
+          account.displayName?.trim() ||
+          account.email ||
+          PROVIDER_DISPLAY_NAMES[account.driver] ||
+          String(account.driver),
+        limits: account.limits,
+      });
+    }
+  }
+  return accounts;
+}
+
+export function evaluateLowUsageWarnings(input: {
+  readonly accounts: readonly UsageWarningAccount[];
+  /** Fire when at most this percent of a window remains. */
+  readonly thresholdPercent: number;
+  readonly now: number;
+  readonly warned: Readonly<WarnedPeriods>;
+}): { readonly warnings: readonly UsageLimitWarning[]; readonly warned: WarnedPeriods } {
+  const warned: WarnedPeriods = { ...input.warned };
+  const warnings: Array<UsageLimitWarning> = [];
+  for (const account of input.accounts) {
+    if (limitsNotice(account.limits) !== null) continue;
+    for (const window of account.limits.windows) {
+      const left = remainingPercent(window);
+      if (left > input.thresholdPercent) continue;
+      const period = usageWindowPeriod(window, input.now);
+      // A reset already in the past makes the report stale; do not warn from it.
+      if (period === null) continue;
+      const key = `${account.driver}:${account.id}:${window.id}`;
+      if (warned[key] === period) continue;
+      warned[key] = period;
+      warnings.push({
+        key,
+        driver: account.driver,
+        name: account.name,
+        windowId: window.id,
+        windowLabel: window.label,
+        remainingPercent: left,
+        resetsAtMs: resetMillis(window),
+      });
+    }
+  }
+  for (const key of Object.keys(warned)) {
+    if (!isLivePeriod(warned[key]!, input.now)) delete warned[key];
+  }
+  return { warnings, warned };
+}
+
+/** Formats when the window resets, in the user's local time, e.g. "Fri 14:00". */
+function formatResetLocalDayTime(resetsAtMs: number, locale?: string | undefined): string {
+  return new Intl.DateTimeFormat(locale ?? undefined, {
+    weekday: "short",
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  })
+    .format(resetsAtMs)
+    .replace(/,\s*/, " ");
+}
+
+export function formatLowUsageWarningToast(input: {
+  readonly name: string;
+  readonly windowLabel: string;
+  readonly remainingPercent: number;
+  readonly resetsAtMs: number | null;
+  readonly now: number;
+  readonly locale?: string | undefined;
+}): { readonly title: string; readonly description: string } {
+  const reset =
+    input.resetsAtMs !== null && input.resetsAtMs > input.now
+      ? `, resets ${formatResetLocalDayTime(input.resetsAtMs, input.locale)}`
+      : "";
+  return {
+    title: `${input.name} ${input.windowLabel}`,
+    description: `${input.remainingPercent}% left${reset}`,
+  };
+}

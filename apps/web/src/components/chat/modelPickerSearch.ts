@@ -7,6 +7,10 @@ type ModelPickerSearchableModel = {
   shortName?: string;
   subProvider?: string;
   isFavorite?: boolean;
+  /** Raw model id, like `opencode-go/glm-5.3`. */
+  modelId?: string;
+  /** Heading the model sits under, like `OpenCode Go`. */
+  groupName?: string;
 };
 
 const MODEL_PICKER_FAVORITE_SCORE_BOOST = 24;
@@ -17,6 +21,8 @@ function getModelPickerSearchFields(model: ModelPickerSearchableModel): string[]
     normalizeSearchQuery(model.name),
     ...(model.shortName ? [normalizeSearchQuery(model.shortName)] : []),
     ...(model.subProvider ? [normalizeSearchQuery(model.subProvider)] : []),
+    ...(model.modelId ? [normalizeSearchQuery(model.modelId)] : []),
+    ...(model.groupName ? [normalizeSearchQuery(model.groupName)] : []),
     normalizeSearchQuery(model.driverKind),
     normalizeSearchQuery(model.providerDisplayName),
     buildModelPickerSearchText(model),
@@ -46,7 +52,15 @@ function normalizeModelName(name: string): string {
 
 function buildModelPickerSearchText(model: ModelPickerSearchableModel): string {
   return normalizeSearchQuery(
-    [model.name, model.shortName, model.subProvider, model.driverKind, model.providerDisplayName]
+    [
+      model.name,
+      model.shortName,
+      model.subProvider,
+      model.modelId,
+      model.groupName,
+      model.driverKind,
+      model.providerDisplayName,
+    ]
       .filter((value): value is string => typeof value === "string" && value.length > 0)
       .join(" "),
   );

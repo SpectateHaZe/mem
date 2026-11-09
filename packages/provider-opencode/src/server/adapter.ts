@@ -211,7 +211,7 @@ type TerminalTurnStatus = Extract<
 
 type OpenCodeStepUsage = Pick<
   Extract<OpenCodePart, { readonly type: "step-finish" }>,
-  "id" | "tokens"
+  "id" | "tokens" | "cost"
 >;
 
 interface OpenCodeTurnTokenUsageAccumulator {
@@ -224,6 +224,8 @@ interface OpenCodeTurnTokenUsageAccumulator {
   cacheCreationTokens: number;
   outputTokens: number;
   reasoningTokens: number;
+  /** Provider-reported USD cost of the turn's owned steps; zero when none of them priced it. */
+  costUsd: number;
   hasSubagents: boolean;
   complete: boolean;
 }
@@ -239,10 +241,14 @@ function makeOpenCodeTurnTokenUsageAccumulator(): OpenCodeTurnTokenUsageAccumula
     cacheCreationTokens: 0,
     outputTokens: 0,
     reasoningTokens: 0,
+    costUsd: 0,
     hasSubagents: false,
     complete: true,
   };
 }
+
+const openCodeStepCostUsd = (step: OpenCodeStepUsage): number =>
+  typeof step.cost === "number" && Number.isFinite(step.cost) && step.cost > 0 ? step.cost : 0;
 
 function accumulateOpenCodeStepUsage(
   accumulator: OpenCodeTurnTokenUsageAccumulator,
@@ -255,6 +261,7 @@ function accumulateOpenCodeStepUsage(
   accumulator.cacheCreationTokens += part.tokens.cache.write;
   accumulator.outputTokens += part.tokens.output + part.tokens.reasoning;
   accumulator.reasoningTokens += part.tokens.reasoning;
+  accumulator.costUsd += openCodeStepCostUsd(part);
 }
 
 interface ActiveOpenCodeTurn {
@@ -1174,6 +1181,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
                           cacheCreationTokens: turn.usage.cacheCreationTokens,
                           outputTokens: turn.usage.outputTokens,
                           reasoningTokens: turn.usage.reasoningTokens,
+                          ...(turn.usage.costUsd > 0 ? { costUsd: turn.usage.costUsd } : {}),
                           hasSubagents: turn.usage.hasSubagents,
                         },
                 }),
@@ -2467,7 +2475,7 @@ export const makeOpenCodeAdapterV2 = Effect.fn("makeOpenCodeAdapterV2")(function
               const steps =
                 usage.unresolvedStepsByMessageId.get(part.messageID) ??
                 new Map<string, OpenCodeStepUsage>();
-              steps.set(part.id, { id: part.id, tokens: part.tokens });
+              steps.set(part.id, { id: part.id, tokens: part.tokens, cost: part.cost });
               usage.unresolvedStepsByMessageId.set(part.messageID, steps);
             }
             return;

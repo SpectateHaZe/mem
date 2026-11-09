@@ -1,4 +1,5 @@
 import type { DesktopUpdateActionResult, DesktopUpdateState } from "@t3tools/contracts";
+import { compareSemverVersions } from "@t3tools/shared/semver";
 
 export type DesktopUpdateButtonAction = "download" | "install" | "none";
 
@@ -153,6 +154,34 @@ export function getDesktopUpdateDisabledReason(
   if (managedDenial !== undefined) return managedDenial;
   if (!state || (state.enabled && state.status !== "disabled")) return null;
   return state.message?.trim() || "Automatic updates are not available in this build.";
+}
+
+export interface MacManualUpdateNotice {
+  readonly version: string;
+  readonly releaseUrl: string;
+}
+
+/**
+ * Manual mac updates are installed from the release page because the app cannot self-replace an
+ * unsigned build. The desktop sets `manualUpdate` only for that build, and the platform gate keeps
+ * a stray offer from showing anywhere but macOS.
+ */
+export function getMacManualUpdateNotice(
+  state: Pick<DesktopUpdateState, "status" | "currentVersion" | "manualUpdate"> | null,
+  platform: string | null | undefined,
+): MacManualUpdateNotice | null {
+  if (!state || platform !== "darwin" || state.status !== "disabled") return null;
+  const offer = state.manualUpdate;
+  if (!offer || compareSemverVersions(offer.version, state.currentVersion) <= 0) return null;
+  return offer;
+}
+
+/** Dismissals are remembered per offered version, so a newer release asks again. */
+export const macManualUpdateDismissedKey = (version: string): string =>
+  `t3code:mac-update-dismissed:${version}`;
+
+export function getMacManualUpdateNoticeDescription(notice: MacManualUpdateNotice): string {
+  return `Mem ${notice.version} is available. This macOS build is unsigned, so install the new version by downloading it from the release page.`;
 }
 
 export function getDesktopUpdateIdleTooltip(

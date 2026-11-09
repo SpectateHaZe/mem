@@ -284,7 +284,19 @@ export interface DesktopUpdateState {
   notAppliedVersion?: string;
   /** Off only because a managed policy rules out this channel; switching channels turns it on. */
   channelBlockedByPolicy?: true;
+  /** Set only where the app cannot self-install (unsigned macOS): the newer release to install from its release page. */
+  manualUpdate?: DesktopManualUpdateOffer;
 }
+
+export interface DesktopManualUpdateOffer {
+  version: string;
+  releaseUrl: string;
+}
+
+export const DesktopManualUpdateOfferSchema = Schema.Struct({
+  version: Schema.String,
+  releaseUrl: Schema.String,
+});
 
 export interface DesktopUpdateReleaseNote {
   version: string;
@@ -327,6 +339,7 @@ export const DesktopUpdateStateSchema = Schema.Struct({
   errorContext: Schema.NullOr(Schema.Literals(["check", "download", "install"])),
   canRetry: Schema.Boolean,
   notAppliedVersion: Schema.optionalKey(Schema.String),
+  manualUpdate: Schema.optionalKey(DesktopManualUpdateOfferSchema),
 });
 
 export const DesktopCliCommandStateSchema = Schema.Struct({

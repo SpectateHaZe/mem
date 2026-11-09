@@ -97,6 +97,18 @@ export const SidebarAutoSettleAfterDays = Schema.Number.check(
 export type SidebarAutoSettleAfterDays = typeof SidebarAutoSettleAfterDays.Type;
 const DEFAULT_SIDEBAR_AUTO_SETTLE_AFTER_DAYS: SidebarAutoSettleAfterDays = 7;
 
+export const MIN_USAGE_WARNING_THRESHOLD_PERCENT = 5;
+export const MAX_USAGE_WARNING_THRESHOLD_PERCENT = 50;
+const DEFAULT_USAGE_WARNING_THRESHOLD_PERCENT = 10;
+export const UsageWarningThresholdPercent = Schema.Number.check(
+  Schema.isInt(),
+  Schema.isBetween({
+    minimum: MIN_USAGE_WARNING_THRESHOLD_PERCENT,
+    maximum: MAX_USAGE_WARNING_THRESHOLD_PERCENT,
+  }),
+);
+export type UsageWarningThresholdPercent = typeof UsageWarningThresholdPercent.Type;
+
 export const MAX_SNOOZE_PRESET_MINUTES = 30 * 24 * 60;
 export const MAX_SNOOZE_PRESETS = 8;
 export const SnoozePresetDay = Schema.Literals([
@@ -410,6 +422,9 @@ export const ClientSettingsSchema = Schema.Struct({
   completionChimeCustomSoundName: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
   ),
+  stickerWorkingName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  stickerNeedsYouName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  stickerFinishedName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   diffColorScheme: DiffColorScheme.pipe(
     Schema.withDecodingDefault(Effect.succeed("red-green" as const)),
   ),
@@ -468,6 +483,10 @@ export const ClientSettingsSchema = Schema.Struct({
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_BROWSER_PROFILE_ID)),
   ),
 
+  usageWarningsEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  usageWarningsThresholdPercent: UsageWarningThresholdPercent.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_USAGE_WARNING_THRESHOLD_PERCENT)),
+  ),
   confirmQuit: QuitConfirmationModeSetting.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_QUIT_CONFIRMATION_MODE)),
   ),
@@ -1355,6 +1374,10 @@ export const ServerSettings = Schema.Struct({
   fallbackModelSelection: Schema.NullOr(ModelSelection).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** Where a delegated task retries once when its provider runs out of credit. Null leaves the failure as is. */
+  subagentFallbackModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
   defaultRuntimeMode: RuntimeMode.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_RUNTIME_MODE)),
   ),
@@ -1520,6 +1543,10 @@ export const ServerSettings = Schema.Struct({
   /** Discord Application ID for Rich Presence. Empty turns it off. */
   discordClientId: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed(MEM_DISCORD_CLIENT_ID)),
+  ),
+  /** Discord Rich Presence name of the project the working agents run in. Off keeps project names private. */
+  discordPresenceShowProjectName: Schema.Boolean.pipe(
+    Schema.withDecodingDefault(Effect.succeed(false)),
   ),
   /** What agents in full-access threads may do with the desktop. */
   computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
@@ -1800,6 +1827,7 @@ export const ServerSettingsPatch = Schema.Struct({
   defaultModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   defaultRuntimeMode: Schema.optionalKey(RuntimeMode),
   fallbackModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
+  subagentFallbackModelSelection: Schema.optionalKey(Schema.NullOr(ModelSelection)),
   /** Replaces each project's override set; null removes it. Omitted providerInstances retains its stored value. */
   projectSettingsOverrides: Schema.optionalKey(
     Schema.Record(
@@ -1899,6 +1927,7 @@ export const ServerSettingsPatch = Schema.Struct({
 
   dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
   discordClientId: Schema.optionalKey(Schema.String),
+  discordPresenceShowProjectName: Schema.optionalKey(Schema.Boolean),
   computerUseMode: Schema.optionalKey(ComputerUseMode),
   obscuraEnabled: Schema.optionalKey(Schema.Boolean),
   lowUsageThreads: Schema.optionalKey(Schema.Array(LowUsageThread)),
@@ -1952,6 +1981,9 @@ export const ClientSettingsPatch = Schema.Struct({
   completionChimeEnabled: Schema.optionalKey(Schema.Boolean),
   completionChimeVolume: Schema.optionalKey(CompletionChimeVolume),
   completionChimeCustomSoundName: Schema.optionalKey(Schema.String),
+  stickerWorkingName: Schema.optionalKey(Schema.String),
+  stickerNeedsYouName: Schema.optionalKey(Schema.String),
+  stickerFinishedName: Schema.optionalKey(Schema.String),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),
   effortDisplay: Schema.optionalKey(EffortDisplay),
@@ -1971,6 +2003,8 @@ export const ClientSettingsPatch = Schema.Struct({
   browserAutoShowFloatingPreview: Schema.optionalKey(Schema.Boolean),
   browserProfiles: Schema.optionalKey(Schema.Array(BrowserProfile)),
   browserDefaultProfileId: Schema.optionalKey(BrowserProfileId),
+  usageWarningsEnabled: Schema.optionalKey(Schema.Boolean),
+  usageWarningsThresholdPercent: Schema.optionalKey(UsageWarningThresholdPercent),
   confirmQuit: Schema.optionalKey(QuitConfirmationMode),
   confirmThreadArchive: Schema.optionalKey(Schema.Boolean),
   confirmThreadDelete: Schema.optionalKey(Schema.Boolean),

@@ -1,8 +1,8 @@
 import {
   ANTIGRAVITY_DEFAULT_MODEL,
+  ProviderDriverKind,
   type ProviderInstanceId,
   type EnvironmentId,
-  type ProviderDriverKind,
   type ResolvedKeybindingsConfig,
   MODEL_PICKER_JUMP_KEYBINDING_COMMANDS,
 } from "@t3tools/contracts";
@@ -23,14 +23,22 @@ import {
 } from "react";
 import { ModelListRow } from "./ModelListRow";
 import { ModelPickerSidebar } from "./ModelPickerSidebar";
+import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { getProviderStatusMessage, hasProviderSetup } from "./ProviderStatusBanner";
 import {
   modelPickerLegacySectionKey,
   modelPickerModelKey,
+  isModelPickerGroupRowKey,
+  modelPickerGroupRowKey,
   parseModelPickerLegacySectionKey,
   parseModelPickerModelKey,
 } from "./modelPickerKeys";
 import { rankModelPickerSearch } from "./modelPickerSearch";
+import {
+  openCodeModelSource,
+  openCodeSourceModelFields,
+  planOpenCodeSourceRows,
+} from "./modelPickerGroups";
 import {
   Combobox,
   ComboboxEmpty,
@@ -63,6 +71,7 @@ import {
   shouldShowInstanceBadge,
   type ProviderInstanceEntry,
 } from "../../providerInstances";
+import { providerInstanceInitials } from "@t3tools/client-runtime/state/provider-instance-display";
 import { providerModelKey, sortProviderModelItems } from "../../modelOrdering";
 
 type ModelPickerItem = {
@@ -165,8 +174,32 @@ const EMPTY_MODEL_JUMP_LABELS = new Map<string, string>();
 const MODEL_LIST_ESTIMATED_ITEM_SIZE = 32;
 // Rendered heights in `--spacing` units. Chrome is the search box and list padding, plus a 1px border.
 const ROW_UNITS = 8;
+const GROUP_HEADER_UNITS = 6;
 const ROW_SEPARATOR_UNITS = 0.5;
 const LIST_CHROME_UNITS = 15.5;
+
+function ModelPickerSourceHeader({ label, hasLogo }: { label: string; hasLogo: boolean }) {
+  return (
+    <span className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-muted-foreground">
+      {hasLogo ? (
+        <ProviderInstanceIcon
+          driverKind={ProviderDriverKind.make("opencode")}
+          displayName="OpenCode"
+          className="size-3.5"
+          iconClassName="size-3.5"
+        />
+      ) : (
+        <span
+          aria-hidden
+          className="flex size-3.5 shrink-0 items-center justify-center text-3xs leading-none font-semibold"
+        >
+          {providerInstanceInitials(label)}
+        </span>
+      )}
+      <span className="min-w-0 truncate">{label}</span>
+    </span>
+  );
+}
 
 function ModelListSeparator() {
   return <div className="h-0.5" />;
@@ -595,6 +628,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         previous === undefined ? ROW_UNITS : previous + ROW_SEPARATOR_UNITS + ROW_UNITS,
       );
     };
+    const groupsByTab = new Map<ProviderInstanceId, Set<string>>();
     const tabsWithLegacyRow = new Set<ProviderInstanceId>();
     for (const model of flatModels) {
       if (!matchesLockedProvider(model)) continue;
@@ -604,10 +638,25 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
         tabsWithLegacyRow.add(model.instanceId);
       } else {
         addRow(model.instanceId);
+        if (model.driverKind === "opencode") {
+          let sources = groupsByTab.get(model.instanceId);
+          if (!sources) {
+            sources = new Set();
+            groupsByTab.set(model.instanceId, sources);
+          }
+          sources.add(openCodeModelSource(model.slug) ?? "");
+        }
       }
     }
     for (const instanceId of tabsWithLegacyRow) addRow(instanceId);
-    return Math.max(0, ...unitsByTab.values());
+    let tallest = 0;
+    for (const [tab, units] of unitsByTab) {
+      tallest = Math.max(
+        tallest,
+        units + (tab === "favorites" ? 0 : GROUP_HEADER_UNITS * (groupsByTab.get(tab)?.size ?? 0)),
+      );
+    }
+    return tallest;
   })();
   const lockedDisabledInstanceIds = (() => {
     if (!isLocked) {
@@ -646,14 +695,23 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     if (searchQuery.trim()) {
       const candidates =
         lockedProvider !== null ? result.filter((m) => matchesLockedProvider(m)) : result;
-      return rankModelPickerSearch(candidates, searchQuery, (model) => ({
+      const ranked = rankModelPickerSearch(candidates, searchQuery, (model) => ({
         name: model.name,
         ...(model.shortName ? { shortName: model.shortName } : {}),
         ...(model.subProvider ? { subProvider: model.subProvider } : {}),
+        ...(model.driverKind === "opencode" ? openCodeSourceModelFields(model) : {}),
         driverKind: model.driverKind,
         providerDisplayName: model.instanceDisplayName,
         isFavorite: favoritesSet.has(providerModelKey(model.instanceId, model.slug)),
       }));
+      return [
+        // Identical ids keep showing duplicates otherwise: ranking puts them side by side.
+        ...new Map(
+          ranked.map(
+            (model) => [modelPickerModelKey(model.instanceId, model.slug), model] as const,
+          ),
+        ).values(),
+      ];
     }
 
     if (lockedProvider !== null) {
@@ -710,6 +768,32 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
 
   const selectedEntry =
     selectedInstanceId === "favorites" ? undefined : entryByInstanceId.get(selectedInstanceId);
+  // OpenCode rows span catalog sources (`opencode-go/...`, direct API keys) that bill differently,
+  // so a tab view groups them under labeled sections. Search keeps one flat ranked list.
+  const plannedRows =
+    !isSearching &&
+    selectedInstanceId !== "favorites" &&
+    selectedEntry?.driverKind === "opencode" &&
+    filteredModels.length > 0
+      ? planOpenCodeSourceRows(legacySection ? legacySection.currentModels : filteredModels)
+      : null;
+  const groupRowDataByKey = new Map<string, { label: string; hasLogo: boolean }>();
+  const groupedRowKeys = (() => {
+    if (!plannedRows) {
+      return null;
+    }
+    const keys: string[] = [];
+    for (const row of plannedRows) {
+      if (row.kind === "group") {
+        const rowKey = modelPickerGroupRowKey(`${selectedInstanceId}|${row.source ?? ""}`);
+        keys.push(rowKey);
+        groupRowDataByKey.set(rowKey, { label: row.label, hasLogo: row.hasLogo });
+      } else {
+        keys.push(modelPickerModelKey(row.model.instanceId, row.model.slug));
+      }
+    }
+    return keys;
+  })();
   const providerSetupEntries =
     !isSearching && canOpenProviderSetup
       ? instanceEntries.filter(
@@ -746,9 +830,16 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
     ),
   ])();
   const filteredItemKeys = ((): string[] => {
-    const modelKeys = visibleModels.map((model) =>
-      modelPickerModelKey(model.instanceId, model.slug),
-    );
+    const modelKeys = groupedRowKeys
+      ? legacySection?.isExpanded
+        ? [
+            ...groupedRowKeys,
+            ...legacySection.legacyModels.map((model) =>
+              modelPickerModelKey(model.instanceId, model.slug),
+            ),
+          ]
+        : groupedRowKeys
+      : visibleModels.map((model) => modelPickerModelKey(model.instanceId, model.slug));
     // The toggle trails the list, so expanding it reveals older models above it.
     return legacySection ? [...modelKeys, legacySection.key] : modelKeys;
   })();
@@ -1013,6 +1104,17 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
               itemKeys={filteredItemKeys}
               extraData={modelListExtraData}
               renderItem={({ item: modelKey, index }) => {
+                if (isModelPickerGroupRowKey(modelKey)) {
+                  const group = groupRowDataByKey.get(modelKey);
+                  if (!group) {
+                    return null;
+                  }
+                  return (
+                    <div key={modelKey} className="flex h-6 cursor-default items-center px-1.5">
+                      <ModelPickerSourceHeader label={group.label} hasLogo={group.hasLogo} />
+                    </div>
+                  );
+                }
                 if (legacySection?.key === modelKey) {
                   return (
                     <ComboboxItem
@@ -1056,6 +1158,7 @@ export const ModelPickerContent = memo(function ModelPickerContent(props: {
                     favoriteStarOnHover={selectedInstanceId === "favorites" && !isSearching}
                     showInstanceBadge={badgedInstanceIds.has(model.instanceId)}
                     showNewBadge={model.badge === "new"}
+                    hideSubProvider={plannedRows !== null}
                     unavailable={model.isUnavailable === true}
                     jumpLabel={modelJumpLabelByKey.get(modelKey) ?? null}
                     disabledReason={disabledReason}

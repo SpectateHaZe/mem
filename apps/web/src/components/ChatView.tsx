@@ -40,6 +40,7 @@ import { useStableCallback } from "../hooks/useStableCallback";
 import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
+import { ThreadSticker } from "./chat/ThreadSticker";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -3200,6 +3201,15 @@ export default function ChatView(props: ChatViewProps) {
     return embedded ? null : <NoActiveThreadState />;
   }
 
+  const awaitingUser =
+    activePendingApproval !== null
+      ? "approval"
+      : activePendingUserInput !== null ||
+          // A secret request has no runtime request; the shell carries it.
+          activeThreadShell?.hasPendingUserInput === true
+        ? "input"
+        : null;
+
   const rightPanelContent = activeThreadRef ? (
     <RightPanelSurfaceContent
       surface={renderedRightPanelSurface}
@@ -3422,15 +3432,7 @@ export default function ChatView(props: ChatViewProps) {
                   isWorking={isWorking}
                   runlessWorkActive={runlessWorkStartedAt !== null}
                   isCompacting={isCompacting}
-                  awaitingUser={
-                    activePendingApproval !== null
-                      ? "approval"
-                      : activePendingUserInput !== null ||
-                          // A secret request has no runtime request; the shell carries it.
-                          activeThreadShell?.hasPendingUserInput === true
-                        ? "input"
-                        : null
-                  }
+                  awaitingUser={awaitingUser}
                   awaitingRequestId={
                     activePendingApproval?.requestId ?? activePendingUserInput?.requestId ?? null
                   }
@@ -3500,6 +3502,12 @@ export default function ChatView(props: ChatViewProps) {
                     : { historyControls: threadHistoryControls })}
                 />
               </WorkspaceMutationIdContext>
+
+              <ThreadSticker
+                awaitingUser={awaitingUser}
+                isWorking={isWorking}
+                threadKey={displayedTimelineKey}
+              />
 
               {showScrollToBottom && !isThreadFindActive && (
                 <ScrollToEndButton

@@ -1,11 +1,14 @@
 import { useAtomValue } from "@effect/atom-react";
-import type { EnvironmentId, ThreadId } from "@t3tools/contracts";
+import type { EnvironmentId, ModelSelection, ThreadId } from "@t3tools/contracts";
 import { useState } from "react";
 
 import { useEnvironmentSettings, useUpdateEnvironmentSettings } from "../../hooks/useSettings";
 import { serverEnvironment } from "../../state/server";
-import { modelOptions } from "../rooms/roomLogic";
-import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
+import {
+  deriveProviderInstanceEntries,
+  isProviderInstancePickerReady,
+} from "../../providerInstances";
+import { ProviderModelPicker } from "./ProviderModelPicker";
 import { Switch } from "../ui/switch";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
 
@@ -19,17 +22,27 @@ export function ThreadDetailsLowUsage(props: {
   );
   const updateSettings = useUpdateEnvironmentSettings(props.environmentId);
   const providers = useAtomValue(serverEnvironment.providersValueAtom(props.environmentId));
-  // On but unsaved until a model is picked: without one there is nothing to send subagents to.
+  // On but unsaved: without a model there is nothing to send subagents to, so the picker opens.
   const [choosingModel, setChoosingModel] = useState(false);
 
   const saved = threads.find((thread) => thread.threadId === props.threadId);
-  const options = modelOptions(providers ?? []);
-  const selectedKey = options.find(
-    (option) =>
-      option.modelSelection.instanceId === saved?.subagentModel.instanceId &&
-      option.modelSelection.model === saved?.subagentModel.model,
-  )?.key;
   const others = threads.filter((thread) => thread.threadId !== props.threadId);
+  const entries = deriveProviderInstanceEntries(providers ?? []);
+  const modelOptionsByInstance = new Map(entries.map((entry) => [entry.instanceId, entry.models]));
+  const fallbackEntry = entries.find(isProviderInstancePickerReady) ?? entries[0];
+  const savedInstance =
+    saved && entries.some((entry) => entry.instanceId === saved.subagentModel.instanceId)
+      ? entries.find((entry) => entry.instanceId === saved.subagentModel.instanceId)
+      : undefined;
+  const activeInstanceId = savedInstance?.instanceId ?? fallbackEntry?.instanceId;
+  const savedSelection: ModelSelection | null = savedInstance && saved ? saved.subagentModel : null;
+  const modelLabel = (selection: ModelSelection) => {
+    const option = modelOptionsByInstance
+      .get(selection.instanceId)
+      ?.find((row) => row.slug === selection.model);
+    const name = option?.shortName ?? option?.name ?? selection.model;
+    return `${name}${selection.model.endsWith("-free") ? " (free)" : ""}`;
+  };
 
   return (
     <ThreadDetailsSection headingId="thread-details-low-usage" title="Low usage mode">
@@ -45,35 +58,32 @@ export function ThreadDetailsLowUsage(props: {
             }}
           />
         </label>
-        {saved !== undefined || choosingModel ? (
-          <Select
-            defaultOpen={saved === undefined}
-            value={selectedKey ?? null}
-            onValueChange={(key) => {
-              const option = options.find((candidate) => candidate.key === key);
-              if (!option) return;
+        {activeInstanceId && (saved !== undefined || choosingModel) ? (
+          <ProviderModelPicker
+            environmentId={props.environmentId}
+            activeInstanceId={activeInstanceId}
+            model={savedSelection?.model ?? ""}
+            lockedProvider={null}
+            instanceEntries={entries}
+            modelOptionsByInstance={modelOptionsByInstance}
+            size="sm"
+            triggerLabel={
+              savedSelection ? `Subagent: ${modelLabel(savedSelection)}` : "Choose subagent model"
+            }
+            triggerAriaLabel="Subagent model"
+            triggerClassName="w-full justify-between rounded-lg border bg-background text-sm font-normal sm:text-xs"
+            open={choosingModel}
+            onOpenChange={(open) => setChoosingModel(open)}
+            onInstanceModelChange={(instanceId, model) => {
               setChoosingModel(false);
               updateSettings({
                 lowUsageThreads: [
                   ...others,
-                  { threadId: props.threadId, subagentModel: option.modelSelection },
+                  { threadId: props.threadId, subagentModel: { instanceId, model } },
                 ],
               });
             }}
-          >
-            <SelectTrigger size="sm" aria-label="Subagent model">
-              <SelectValue placeholder="Choose subagent model">
-                {options.find((option) => option.key === selectedKey)?.description}
-              </SelectValue>
-            </SelectTrigger>
-            <SelectPopup>
-              {options.map((option) => (
-                <SelectItem key={option.key} value={option.key}>
-                  {option.description}
-                </SelectItem>
-              ))}
-            </SelectPopup>
-          </Select>
+          />
         ) : null}
       </div>
     </ThreadDetailsSection>

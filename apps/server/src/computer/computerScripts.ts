@@ -1,6 +1,6 @@
 import type { ComputerActInput, ComputerUseMode } from "@t3tools/contracts";
 
-const MAX_SCREENSHOT_WIDTH = 1280;
+export const MAX_SCREENSHOT_WIDTH = 1280;
 
 // DPI awareness comes first so screen sizes and cursor positions are real pixels.
 const PRELUDE = `
@@ -95,7 +95,9 @@ export const actScript = (
 };
 
 export const computerUseRefusal = (mode: ComputerUseMode, platform: string, acting: boolean) => {
-  if (platform !== "win32") return "Computer control only works on Windows hosts for now.";
+  if (platform !== "win32" && platform !== "darwin") {
+    return "Computer control only works on Windows and macOS hosts for now.";
+  }
   if (mode === "off") return "Computer control is turned off in Mem's settings.";
   if (mode === "view" && acting)
     return "Mem's settings allow viewing the screen but not controlling it.";

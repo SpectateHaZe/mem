@@ -56,6 +56,8 @@ import {
   WindowsDesktopBuildPrerequisitesMissingError,
   WindowsPackagedPayloadValidationError,
   stageCursorSdkPlatformPackages,
+  OPENCODE_LICENSE_FILE_NAME,
+  OPENCODE_RESOURCE_DIR_NAME,
   WINDOWS_PACKAGED_PAYLOAD_FILE_LIMIT,
   WINDOWS_SERVER_ASAR_IGNORE_GLOBS,
   WINDOWS_SERVER_ASAR_RESOURCE,
@@ -65,6 +67,7 @@ import {
   WSL_RUNTIME_ARCHIVE_NAME,
   wslRuntimeArchiveStem,
 } from "./build-desktop-artifact.ts";
+import { resolveOpenCodeBundleAsset } from "./lib/opencode-bundle.ts";
 import {
   ReleasePackageManifestError,
   releasePackageFiles,
@@ -170,6 +173,20 @@ const makeWindowsPayloadFixture = Effect.fn("test.makeWindowsPayloadFixture")(fu
     path.join(resourcesDir, "resource-monitor/t3-resource-monitor.exe"),
     "monitor",
   );
+  const targetArch = input.targetArch ?? "x64";
+  if (resolveOpenCodeBundleAsset({ platform: "win", arch: targetArch }) !== undefined) {
+    yield* fs.makeDirectory(path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME), {
+      recursive: true,
+    });
+    yield* fs.writeFileString(
+      path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, "opencode.exe"),
+      "opencode binary",
+    );
+    yield* fs.writeFileString(
+      path.join(resourcesDir, OPENCODE_RESOURCE_DIR_NAME, OPENCODE_LICENSE_FILE_NAME),
+      "MIT License",
+    );
+  }
   const appExecutableName = "t3code.exe";
   yield* fs.writeFileString(path.join(packagedAppDir, appExecutableName), "electron");
   yield* fs.writeFileString(path.join(packagedAppDir, "chrome_crashpad_handler.exe"), "crashpad");
@@ -967,6 +984,34 @@ it.layer(NodeServices.layer)("build-desktop-artifact", (it) => {
           assert.equal(result.packagedAppDir, fixture.packagedAppDir);
         }),
       ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
+  );
+
+  it.effect("rejects a packaged Windows payload missing the bundled OpenCode binary", () =>
+    Effect.scoped(
+      Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const fixture = yield* makeWindowsPayloadFixture({ copyUnpackedNatives: true });
+        yield* fs.remove(
+          path.join(
+            fixture.packagedAppDir,
+            "resources",
+            OPENCODE_RESOURCE_DIR_NAME,
+            "opencode.exe",
+          ),
+        );
+        const error = yield* validateWindowsPackagedPayload({
+          stageDistDir: fixture.stageDistDir,
+          appExecutableName: fixture.appExecutableName,
+          targetArch: "x64",
+          appVersion: WINDOWS_PAYLOAD_FIXTURE_VERSION,
+        }).pipe(Effect.flip);
+
+        assert.instanceOf(error, WindowsPackagedPayloadValidationError);
+        assert.equal(error.reason, "opencode-binary-missing");
+        assert.deepStrictEqual(error.missingFiles, ["opencode/opencode.exe"]);
+      }),
+    ).pipe(Effect.provideService(HostProcess.Platform, "linux")),
   );
 
   it.effect.each(["x64", "arm64"] as const)(

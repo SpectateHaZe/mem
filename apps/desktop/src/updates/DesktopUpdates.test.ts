@@ -20,6 +20,7 @@ import * as DesktopEnvironment from "../app/DesktopEnvironment.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
+import { MacReleaseFeedError } from "./macReleaseCheck.ts";
 import { flushCallbacks, makeHarness } from "./updatesTestHarness.ts";
 
 describe("DesktopUpdates", () => {
@@ -78,6 +79,126 @@ describe("DesktopUpdates", () => {
         assert.equal(state.status, "disabled");
         assert.include(state.message, "not code-signed");
         assert.equal(harness.checkCount(), 0);
+      }),
+    ).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("offers a newer release on an unsigned mac for a manual install", () => {
+    const feedUrls: string[] = [];
+    const harness = makeHarness({
+      macUnsigned: true,
+      appVersion: "0.1.9",
+      appUpdateYml: "provider: github\nowner: SpectateHaZe\nrepo: mem\n",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+      macReleases: (url) =>
+        Effect.sync(() => {
+          feedUrls.push(url);
+          return [
+            { tag_name: "v0.1.11-nightly.20260912.7" },
+            { tag_name: "v0.1.10" },
+            { tag_name: "v0.1.9" },
+          ];
+        }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const result = yield* updates.check("poll");
+        assert.isTrue(result.checked);
+
+        const state = yield* updates.getState;
+        assert.isFalse(state.enabled);
+        assert.equal(state.status, "disabled");
+        assert.deepEqual(state.manualUpdate, {
+          version: "0.1.10",
+          releaseUrl: "https://github.com/SpectateHaZe/mem/releases/tag/v0.1.10",
+        });
+        assert.deepEqual(feedUrls, [
+          "https://api.github.com/repos/SpectateHaZe/mem/releases?per_page=10",
+        ]);
+      }),
+    ).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("offers no mac release at or below the running version", () => {
+    const harness = makeHarness({
+      macUnsigned: true,
+      appVersion: "0.1.10",
+      appUpdateYml: "provider: github\nowner: SpectateHaZe\nrepo: mem\n",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+      macReleases: () => Effect.succeed([{ tag_name: "v0.1.10" }, { tag_name: "v0.1.9" }]),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const result = yield* updates.check("poll");
+        assert.isTrue(result.checked);
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "disabled");
+        assert.equal(state.manualUpdate, undefined);
+      }),
+    ).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("treats a mac feed failure quietly", () => {
+    const harness = makeHarness({
+      macUnsigned: true,
+      appVersion: "0.1.9",
+      appUpdateYml: "provider: github\nowner: SpectateHaZe\nrepo: mem\n",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+      macReleases: () => Effect.fail(new MacReleaseFeedError({ reason: "403 rate limit" })),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        const result = yield* updates.check("poll");
+        assert.isTrue(result.checked);
+
+        const state = yield* updates.getState;
+        assert.equal(state.status, "disabled");
+        assert.include(state.message, "not code-signed");
+        assert.equal(state.errorContext, null);
+        assert.isFalse(state.canRetry);
+        assert.equal(state.manualUpdate, undefined);
+      }),
+    ).pipe(Effect.provide(harness.layer));
+  });
+
+  it.effect("checks the mac feed only on a mac", () => {
+    const feedUrls: string[] = [];
+    const harness = makeHarness({
+      platform: "win32",
+      appVersion: "0.1.9",
+      appUpdateYml: "provider: github\nowner: SpectateHaZe\nrepo: mem\n",
+      env: { T3CODE_DESKTOP_MOCK_UPDATES: "false" },
+      macReleases: (url) =>
+        Effect.sync(() => {
+          feedUrls.push(url);
+          return [{ tag_name: "v0.1.10" }];
+        }),
+    });
+
+    return Effect.scoped(
+      Effect.gen(function* () {
+        const updates = yield* DesktopUpdates.DesktopUpdates;
+        yield* updates.configure;
+
+        yield* updates.check("poll");
+
+        const state = yield* updates.getState;
+        assert.notEqual(state.status, "disabled");
+        assert.equal(state.manualUpdate, undefined);
+        assert.deepEqual(feedUrls, []);
       }),
     ).pipe(Effect.provide(harness.layer));
   });

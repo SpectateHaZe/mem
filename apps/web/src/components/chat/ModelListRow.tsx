@@ -28,6 +28,8 @@ export const ModelListRow = memo(function ModelListRow(props: {
   isSelected: boolean;
   /** Marks this instance apart from another of the same provider. */
   showInstanceBadge: boolean;
+  /** A section header above the rows already names the source. */
+  hideSubProvider?: boolean;
   showNewBadge?: boolean;
   unavailable?: boolean;
   jumpLabel?: string | null;
@@ -76,11 +78,12 @@ export const ModelListRow = memo(function ModelListRow(props: {
           }}
         >
           {getDisplayModelName(model)}
+          {props.slug.endsWith("-free") ? " (free)" : ""}
           {/* The logo is decorative, so name the provider for screen readers. */}
           <span className="sr-only">, {props.providerDisplayName}</span>
         </div>
         {props.isSelected ? <CheckIcon className="size-3.5 shrink-0" aria-hidden="true" /> : null}
-        {props.subProvider ? (
+        {props.subProvider && !props.hideSubProvider ? (
           <span className="min-w-0 shrink truncate text-xs text-muted-foreground/70">
             {props.subProvider}
           </span>

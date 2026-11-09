@@ -8798,6 +8798,274 @@ it.layer(layerTest)("usage-limit recovery", (it) => {
       }
     }),
   );
+
+  const failRunWithLimit = (input: {
+    readonly threadId: ThreadId;
+    readonly run: OrchestrationV2Run;
+    readonly resetInMs: number;
+    readonly label: string;
+  }) =>
+    Effect.gen(function* () {
+      const events = yield* EventSink.EventSinkV2;
+      const now = yield* DateTime.now;
+      const resetAt = DateTime.formatIso(DateTime.add(now, { milliseconds: input.resetInMs }));
+      yield* events.write({
+        events: [
+          {
+            id: EventId.make(`recovery:run:${input.label}`),
+            type: "run.updated",
+            threadId: input.threadId,
+            runId: input.run.id,
+            occurredAt: now,
+            payload: { ...input.run, status: "failed", completedAt: now },
+          },
+          {
+            id: EventId.make(`recovery:error:${input.label}`),
+            type: "turn-item.updated",
+            threadId: input.threadId,
+            occurredAt: now,
+            payload: {
+              id: TurnItemId.make(`recovery:error:${input.label}`),
+              type: "error",
+              threadId: input.threadId,
+              runId: input.run.id,
+              nodeId: input.run.rootNodeId,
+              providerThreadId: null,
+              providerTurnId: null,
+              nativeItemRef: null,
+              parentItemId: null,
+              ordinal: 2,
+              status: "failed",
+              title: "Usage limit reached",
+              startedAt: now,
+              completedAt: now,
+              updatedAt: now,
+              failure: {
+                class: "usage_limit",
+                message: "Plan limit reached.",
+                code: "usageLimitExceeded",
+                retryable: null,
+                resetAt,
+              },
+            },
+          },
+        ],
+      });
+      return resetAt;
+    });
+
+  const limitedThread = (input: { readonly threadId: ThreadId; readonly resetInMs: number }) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const projectId = ProjectId.make(`${input.threadId}:project`);
+      const now = yield* DateTime.now;
+      yield* seedProject({
+        projectId,
+        title: "Recovery project",
+        workspaceRoot: process.cwd(),
+        defaultModelSelection: modelSelection,
+        createdAt: DateTime.formatIso(now),
+      });
+      yield* orchestrator.dispatch({
+        type: "thread.create",
+        commandId: CommandId.make(`${input.threadId}:create`),
+        threadId: input.threadId,
+        projectId,
+        title: "Limited thread",
+        modelSelection,
+        runtimeMode: "full-access",
+        interactionMode: "default",
+        branch: null,
+        worktreePath: null,
+        createdBy: "user",
+        creationSource: "web",
+      });
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make(`${input.threadId}:message`),
+        threadId: input.threadId,
+        messageId: MessageId.make(`${input.threadId}:message`),
+        text: "Work on this.",
+        attachments: [],
+        dispatchMode: { type: "defer_start" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const run = (yield* orchestrator.getThreadProjection(input.threadId)).runs[0]!;
+      return yield* failRunWithLimit({
+        threadId: input.threadId,
+        run,
+        resetInMs: input.resetInMs,
+        label: `${input.threadId}:seed`,
+      });
+    });
+
+  const shellFor = Effect.fn("test.shellFor")(function* (threadId: ThreadId) {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const shell = (yield* orchestrator.getShellSnapshot()).threads.find(
+      (thread) => thread.id === threadId,
+    );
+    assert.isDefined(shell);
+    return shell!;
+  });
+
+  const armAutoResume = (threadId: ThreadId) =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const shell = yield* shellFor(threadId);
+      const arm = limitRecoveryCommand(shell, true, DateTime.toEpochMillis(yield* DateTime.now));
+      assert(arm?.type === "thread.metadata.update" && arm.limitRecovery != null);
+      yield* orchestrator.autoArmLimitRecovery({
+        commandId: arm.commandId,
+        threadId,
+        limitRecovery: arm.limitRecovery,
+      });
+    });
+
+  const resumeCommandFor = Effect.fn("test.resumeCommandFor")(function* (threadId: ThreadId) {
+    const shell = yield* shellFor(threadId);
+    return limitRecoveryCommand(shell, true, DateTime.toEpochMillis(yield* DateTime.now));
+  });
+
+  it.effect("caps automatic resumes at three until a user message breaks the chain", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("recovery:resume-cap");
+      yield* limitedThread({ threadId, resetInMs: 60_000 });
+      for (let round = 0; round < 3; round++) {
+        yield* armAutoResume(threadId);
+        yield* TestClock.adjust("1 minute");
+        const resume = yield* resumeCommandFor(threadId);
+        assert(resume?.type === "message.dispatch");
+        yield* orchestrator.dispatch(resume);
+        const continuation = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
+        yield* failRunWithLimit({
+          threadId,
+          run: continuation,
+          resetInMs: 60_000,
+          label: `cap:${round}`,
+        });
+      }
+      const projection = yield* orchestrator.getThreadProjection(threadId);
+      assert.lengthOf(projection.runs, 4);
+      assert.deepEqual(
+        projection.runs.map((run) => run.usageLimitContinuationOfRunId ?? null),
+        [null, projection.runs[0]!.id, projection.runs[1]!.id, projection.runs[2]!.id],
+      );
+      // The fourth failure re-arms, but its resume is refused and the recovery disarms.
+      yield* armAutoResume(threadId);
+      yield* TestClock.adjust("1 minute");
+      const blocked = yield* resumeCommandFor(threadId);
+      assert(blocked?.type === "message.dispatch");
+      yield* orchestrator.dispatch(blocked);
+      const after = yield* orchestrator.getThreadProjection(threadId);
+      assert.lengthOf(after.runs, 4);
+      assert.deepInclude(after.thread.limitRecovery, { autoResume: false });
+      // No retry loop: a disarmed recovery stops producing resume commands.
+      assert.isNull(yield* resumeCommandFor(threadId));
+
+      // A user message breaks the chain, so a later limit failure may resume again.
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("recovery:resume-cap:user-message"),
+        threadId,
+        messageId: MessageId.make("recovery:resume-cap:user-message"),
+        text: "Take another pass at this.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      const userRun = (yield* orchestrator.getThreadProjection(threadId)).runs.at(-1)!;
+      yield* failRunWithLimit({
+        threadId,
+        run: userRun,
+        resetInMs: 60_000,
+        label: "cap:user-failure",
+      });
+      yield* armAutoResume(threadId);
+      yield* TestClock.adjust("1 minute");
+      const unblocked = yield* resumeCommandFor(threadId);
+      assert(unblocked?.type === "message.dispatch");
+      assert.notEqual(unblocked.commandId, blocked.commandId);
+      yield* orchestrator.dispatch(unblocked);
+      assert.lengthOf((yield* orchestrator.getThreadProjection(threadId)).runs, 6);
+    }),
+  );
+
+  it.effect("a user message cancels the pending resume", () =>
+    Effect.gen(function* () {
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const threadId = ThreadId.make("recovery:user-message-cancels");
+      yield* limitedThread({ threadId, resetInMs: 60_000 });
+      yield* armAutoResume(threadId);
+      yield* TestClock.adjust("1 minute");
+      const pending = yield* resumeCommandFor(threadId);
+      assert(pending?.type === "message.dispatch");
+      yield* orchestrator.dispatch({
+        type: "message.dispatch",
+        commandId: CommandId.make("recovery:user-message-cancels:user-message"),
+        threadId,
+        messageId: MessageId.make("recovery:user-message-cancels:user-message"),
+        text: "Never mind, do this instead.",
+        attachments: [],
+        dispatchMode: { type: "start_immediately" },
+        createdBy: "user",
+        creationSource: "web",
+      });
+      // The sweep's already-built resume is refused: no continuation run starts.
+      yield* orchestrator.dispatch(pending);
+      assert.lengthOf((yield* orchestrator.getThreadProjection(threadId)).runs, 2);
+      // A fresh sweep decision finds nothing to resume while the user's turn runs.
+      assert.isNull(yield* resumeCommandFor(threadId));
+    }),
+  );
+
+  it.effect(
+    "fires an armed resume after a restart replay unless the reset expired over a day ago",
+    () =>
+      Effect.gen(function* () {
+        const orchestrator = yield* Orchestrator.OrchestratorV2;
+        const replay = yield* ProjectionReplay.ProjectionReplay;
+        const projections = yield* ProjectionStore.ProjectionStoreV2;
+        const freshThreadId = ThreadId.make("recovery:restart-fresh");
+        yield* limitedThread({ threadId: freshThreadId, resetInMs: 60_000 });
+        yield* armAutoResume(freshThreadId);
+        yield* TestClock.adjust("20 minutes");
+        yield* replay.rebuild;
+        const freshCandidate = (yield* projections.getLimitRecoveryCandidates({
+          now: yield* DateTime.now,
+          autoResume: true,
+          snooze: false,
+        })).find((row) => row.id === freshThreadId);
+        assert.isDefined(freshCandidate);
+        const resume = limitRecoveryCommand(
+          freshCandidate!,
+          true,
+          DateTime.toEpochMillis(yield* DateTime.now),
+        );
+        assert(resume?.type === "message.dispatch");
+        yield* orchestrator.dispatch(resume);
+        assert.lengthOf((yield* orchestrator.getThreadProjection(freshThreadId)).runs, 2);
+
+        // The reset expired while the server was closed for over a day: no resume.
+        const staleThreadId = ThreadId.make("recovery:restart-stale");
+        yield* limitedThread({ threadId: staleThreadId, resetInMs: 29 * 3_600_000 });
+        yield* armAutoResume(staleThreadId);
+        yield* TestClock.adjust("54 hours");
+        yield* replay.rebuild;
+        const staleCandidate = (yield* projections.getLimitRecoveryCandidates({
+          now: yield* DateTime.now,
+          autoResume: true,
+          snooze: false,
+        })).find((row) => row.id === staleThreadId);
+        assert.isDefined(staleCandidate);
+        assert.isNull(
+          limitRecoveryCommand(staleCandidate!, true, DateTime.toEpochMillis(yield* DateTime.now)),
+        );
+        assert.lengthOf((yield* orchestrator.getThreadProjection(staleThreadId)).runs, 1);
+      }),
+  );
 });
 
 const queueResumeDisabledInstanceProjectId = ProjectId.make(

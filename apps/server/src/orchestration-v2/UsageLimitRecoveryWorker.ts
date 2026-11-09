@@ -56,7 +56,14 @@ export function limitRecoveryCommand(
   }
   if (
     !recovery.autoResume ||
+    // The setting can flip between arming and the reset; the live setting
+    // decides at fire time.
+    !autoResume ||
     resetMs > nowMs ||
+    // The sweep fires within seconds of the reset, so a reset expired longer
+    // than the arm window means the server was closed past it — too stale to
+    // spend the user's usage unattended.
+    nowMs - resetMs > MAX_OVERDUE_ARM_MS ||
     (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
   )
     return null;

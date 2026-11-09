@@ -36,6 +36,13 @@ import * as ElectronWindow from "../electron/ElectronWindow.ts";
 import * as IpcChannels from "../ipc/channels.ts";
 import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
+import {
+  MacReleaseHttp,
+  githubMacReleasesUrl,
+  githubMacReleaseRepository,
+  macManualUpdateOffer,
+  newestMacReleaseTag,
+} from "./macReleaseCheck.ts";
 import { normalizeDesktopUpdateReleaseNotes } from "./releaseNotes.ts";
 import { desktopUpdateChannelOf } from "@t3tools/shared/cliRelease";
 import { compareSemverVersions } from "@t3tools/shared/semver";
@@ -393,6 +400,7 @@ export const make = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
   const desktopSettings = yield* DesktopAppSettings.DesktopAppSettings;
   const policy = yield* DesktopUpdatePolicy.DesktopUpdatePolicy;
+  const macReleaseHttp = yield* MacReleaseHttp;
   // Any user can set the mock flag, so it never replaces an administrator's update source.
   const mockUpdates = config.mockUpdates && policy.message === null;
 
@@ -485,6 +493,16 @@ export const make = Effect.gen(function* () {
           )
       : false;
 
+  // An unsigned mac build cannot install its own release, so it still learns about newer
+  // releases from the GitHub feed and offers them for a manual download. Mirrors and
+  // administrator feeds replace that source, so they get no offer.
+  const checkMacReleases =
+    isUnsignedMac &&
+    policy.mode !== "off" &&
+    !config.disableAutoUpdate &&
+    !mockUpdates &&
+    policy.feedUrl === undefined;
+
   const hasUpdateFeedConfig = Ref.get(appUpdateYmlConfigRef).pipe(
     Effect.map(
       (appUpdateYmlConfig) =>
@@ -564,6 +582,52 @@ export const make = Effect.gen(function* () {
     });
   });
 
+  const checkUnsignedMacRelease = Effect.fn("desktop.updates.checkUnsignedMacRelease")(function* (
+    reason: string,
+  ) {
+    yield* Effect.annotateCurrentSpan({ reason });
+    const repository = githubMacReleaseRepository(
+      Option.getOrNull(yield* Ref.get(appUpdateYmlConfigRef)),
+    );
+    if (repository === null) return;
+    const state = yield* Ref.get(updateStateRef);
+    if (Option.isSome(channelBlockedReason(state.channel))) return;
+
+    const releases = yield* macReleaseHttp
+      .getReleases(githubMacReleasesUrl(repository))
+      .pipe(Effect.option);
+    if (Option.isNone(releases)) {
+      // Network, rate-limit and feed failures change nothing: the next poller run retries and
+      // no error is surfaced.
+      yield* logUpdaterWarning("The mac release feed could not be read.", { reason });
+      return;
+    }
+
+    const tag = newestMacReleaseTag(releases.value, state.channel);
+    const offer =
+      tag === undefined
+        ? null
+        : macManualUpdateOffer({
+            tag,
+            currentVersion: state.currentVersion,
+            repository,
+          });
+    const unchanged =
+      (offer === null && state.manualUpdate === undefined) ||
+      (offer?.version === state.manualUpdate?.version &&
+        offer?.releaseUrl === state.manualUpdate?.releaseUrl);
+    if (unchanged) return;
+
+    if (offer === null) {
+      const { manualUpdate: _omitted, ...withoutOffer } = state;
+      yield* setState(withoutOffer);
+      yield* logUpdaterInfo("no newer mac release", { reason });
+    } else {
+      yield* setState({ ...state, manualUpdate: offer });
+      yield* logUpdaterInfo("offering a newer mac release", { reason, version: offer.version });
+    }
+  });
+
   const checkForUpdates = Effect.fn("desktop.updates.checkForUpdates")(function* (
     reason: string,
     actionReservation: "acquire" | "held" = "acquire",
@@ -571,9 +635,15 @@ export const make = Effect.gen(function* () {
   ) {
     yield* Effect.annotateCurrentSpan({ reason });
     if (yield* Ref.get(desktopState.quitting)) return false;
-    if (!(yield* Ref.get(updaterConfiguredRef))) return false;
 
     const state = yield* Ref.get(updateStateRef);
+    // The only disabled updater that still checks is the unsigned macOS one; it finds a
+    // newer release for the browser to install instead of one the app installs.
+    if (state.status === "disabled" && checkMacReleases) {
+      yield* checkUnsignedMacRelease(reason);
+      return true;
+    }
+    if (!(yield* Ref.get(updaterConfiguredRef))) return false;
     // A configured updater is disabled only by a channel the managed policy blocks.
     if (state.status === "disabled") return false;
     if (state.status === "downloading") {
@@ -1189,6 +1259,9 @@ export const make = Effect.gen(function* () {
         ),
       );
       if (Option.isSome(disabledReason)) {
+        // The unsigned macOS release pollers run the same cadence as the updater's; they read
+        // the mac feed instead while the updater is off.
+        if (checkMacReleases) yield* startUpdatePollers;
         return;
       }
       yield* Ref.set(updaterConfiguredRef, true);
@@ -1301,12 +1374,6 @@ export const make = Effect.gen(function* () {
       options?: { readonly allowDowngrade?: boolean },
     ) {
       yield* Effect.annotateCurrentSpan({ reason });
-      if (!(yield* Ref.get(updaterConfiguredRef))) {
-        return {
-          checked: false,
-          state: yield* Ref.get(updateStateRef),
-        };
-      }
       const checked = yield* checkForUpdates(reason, "acquire", options?.allowDowngrade === true);
       return {
         checked,

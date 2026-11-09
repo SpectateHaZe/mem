@@ -124,11 +124,42 @@ export function addClaudeLedgerUsage(
       };
 }
 
+/** The SDK result's process-cumulative `total_cost_usd`, or undefined when it did not report one. */
+export function claudeTotalCostUsd(result: {
+  readonly total_cost_usd?: unknown;
+}): number | undefined {
+  const value = result.total_cost_usd;
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+/**
+ * Growth of the process-cumulative `total_cost_usd` since the previous result. Unknown without a
+ * baseline or when a counter went backwards, so a resumed process never re-bills earlier turns.
+ */
+export function claudeCostDelta(
+  previous: number | undefined,
+  current: number | undefined,
+): number | undefined {
+  if (current === undefined) return undefined;
+  if (previous === undefined) return current;
+  return current >= previous ? current - previous : undefined;
+}
+
+/** Steered segments' growth disappears once any segment's growth is unknown, as ledger usage does. */
+export function addClaudeCostUsd(
+  left: number | undefined,
+  right: number | undefined,
+): number | undefined {
+  return left === undefined || right === undefined ? undefined : left + right;
+}
+
 export interface ClaudeTurnObservations {
   // Models on the turn's root assistant messages.
   readonly rootModels?: ReadonlySet<string>;
   // Ledger growth across every result this turn consumed, including steered segments.
   readonly ledger?: ClaudeLedgerUsage | undefined;
+  // Provider-reported `total_cost_usd` growth across every result this turn consumed.
+  readonly costUsd?: number | undefined;
 }
 
 export function normalizeClaudeTurnTokenUsage(
@@ -151,6 +182,7 @@ export function normalizeClaudeTurnTokenUsage(
     ...(typeof result?.local_command === "string" && result.local_command.length > 0
       ? { localCommand: true }
       : {}),
+    ...(observed.costUsd !== undefined ? { costUsd: observed.costUsd } : {}),
   };
   const finalUsage = result?.usage as Record<string, unknown> | undefined;
   const usage = withEarlierSegmentUsage(finalUsage ?? {}, earlierSegmentUsage);

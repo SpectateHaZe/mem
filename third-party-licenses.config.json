@@ -8,6 +8,13 @@
       "noticeFile": "apps/web/src/components/files/office/LICENSE.opencode"
     },
     {
+      "name": "OpenCode CLI",
+      "bundles": ["desktop"],
+      "license": "MIT",
+      "sourceUrl": "https://github.com/anomalyco/opencode",
+      "noticeFile": "apps/desktop/resources/opencode/LICENSE"
+    },
+    {
       "bundles": ["desktop", "web"],
       "license": "MIT",
       "name": "Ionic keyboard assist",

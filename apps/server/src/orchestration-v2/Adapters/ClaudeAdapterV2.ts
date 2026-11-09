@@ -27,10 +27,13 @@ import {
 
 import { isWorkspaceImagePreviewPath } from "@t3tools/shared/filePreview";
 import {
+  addClaudeCostUsd,
   addClaudeLedgerUsage,
+  claudeCostDelta,
   claudeLedgerDelta,
   claudeModelLedger,
   claudeReportedContextWindows,
+  claudeTotalCostUsd,
   normalizeClaudeTurnTokenUsage,
   type ClaudeLedgerUsage,
   type ClaudeModelLedger,
@@ -4390,6 +4393,8 @@ interface ActiveClaudeTurnContext {
   readonly steeredSegmentUsage: Array<SDKResultMessage["usage"]>;
   // Ledger growth of the steered segments; undefined once any segment's growth is unknown.
   steeredLedgerUsage: ClaudeLedgerUsage | undefined;
+  // Cost growth of the steered segments; undefined once any segment's growth is unknown.
+  steeredCostUsd: number | undefined;
   readonly rootModels: Set<string>;
   readonly subagentsByTaskId: Map<string, ActiveClaudeSubagent>;
   readonly subagentsByToolUseId: Map<string, ActiveClaudeSubagent>;
@@ -4451,6 +4456,8 @@ interface ClaudeLiveQueryContext {
   handedOffSubagents: ReadonlySet<ActiveClaudeSubagent>;
   // The SDK's per-process model ledger at the last result; a new process starts at zero.
   modelLedger: ClaudeModelLedger | undefined;
+  // The SDK's per-process cumulative `total_cost_usd` at the last result; a new process resets it.
+  processCostUsd: number | undefined;
   // Per process, not per session: a relative temp dir follows the cwd this CLI
   // was launched in, and a later turn's cwd can differ.
   readonly taskOutputRoot: string | undefined;
@@ -5179,6 +5186,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
         const queryContext = yield* Ref.make<ClaudeLiveQueryContext | null>(null);
         // Wake buffers replay result frames, so ledger growth is measured once on arrival.
         const resultLedgerUsage = new WeakMap<SDKMessage, ClaudeLedgerUsage>();
+        const resultCostUsd = new WeakMap<SDKMessage, number>();
         const resultsReportingNewContextWindow = new WeakSet<SDKMessage>();
         // A worktree handoff changes the project settings even within one session.
         let bypassCache: { cwd: string | null; availability: ClaudeBypassAvailability } | null =
@@ -8164,6 +8172,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                               input.context.steeredLedgerUsage,
                               resultLedgerUsage.get(input.result),
                             ),
+                            costUsd: addClaudeCostUsd(
+                              input.context.steeredCostUsd,
+                              resultCostUsd.get(input.result),
+                            ),
                           }),
                     },
                   ),
@@ -10038,6 +10050,10 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                 context.steeredLedgerUsage,
                 resultLedgerUsage.get(message),
               );
+              context.steeredCostUsd = addClaudeCostUsd(
+                context.steeredCostUsd,
+                resultCostUsd.get(message),
+              );
               return;
             }
             yield* Ref.update(steeredTurns, (current) => {
@@ -11067,6 +11083,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               ),
             ),
             modelLedger: new Map(),
+            processCostUsd: undefined,
             taskOutputRoot: claudeTaskOutputRoot(
               adapterOptions.environment,
               path,
@@ -11115,6 +11132,19 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
                       growth === undefined && context.modelLedger !== undefined
                         ? undefined
                         : ledger;
+                    const totalCostUsd = claudeTotalCostUsd(message);
+                    if (totalCostUsd !== undefined) {
+                      const costDelta = claudeCostDelta(context.processCostUsd, totalCostUsd);
+                      // Zero growth carries no spend; skip it like providers that price nothing.
+                      if (costDelta !== undefined && costDelta > 0) {
+                        resultCostUsd.set(message, costDelta);
+                      }
+                      // A cost that went backwards cannot anchor the next turn's growth.
+                      context.processCostUsd =
+                        costDelta === undefined && context.processCostUsd !== undefined
+                          ? undefined
+                          : totalCostUsd;
+                    }
                     for (const [model, window] of claudeReportedContextWindows(
                       message.modelUsage,
                     )) {
@@ -11275,6 +11305,7 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               compactionFailure: null,
               steeredSegmentUsage: [],
               steeredLedgerUsage: { inputTokens: 0, outputTokens: 0 },
+              steeredCostUsd: 0,
               rootModels: new Set(),
               subagentsByTaskId: new Map(),
               subagentsByToolUseId: new Map(),

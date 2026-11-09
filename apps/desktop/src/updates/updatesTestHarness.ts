@@ -16,6 +16,11 @@ import * as DesktopAppSettings from "../settings/DesktopAppSettings.ts";
 import * as DesktopState from "../app/DesktopState.ts";
 import * as DesktopUpdatePolicy from "./DesktopUpdatePolicy.ts";
 import * as DesktopUpdates from "./DesktopUpdates.ts";
+import {
+  MacReleaseHttp,
+  MacReleaseFeedError,
+  type MacReleaseFeedEntry,
+} from "./macReleaseCheck.ts";
 
 export const flushCallbacks = Effect.yieldNow;
 
@@ -45,6 +50,12 @@ export interface UpdatesHarnessOptions {
   readonly savedChannel?: DesktopAppSettings.DesktopSettings["updateChannel"];
   /** Adds a WSL backend beside the primary, as on a Windows host with WSL enabled. */
   readonly wslBackend?: boolean;
+  /** Serves the packaged `app-update.yml` the mac release feed is read from. */
+  readonly appUpdateYml?: string;
+  /** Answers the mac release feed for an unsigned build; absent stubs refuse any call. */
+  readonly macReleases?: (
+    url: string,
+  ) => Effect.Effect<ReadonlyArray<MacReleaseFeedEntry>, MacReleaseFeedError>;
 }
 
 export function makeHarness(options: UpdatesHarnessOptions = {}) {
@@ -248,6 +259,9 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
       if (options.macUnsigned === true && /(?:^|[\\/])package\.json$/.test(path)) {
         return Effect.succeed(JSON.stringify({ t3codeMacUnsigned: true }));
       }
+      if (options.appUpdateYml !== undefined && /(?:^|[\\/])app-update\.yml$/.test(path)) {
+        return Effect.succeed(options.appUpdateYml);
+      }
       const installRecord = isInstallRecord(path)
         ? (installRecords.get(path) ?? previousInstallRecord)
         : undefined;
@@ -296,6 +310,15 @@ export function makeHarness(options: UpdatesHarnessOptions = {}) {
     ),
     Layer.provideMerge(layerEnvironment),
     Layer.provideMerge(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer)),
+    Layer.provideMerge(
+      Layer.succeed(MacReleaseHttp, {
+        getReleases: Effect.fn("updatesTestHarness.macReleaseHttp.getReleases")((url: string) =>
+          options.macReleases
+            ? options.macReleases(url)
+            : Effect.die("unexpected mac release fetch"),
+        ),
+      }),
+    ),
   );
 
   return {
