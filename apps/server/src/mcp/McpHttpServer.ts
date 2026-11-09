@@ -77,6 +77,8 @@ import {
   ComputerScreenshotToolkit,
 } from "./toolkits/computer/tools.ts";
 import * as DeviceHandlers from "./toolkits/device/handlers.ts";
+import * as ObscuraHandlers from "./toolkits/obscura/handlers.ts";
+import { ObscuraToolkit } from "./toolkits/obscura/tools.ts";
 import {
   DeviceScreenshotTool,
   DeviceScreenshotToolkit,
@@ -1282,6 +1284,7 @@ export const layerTools = Layer.mergeAll(
   layerPullRequestsToolkit,
   layerDeviceToolkit,
   layerComputerToolkit,
+  toolkitRegistration(ObscuraToolkit, ObscuraHandlers.layer),
   layerHtmlToolkit,
 );
 

@@ -505,6 +505,7 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.computerUseMode !== DEFAULT_UNIFIED_SETTINGS.computerUseMode
       ? ["Computer control"]
       : []),
+    ...(settings.obscuraEnabled !== DEFAULT_UNIFIED_SETTINGS.obscuraEnabled ? ["Obscura"] : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
@@ -670,6 +671,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
       discordClientId: DEFAULT_UNIFIED_SETTINGS.discordClientId,
       computerUseMode: DEFAULT_UNIFIED_SETTINGS.computerUseMode,
+      obscuraEnabled: DEFAULT_UNIFIED_SETTINGS.obscuraEnabled,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
@@ -1679,6 +1681,22 @@ export function ThreadsSettingsPanel() {
                 <SelectItem value="off">{COMPUTER_USE_LABELS.off}</SelectItem>
               </SelectPopup>
             </Select>
+          }
+        />
+      </SettingsSection>
+      <SettingsSection id="obscura" title="Obscura">
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("obscura-enabled")}
+          description="Lets agents in full-access threads read web pages with the Obscura headless browser. Downloads about 41 MB the first time an agent uses it."
+          settingKeys={["obscuraEnabled"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["obscuraEnabled"]}
+              checked={settings.obscuraEnabled}
+              onCheckedChange={(checked) => updateSettings({ obscuraEnabled: Boolean(checked) })}
+              aria-label="Enable Obscura"
+            />
           }
         />
       </SettingsSection>

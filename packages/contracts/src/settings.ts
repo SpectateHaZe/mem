@@ -1490,6 +1490,7 @@ export const ServerSettings = Schema.Struct({
   discordClientId: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   /** What agents in full-access threads may do with the desktop. */
   computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
+  obscuraEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1847,6 +1848,7 @@ export const ServerSettingsPatch = Schema.Struct({
   dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
   discordClientId: Schema.optionalKey(Schema.String),
   computerUseMode: Schema.optionalKey(ComputerUseMode),
+  obscuraEnabled: Schema.optionalKey(Schema.Boolean),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

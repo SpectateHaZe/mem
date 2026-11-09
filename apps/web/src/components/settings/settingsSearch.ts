@@ -451,6 +451,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["computer use desktop mouse keyboard screen control screenshot"],
   },
   {
+    id: "obscura-enabled",
+    title: "Obscura",
+    to: "/settings/threads",
+    searchTerms: ["obscura headless browser fetch web page"],
+  },
+  {
     id: "discord-status",
     title: "Discord status",
     to: "/settings/threads",
