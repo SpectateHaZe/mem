@@ -52,7 +52,7 @@ class OpenCodeCredentialReadError extends Schema.TaggedError<OpenCodeCredentialR
   }
 }
 
-const readStoredApiKey = (databasePath: string, integrationId: "opencode" | "opencode-go") =>
+export const readStoredApiKey = (databasePath: string, integrationId: "opencode" | "opencode-go") =>
   Effect.try({
     try: () => {
       const database = new NodeSqlite.DatabaseSync(databasePath, { readOnly: true });

@@ -2,6 +2,7 @@
 import * as NodeFS from "node:fs";
 import * as NodeOS from "node:os";
 import * as NodePath from "node:path";
+import * as NodeSqlite from "node:sqlite";
 
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
@@ -170,6 +171,67 @@ it.layer(layer)("OpenCodeDriver runtime selection", (it) => {
         }),
       );
       assert.deepStrictEqual(serverStarts, ["start"]);
+    }).pipe(Effect.scoped),
+  );
+
+  it.effect("lends the user's OpenCode Go key to Mem's own data folder", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const home = yield* fs.makeTempDirectoryScoped();
+      const databaseDirectory = NodePath.join(home, ".local", "share", "opencode");
+      yield* fs.makeDirectory(databaseDirectory, { recursive: true });
+      const database = new NodeSqlite.DatabaseSync(NodePath.join(databaseDirectory, "opencode.db"));
+      try {
+        database.exec(
+          "CREATE TABLE credential (id text PRIMARY KEY, integration_id text, value text, active integer, time_created integer, time_updated integer)",
+        );
+        database
+          .prepare("INSERT INTO credential VALUES (?, ?, ?, ?, ?, ?)")
+          .run(
+            "cred_go",
+            "opencode-go",
+            JSON.stringify({ type: "key", key: "go-test-key" }),
+            1,
+            1,
+            1,
+          );
+      } finally {
+        database.close();
+      }
+
+      const environments: Array<NodeJS.ProcessEnv | undefined> = [];
+      const runtime = {
+        ...openCode2Runtime,
+        startOpenCodeServerProcess: (input: { readonly environment?: NodeJS.ProcessEnv }) =>
+          Effect.sync(() => environments.push(input.environment)).pipe(
+            Effect.andThen(reachedServer("start")),
+          ),
+      } as unknown as OpenCodeRuntime.OpenCodeRuntime["Service"];
+      const usageHttp = HttpClient.make((request) =>
+        Effect.succeed(HttpClientResponse.fromWeb(request, new Response("{}", { status: 403 }))),
+      );
+      const instance = yield* OpenCodeDriver.create({
+        instanceId: ProviderInstanceId.make("opencode-go-key"),
+        displayName: undefined,
+        environment: [],
+        enabled: true,
+        config: OpenCodeDriver.defaultConfig(),
+      }).pipe(
+        Effect.provideService(OpenCodeRuntime.OpenCodeRuntime, runtime),
+        Effect.provideService(HostProcess.HomeDirectory, home),
+        Effect.provideService(HostProcess.Environment, {
+          ...process.env,
+          XDG_DATA_HOME: undefined,
+        }),
+        Effect.provideService(HttpClient.HttpClient, usageHttp),
+      );
+      yield* Effect.yieldNow;
+      yield* instance.snapshot.refresh;
+
+      assert.isAtLeast(environments.length, 1);
+      assert.isTrue(
+        environments.every((environment) => environment?.OPENCODE_API_KEY === "go-test-key"),
+      );
     }).pipe(Effect.scoped),
   );
 
