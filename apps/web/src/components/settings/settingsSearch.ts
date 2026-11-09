@@ -445,6 +445,12 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset wake recover continue"],
   },
   {
+    id: "computer-use-mode",
+    title: "Computer control",
+    to: "/settings/threads",
+    searchTerms: ["computer use desktop mouse keyboard screen control screenshot"],
+  },
+  {
     id: "discord-status",
     title: "Discord status",
     to: "/settings/threads",

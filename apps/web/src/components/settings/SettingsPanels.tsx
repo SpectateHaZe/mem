@@ -111,6 +111,8 @@ import { useUpdateEverythingRun } from "../sidebar/updateEverythingRun";
 import { awaitsTrackSwitch, channelSwitchLabel } from "../sidebar/updateEverything.logic";
 import { isHostedByThisApp } from "../sidebar/useUpdateEverything";
 
+const COMPUTER_USE_LABELS = { full: "Full control", view: "View only", off: "Off" } as const;
+
 const RESPONSE_STREAMING_MODE_LABELS: Record<ResponseStreamingMode, string> = {
   turn: "Wait for the full response",
   paragraph: "Show finished paragraphs",
@@ -500,6 +502,9 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.discordClientId !== DEFAULT_UNIFIED_SETTINGS.discordClientId
       ? ["Discord status"]
       : []),
+    ...(settings.computerUseMode !== DEFAULT_UNIFIED_SETTINGS.computerUseMode
+      ? ["Computer control"]
+      : []),
     ...(settings.autoResumeLimitedThreads !== DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads
       ? ["Resume after usage limits"]
       : []),
@@ -664,6 +669,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
       discordClientId: DEFAULT_UNIFIED_SETTINGS.discordClientId,
+      computerUseMode: DEFAULT_UNIFIED_SETTINGS.computerUseMode,
       autoResumeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.autoResumeLimitedThreads,
       snoozeLimitedThreads: DEFAULT_UNIFIED_SETTINGS.snoozeLimitedThreads,
       snoozePresets: DEFAULT_UNIFIED_SETTINGS.snoozePresets,
@@ -1649,6 +1655,33 @@ export function ThreadsSettingsPanel() {
         </SettingsSection>
       ) : null}
 
+      <SettingsSection id="computer-control" title="Computer control">
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("computer-use-mode")}
+          description="What agents in full-access threads may do on this Windows desktop. Full control lets them see the screen and use your mouse and keyboard."
+          settingKeys={["computerUseMode"]}
+          control={
+            <Select
+              value={settings.computerUseMode}
+              onValueChange={(value) => {
+                if (value === "full" || value === "view" || value === "off") {
+                  updateSettings({ computerUseMode: value });
+                }
+              }}
+            >
+              <SelectTrigger size="sm" className="w-full sm:w-40" aria-label="Computer control">
+                <SelectValue>{COMPUTER_USE_LABELS[settings.computerUseMode]}</SelectValue>
+              </SelectTrigger>
+              <SelectPopup align="end">
+                <SelectItem value="full">{COMPUTER_USE_LABELS.full}</SelectItem>
+                <SelectItem value="view">{COMPUTER_USE_LABELS.view}</SelectItem>
+                <SelectItem value="off">{COMPUTER_USE_LABELS.off}</SelectItem>
+              </SelectPopup>
+            </Select>
+          }
+        />
+      </SettingsSection>
       <SettingsSection id="discord" title="Discord">
         <SettingsRow
           serverScoped

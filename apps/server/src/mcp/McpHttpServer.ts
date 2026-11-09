@@ -70,6 +70,12 @@ import { WorktreeToolkit } from "./toolkits/worktree/tools.ts";
 import * as WorktreeMcpService from "./WorktreeMcpService.ts";
 import * as PullRequestsHandlers from "./toolkits/pullRequests/handlers.ts";
 import { PullRequestsToolkit } from "./toolkits/pullRequests/tools.ts";
+import * as ComputerHandlers from "./toolkits/computer/handlers.ts";
+import {
+  ComputerActToolkit,
+  ComputerScreenshotTool,
+  ComputerScreenshotToolkit,
+} from "./toolkits/computer/tools.ts";
 import * as DeviceHandlers from "./toolkits/device/handlers.ts";
 import {
   DeviceScreenshotTool,
@@ -801,6 +807,28 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
   );
 });
 
+const registerComputerScreenshot = Effect.fn("McpHttpServer.registerComputerScreenshot")(
+  function* () {
+    const settings = yield* ServerSettings.ServerSettingsService;
+    const threads = yield* ThreadManagementService.ThreadManagementService;
+    const built = yield* decodeAsAdvertised(ComputerScreenshotToolkit);
+    yield* registerImageTool(
+      ComputerScreenshotTool,
+      (payload) =>
+        built
+          .handle("computer_screenshot", payload)
+          .pipe(Stream.unwrap, Stream.run(Sink.last()), Effect.flatMap(Effect.fromOption)),
+      (effect) =>
+        effect.pipe(
+          Effect.provideService(ServerSettings.ServerSettingsService, settings),
+          Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
+        ),
+      "screenshot",
+      (error) => (isOrchestratorMcpFailure(error) ? error.message : "Desktop screenshot failed."),
+    );
+  },
+);
+
 const isOrchestratorMcpFailure = Schema.is(OrchestratorMcpFailure);
 const isDeviceToolError = Schema.is(DeviceToolError);
 
@@ -1207,6 +1235,11 @@ export const layerDeviceToolkit = Layer.mergeAll(
   layerDeviceScreenshotRegistration,
 );
 
+const layerComputerToolkit = Layer.mergeAll(
+  toolkitRegistration(ComputerActToolkit, ComputerHandlers.layerAct),
+  imageToolRegistration(registerComputerScreenshot(), ComputerHandlers.layerScreenshot),
+);
+
 /**
  * `McpServer` for in-process calls, which provide `McpInvocationContext`
  * around `callTool` as the auth middleware does for each /mcp request.
@@ -1248,6 +1281,7 @@ export const layerTools = Layer.mergeAll(
   layerWorktreeToolkitRegistration,
   layerPullRequestsToolkit,
   layerDeviceToolkit,
+  layerComputerToolkit,
   layerHtmlToolkit,
 );
 

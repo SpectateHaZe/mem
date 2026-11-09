@@ -9,6 +9,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Duration from "effect/Duration";
 import * as Schema from "effect/Schema";
+import { ComputerUseMode } from "./computer.ts";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import {
   EnvironmentId,
@@ -1487,6 +1488,8 @@ export const ServerSettings = Schema.Struct({
   ),
   /** Discord Application ID for Rich Presence. Empty turns it off. */
   discordClientId: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  /** What agents in full-access threads may do with the desktop. */
+  computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
 });
 export type ServerSettings = typeof ServerSettings.Type;
 
@@ -1843,6 +1846,7 @@ export const ServerSettingsPatch = Schema.Struct({
 
   dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
   discordClientId: Schema.optionalKey(Schema.String),
+  computerUseMode: Schema.optionalKey(ComputerUseMode),
 });
 export type ServerSettingsPatch = typeof ServerSettingsPatch.Type;
 

@@ -66,6 +66,7 @@ export * from "./previewCapture.ts";
 export * from "./usage.ts";
 export * from "./room.ts";
 export * from "./goalQueue.ts";
+export * from "./computer.ts";
 export * from "./scheduledTask.ts";
 export * from "./worktreeMcp.ts";
 export * from "./resourceTelemetry.ts";
