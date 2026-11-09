@@ -43,6 +43,13 @@ import {
   RoomSendInput,
   RoomSetPausedInput,
 } from "./room.ts";
+import {
+  GoalQueue,
+  QueueAddInput,
+  QueueError,
+  QueueRemoveInput,
+  QueueSetPausedInput,
+} from "./goalQueue.ts";
 import * as Rpc from "effect/rpc/Rpc";
 import * as RpcGroup from "effect/rpc/RpcGroup";
 import * as RpcMiddleware from "effect/rpc/RpcMiddleware";
@@ -558,6 +565,10 @@ export const WS_METHODS = {
   roomsSend: "rooms.send",
   roomsSetPaused: "rooms.setPaused",
   roomsDelete: "rooms.delete",
+  queueSubscribe: "queue.subscribe",
+  queueAdd: "queue.add",
+  queueSetPaused: "queue.setPaused",
+  queueRemove: "queue.remove",
 
   scheduledTasksSubscribe: "scheduledTasks.subscribe",
   scheduledTasksUpsert: "scheduledTasks.upsert",
@@ -1976,6 +1987,31 @@ const WsSubscribeServerLifecycleRpc = Rpc.make(WS_METHODS.subscribeServerLifecyc
   stream: true,
 });
 
+const WsQueueSubscribeRpc = Rpc.make(WS_METHODS.queueSubscribe, {
+  payload: Schema.Struct({}),
+  success: GoalQueue,
+  error: Schema.Union([QueueError, EnvironmentAuthorizationError]),
+  stream: true,
+});
+
+const WsQueueAddRpc = Rpc.make(WS_METHODS.queueAdd, {
+  payload: QueueAddInput,
+  success: GoalQueue,
+  error: Schema.Union([QueueError, EnvironmentAuthorizationError]),
+});
+
+const WsQueueSetPausedRpc = Rpc.make(WS_METHODS.queueSetPaused, {
+  payload: QueueSetPausedInput,
+  success: GoalQueue,
+  error: Schema.Union([QueueError, EnvironmentAuthorizationError]),
+});
+
+const WsQueueRemoveRpc = Rpc.make(WS_METHODS.queueRemove, {
+  payload: QueueRemoveInput,
+  success: GoalQueue,
+  error: Schema.Union([QueueError, EnvironmentAuthorizationError]),
+});
+
 const WsRoomsSubscribeRpc = Rpc.make(WS_METHODS.roomsSubscribe, {
   payload: Schema.Struct({}),
   success: RoomListResult,
@@ -2159,6 +2195,10 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoomsSendRpc,
   WsRoomsSetPausedRpc,
   WsRoomsDeleteRpc,
+  WsQueueSubscribeRpc,
+  WsQueueAddRpc,
+  WsQueueSetPausedRpc,
+  WsQueueRemoveRpc,
   WsScheduledTasksUpsertRpc,
   WsScheduledTasksSetEnabledRpc,
   WsScheduledTasksDeleteRpc,

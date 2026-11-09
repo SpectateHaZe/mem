@@ -15,6 +15,14 @@ export const RoomParticipant = Schema.Struct({
 });
 export type RoomParticipant = typeof RoomParticipant.Type;
 
+const RoomMode = Schema.Literal("lead");
+
+export const RoomHelper = Schema.Struct({
+  label: TrimmedNonEmptyString,
+  modelSelection: ModelSelection,
+});
+export type RoomHelper = typeof RoomHelper.Type;
+
 export const RoomMessage = Schema.Struct({
   speaker: TrimmedNonEmptyString,
   text: Schema.String,
@@ -26,6 +34,9 @@ export const Room = Schema.Struct({
   id: RoomId,
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  /** One lead agent that delegates to `helpers`, instead of agents taking turns. */
+  mode: Schema.optional(RoomMode),
+  helpers: Schema.optional(Schema.Array(RoomHelper)),
   participants: Schema.Array(RoomParticipant),
   transcript: Schema.Array(RoomMessage),
   status: Schema.Literals(["idle", "running", "paused"]),
@@ -48,6 +59,8 @@ const MaxRounds = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 20 })
 export const RoomCreateInput = Schema.Struct({
   projectId: ProjectId,
   title: TrimmedNonEmptyString,
+  /** In lead mode the first participant leads and the rest are its helpers. */
+  mode: Schema.optional(RoomMode),
   participants: Schema.Array(
     Schema.Struct({
       label: TrimmedNonEmptyString,

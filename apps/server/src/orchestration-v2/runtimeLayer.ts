@@ -1,5 +1,6 @@
 import * as WorktreeBranchSync from "./WorktreeBranchSync.ts";
 import * as GuestShareService from "../guest/GuestShareService.ts";
+import * as GoalQueueService from "../rooms/GoalQueueService.ts";
 import * as RoomService from "../rooms/RoomService.ts";
 import * as SpendingCap from "./SpendingCap.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -379,6 +380,16 @@ export const layerProduction = Layer.mergeAll(
   layerManagedProjectFoldersProvided,
   layerThreadLaunchProvided,
   layerScheduledTaskProvided,
+  GoalQueueService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(
+        layerThreadLaunchProvided,
+        layerThreadManagementProvided,
+        layerOrchestratorProvided,
+        ProjectionStore.layer,
+      ),
+    ),
+  ),
   RoomService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(

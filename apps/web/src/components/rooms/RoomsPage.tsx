@@ -5,7 +5,7 @@ import { PauseIcon, PlayIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 
 import { usePrimarySettings } from "../../hooks/useSettings";
-import { useProjects } from "../../state/entities";
+import { useProjects, useThreadShells } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
 import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
@@ -24,6 +24,42 @@ import {
 } from "./roomLogic";
 
 const STATUS_TEXT = { idle: "Finished", running: "Discussing", paused: "Paused" } as const;
+const MODE_TEXT = {
+  discussion: "Group discussion: agents take turns",
+  lead: "Lead agent: one agent runs the others",
+} as const;
+
+function LeadJobs({
+  environmentId,
+  leadThreadId,
+}: {
+  readonly environmentId: EnvironmentId;
+  readonly leadThreadId: Room["participants"][number]["threadId"];
+}) {
+  const jobs = useThreadShells().filter(
+    (thread) =>
+      thread.environmentId === environmentId && thread.lineage.parentThreadId === leadThreadId,
+  );
+  if (jobs.length === 0) return null;
+  return (
+    <ul className="grid gap-2 sm:grid-cols-2">
+      {jobs.map((job) => (
+        <li key={job.id}>
+          <Link
+            to="/$environmentId/$threadId"
+            params={{ environmentId, threadId: job.id }}
+            className="block rounded-md border p-3 hover:bg-muted/50"
+          >
+            <span className="block truncate text-sm font-medium">{job.title}</span>
+            <span className="block truncate text-xs text-muted-foreground">
+              {job.modelSelection.model} · {job.latestRun?.status ?? "queued"}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 function NewRoomForm({
   environmentId,
@@ -42,6 +78,7 @@ function NewRoomForm({
   const [chosenProjectId, setProjectId] = useState<string | null>(null);
   const projectId = chosenProjectId ?? projects[0]?.id ?? "";
   const [maxRounds, setMaxRounds] = useState("3");
+  const [mode, setMode] = useState<"discussion" | "lead">("discussion");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [agents, setAgents] = useState([
@@ -77,6 +114,7 @@ function NewRoomForm({
       input: {
         projectId: projectId as ProjectId,
         title: title.trim(),
+        ...(mode === "lead" ? { mode } : {}),
         participants,
         maxRounds: rounds,
         message: message.trim(),
@@ -115,8 +153,23 @@ function NewRoomForm({
           </SelectPopup>
         </Select>
       </div>
+      <div className="grid gap-1.5">
+        <Label>How they work</Label>
+        <Select
+          value={mode}
+          onValueChange={(value) => setMode(value === "lead" ? "lead" : "discussion")}
+        >
+          <SelectTrigger aria-label="How they work">
+            <SelectValue>{MODE_TEXT[mode]}</SelectValue>
+          </SelectTrigger>
+          <SelectPopup>
+            <SelectItem value="discussion">{MODE_TEXT.discussion}</SelectItem>
+            <SelectItem value="lead">{MODE_TEXT.lead}</SelectItem>
+          </SelectPopup>
+        </Select>
+      </div>
       <div className="grid gap-2">
-        <Label>Agents</Label>
+        <Label>{mode === "lead" ? "Lead agent first, then its helpers" : "Agents"}</Label>
         {agents.map((agent) => (
           <div key={agent.key} className="flex flex-wrap items-center gap-2">
             <div className="min-w-48 flex-1">
@@ -193,15 +246,17 @@ function NewRoomForm({
           </Button>
         </div>
       </div>
-      <div className="grid w-32 gap-1.5">
-        <Label htmlFor="room-rounds">Rounds</Label>
-        <Input
-          id="room-rounds"
-          inputMode="numeric"
-          value={maxRounds}
-          onChange={(event) => setMaxRounds(event.target.value)}
-        />
-      </div>
+      {mode === "lead" ? null : (
+        <div className="grid w-32 gap-1.5">
+          <Label htmlFor="room-rounds">Rounds</Label>
+          <Input
+            id="room-rounds"
+            inputMode="numeric"
+            value={maxRounds}
+            onChange={(event) => setMaxRounds(event.target.value)}
+          />
+        </div>
+      )}
       <div className="grid gap-1.5">
         <Label htmlFor="room-message">First message</Label>
         <Textarea
@@ -312,6 +367,9 @@ function RoomView({
               </div>
             );
           })}
+          {room.mode === "lead" && room.participants[0] ? (
+            <LeadJobs environmentId={environmentId} leadThreadId={room.participants[0].threadId} />
+          ) : null}
           <p className="text-xs text-muted-foreground" role="status">
             {room.note ??
               (speaker && room.status === "running"

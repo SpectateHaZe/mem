@@ -1,4 +1,12 @@
-import type { Room, RoomMessage } from "@t3tools/contracts";
+import type { OrchestrationV2Run, Room, RoomMessage } from "@t3tools/contracts";
+
+export const ENDED_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
+  "completed",
+  "interrupted",
+  "failed",
+  "cancelled",
+  "rolled_back",
+]);
 
 const USER_SPEAKER = "You";
 
@@ -48,6 +56,16 @@ export const addAgentReply = (
   };
 };
 
+const leadPreamble = (room: Room, label: string) => {
+  const helpers = (room.helpers ?? [])
+    .map(
+      (helper) =>
+        `${helper.label} (providerInstanceId "${helper.modelSelection.instanceId}", model "${helper.modelSelection.model}")`,
+    )
+    .join(", ");
+  return `You are ${label}, the lead agent for "${room.title}". Do the judgment-heavy work yourself and hand independent pieces to your helpers with delegate_task, setting target to one of: ${helpers}. When their results arrive, combine them and report back to the user.`;
+};
+
 /** Builds the speaker's next prompt and records what it has now been sent. */
 export const beginTurn = (room: Room, speakerIndex: number) => {
   const speaker = room.participants[speakerIndex]!;
@@ -61,11 +79,12 @@ export const beginTurn = (room: Room, speakerIndex: number) => {
     .filter((message) => message.speaker !== speaker.label)
     .map((message) => `[${message.speaker}]: ${message.text}`);
   const prompt = [
-    speaker.seen === 0
+    speaker.seen === 0 && room.mode === "lead" ? leadPreamble(room, speaker.label) : null,
+    speaker.seen === 0 && room.mode !== "lead"
       ? `You are ${speaker.label} in a group chat titled "${room.title}" with the user and ${others.join(", ")}.${speaker.role ? ` Your role: ${speaker.role}.` : ""} Answer the discussion directly and briefly, disagree when you have a reason to, and write @Name to ask another participant something. Discuss only; do not change files unless the user asks.`
       : null,
     unseen.length > 0 ? unseen.join("\n\n") : "Please continue the discussion.",
-    room.turnsLeft === 1
+    room.turnsLeft === 1 && room.mode !== "lead"
       ? 'This is the last turn. Summarize where the group landed in one line starting with "Decision:", and note any disagreement that remains.'
       : null,
   ]

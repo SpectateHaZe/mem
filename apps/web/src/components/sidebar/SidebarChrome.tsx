@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChartNoAxesColumnIcon,
+  ListTodoIcon,
   MessagesSquareIcon,
   SettingsIcon,
 } from "lucide-react";
@@ -261,6 +262,11 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/rooms" });
   };
 
+  const handleQueueClick = () => {
+    closeMobileSidebar();
+    void navigate({ to: "/queue" });
+  };
+
   const handleBackClick = () => {
     closeMobileSidebar();
     void navigateToMainApp();
@@ -294,6 +300,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Group chats"
             onClick={handleRoomsClick}
           />
+          <SidebarUtilityItem icon={<ListTodoIcon />} label="Queue" onClick={handleQueueClick} />
           <SidebarUtilityItem
             icon={<ChartNoAxesColumnIcon />}
             label="Usage"

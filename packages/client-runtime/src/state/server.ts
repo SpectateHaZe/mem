@@ -1339,6 +1339,22 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:rooms:live",
       tag: WS_METHODS.roomsSubscribe,
     }),
+    queueLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:queue:live",
+      tag: WS_METHODS.queueSubscribe,
+    }),
+    addQueueGoal: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:queue:add",
+      tag: WS_METHODS.queueAdd,
+    }),
+    setQueuePaused: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:queue:set-paused",
+      tag: WS_METHODS.queueSetPaused,
+    }),
+    removeQueueGoal: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:queue:remove",
+      tag: WS_METHODS.queueRemove,
+    }),
     createRoom: createEnvironmentRpcCommand(runtime, {
       label: "environment-data:server:room:create",
       tag: WS_METHODS.roomsCreate,

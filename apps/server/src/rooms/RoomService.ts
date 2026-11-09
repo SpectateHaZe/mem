@@ -35,19 +35,11 @@ import { lastSpentUsd } from "../orchestration-v2/SpendingCapState.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
-import { addAgentReply, addUserMessage, beginTurn } from "./roomModerator.ts";
+import { addAgentReply, addUserMessage, beginTurn, ENDED_RUN_STATUSES } from "./roomModerator.ts";
 
 const RoomsFile = Schema.fromJsonString(Schema.Array(Room));
 const decodeRooms = Schema.decodeUnknownEffect(RoomsFile);
 const encodeRooms = Schema.encodeEffect(RoomsFile);
-
-const ENDED_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
-  "completed",
-  "interrupted",
-  "failed",
-  "cancelled",
-  "rolled_back",
-]);
 
 const roomError = (cause: unknown) =>
   new RoomError({ detail: cause instanceof Error ? cause.message : String(cause) });
@@ -170,12 +162,17 @@ const make = Effect.gen(function* () {
     // shortcut: a message typed straight into an agent's thread mid-turn also ends the turn here.
     const room = [...rooms.values()].find(
       (candidate) =>
-        candidate.status === "running" &&
-        candidate.speakerIndex !== null &&
-        candidate.participants[candidate.speakerIndex]?.threadId === threadId,
+        (candidate.status === "running" &&
+          candidate.speakerIndex !== null &&
+          candidate.participants[candidate.speakerIndex]?.threadId === threadId) ||
+        // Finished helpers wake the lead for further turns after its first reply.
+        (candidate.status === "idle" &&
+          candidate.mode === "lead" &&
+          candidate.participants[0]?.threadId === threadId),
     );
-    if (room === undefined || room.speakerIndex === null) return;
-    const speaker = room.participants[room.speakerIndex]!;
+    if (room === undefined) return;
+    const speakerIndex = room.speakerIndex ?? 0;
+    const speaker = room.participants[speakerIndex]!;
     if (run.status !== "completed") {
       yield* save(pauseWithNote(room, `${speaker.label}'s turn ended early (${run.status}).`));
       return;
@@ -184,7 +181,7 @@ const make = Effect.gen(function* () {
       .getThreadRecords(threadId, ["messages", "turnItems"])
       .pipe(Effect.mapError(roomError));
     const text = subagentResultForRun(records, run).text.trim() || "(no reply)";
-    const replied = addAgentReply(room, room.speakerIndex, text, yield* now);
+    const replied = addAgentReply(room, speakerIndex, text, yield* now);
     yield* save(replied.status === "running" ? yield* startTurn(replied) : replied);
   }, lock.withPermit);
 
@@ -233,7 +230,9 @@ const make = Effect.gen(function* () {
 
     create: Effect.fn("RoomService.create")(function* (input: RoomCreateInput) {
       const roomId = RoomId.make(yield* random.uuidV4());
-      const participants = yield* Effect.forEach(input.participants, (participant) =>
+      const isLead = input.mode === "lead";
+      const agents = isLead ? input.participants.slice(0, 1) : input.participants;
+      const participants = yield* Effect.forEach(agents, (participant) =>
         launcher
           .launch({
             commandId: CommandId.make(`room-launch:${roomId}:${participant.label}`),
@@ -260,12 +259,20 @@ const make = Effect.gen(function* () {
         id: roomId,
         projectId: input.projectId,
         title: input.title,
+        ...(isLead
+          ? {
+              mode: "lead" as const,
+              helpers: input.participants
+                .slice(1)
+                .map(({ label, modelSelection }) => ({ label, modelSelection })),
+            }
+          : {}),
         participants,
         transcript: [],
         status: "idle",
         speakerIndex: null,
         turnsLeft: 0,
-        maxRounds: input.maxRounds,
+        maxRounds: isLead ? 1 : input.maxRounds,
       };
       return yield* save(yield* startTurn(addUserMessage(room, input.message, yield* now)));
     }, lock.withPermit),

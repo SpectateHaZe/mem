@@ -241,6 +241,7 @@ import * as HostResources from "./resourceTelemetry/HostResources.ts";
 import * as AnalyticsService from "./telemetry/AnalyticsService.ts";
 import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
+import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as RoomService from "./rooms/RoomService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
@@ -1477,6 +1478,7 @@ export const layerWsRpc = (
             );
       const usage = yield* UsageService.UsageService;
       const rooms = yield* RoomService.RoomService;
+      const goalQueue = yield* GoalQueueService.GoalQueueService;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -2355,6 +2357,10 @@ export const layerWsRpc = (
         [WS_METHODS.roomsSend]: (input) => rooms.send(input),
         [WS_METHODS.roomsSetPaused]: (input) => rooms.setPaused(input),
         [WS_METHODS.roomsDelete]: (input) => rooms.delete(input),
+        [WS_METHODS.queueSubscribe]: (_input) => goalQueue.subscribe(),
+        [WS_METHODS.queueAdd]: (input) => goalQueue.add(input),
+        [WS_METHODS.queueSetPaused]: (input) => goalQueue.setPaused(input),
+        [WS_METHODS.queueRemove]: (input) => goalQueue.remove(input),
         [WS_METHODS.scheduledTasksSubscribe]: (_input) =>
           scheduledTasks.subscribeList().pipe(Stream.map(withVisibleWebhookUrls)),
         [WS_METHODS.scheduledTasksUpsert]: (input) => scheduledTasks.upsert(input),

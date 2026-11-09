@@ -47,6 +47,19 @@ it("stops after the turn budget and never exceeds it", () => {
   assert.equal(room.turnsLeft, 0);
 });
 
+it("tells a lead agent how to reach its helpers and never asks it to wrap up", () => {
+  const room = {
+    ...makeRoom(),
+    mode: "lead",
+    participants: makeRoom().participants.slice(0, 1),
+    maxRounds: 1,
+    helpers: [{ label: "Cheap", modelSelection: { instanceId: "opencode", model: "free-1" } }],
+  } as unknown as Room;
+  const { prompt } = beginTurn(addUserMessage(room, "Question", "t"), 0);
+  assert.include(prompt, 'providerInstanceId "opencode", model "free-1"');
+  assert.notInclude(prompt, "Decision:");
+});
+
 it("sends each agent only what it has not seen and asks the last speaker to decide", () => {
   let room = addUserMessage(makeRoom(), "Question", "t");
   const first = beginTurn(room, 0);
