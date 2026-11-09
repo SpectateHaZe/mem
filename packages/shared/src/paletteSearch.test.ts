@@ -219,9 +219,9 @@ describe("scoreThreadSearch", () => {
     expect(
       rankTitles("t3code", [
         thread("Fix sidebar lag", { ...busy, projectTitle: "t3code", branch: "t3code/sidebar" }),
-        thread("T3 Code vs Gemini Token Volume", { projectTitle: "slophouse" }),
+        thread("Mem vs Gemini Token Volume", { projectTitle: "slophouse" }),
       ])[0],
-    ).toBe("T3 Code vs Gemini Token Volume");
+    ).toBe("Mem vs Gemini Token Volume");
   });
 
   it("matches pull request numbers, branches, and projects with every token somewhere", () => {
@@ -360,7 +360,7 @@ describe("scoreThreadSearch beyond Latin text and titles", () => {
     // Short words before a mere prefix are a coincidence.
     expect(rankTitles("inth", [thread("Show skill names in thread overview")])).toEqual([]);
     expect(rankTitles("tos", [thread("Move Client State to Server")])).toEqual([]);
-    expect(rankTitles("t3co", [thread("T3 Code vs Gemini")])).toEqual(["T3 Code vs Gemini"]);
+    expect(rankTitles("t3co", [thread("Mem vs Gemini")])).toEqual(["Mem vs Gemini"]);
     expect(rankTitles('"sidebar lag"', [thread("Fix sidebar lag")])).toEqual(["Fix sidebar lag"]);
     // A pasted query with a separate accent mark matches the composed title.
     expect(rankTitles("cafe\u0301", [thread("Café menu")])).toEqual(["Café menu"]);
