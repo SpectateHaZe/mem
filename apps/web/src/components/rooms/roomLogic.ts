@@ -1,4 +1,4 @@
-import type { ModelSelection, ServerProvider } from "@t3tools/contracts";
+import type { GoalQueue, ModelSelection, ServerProvider } from "@t3tools/contracts";
 
 export interface RoomModelOption {
   readonly key: string;
@@ -61,4 +61,31 @@ export function speakerColor(speaker: string): string | undefined {
   let hash = 0;
   for (const char of speaker) hash = (hash * 31 + char.charCodeAt(0)) % 360;
   return `hsl(${hash} 65% 62%)`;
+}
+
+type QueueAlert = {
+  readonly type: "success" | "error" | "warning";
+  readonly title: string;
+  readonly description: string;
+};
+
+/** What changed worth telling someone who walked away. The first snapshot is history, not news. */
+export function queueAlerts(previous: GoalQueue | undefined, next: GoalQueue) {
+  if (previous === undefined) return [];
+  const before = new Map(previous.goals.map((goal) => [goal.id, goal.status]));
+  const alerts: QueueAlert[] = next.goals.flatMap((goal): QueueAlert[] => {
+    const was = before.get(goal.id);
+    if (was === undefined || was === goal.status) return [];
+    if (goal.status === "done") {
+      return [{ type: "success", title: "Queue goal finished", description: goal.text }];
+    }
+    if (goal.status === "failed") {
+      return [{ type: "error", title: "Queue goal failed", description: goal.text }];
+    }
+    return [];
+  });
+  if (next.note !== undefined && next.note !== previous.note && next.note !== "Paused.") {
+    alerts.push({ type: "warning", title: "Queue stopped", description: next.note });
+  }
+  return alerts;
 }
