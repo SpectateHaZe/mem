@@ -48,6 +48,8 @@ export interface MemOverseerTaskRecord {
   readonly task: MemTaskState;
   /** Estimated turn spend in USD, carried next to the state so a restart keeps the budget spent. */
   readonly spentUsd: number;
+  /** The last usable verdict Mem reached, so a client can show it without paying for a review. */
+  readonly lastReview: MemReviewSummary | null;
   /** The last instruction actually handed to the session; a restart must never resend it. */
   readonly deliveredInstruction: string | null;
   readonly deliveredAtMs: number | null;
@@ -61,9 +63,15 @@ export interface MemOverseerTaskRecord {
   readonly updatedAtMs: number;
 }
 
+export interface MemReviewSummary {
+  readonly verdict: "accept" | "reject";
+  readonly reasoning: string;
+}
+
 export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskRecord => ({
   task: startTask(threadId),
   spentUsd: 0,
+  lastReview: null,
   deliveredInstruction: null,
   deliveredAtMs: null,
   deliveredEvidenceFingerprint: null,
@@ -90,6 +98,15 @@ const PersistedTaskRecord = Schema.Struct({
   rejections: Schema.Int,
   lastInstruction: Schema.NullOr(Schema.String),
   spentUsd: Schema.Finite,
+  // Optional so a file written before verdicts were persisted still decodes.
+  lastReview: Schema.optionalKey(
+    Schema.NullOr(
+      Schema.Struct({
+        verdict: Schema.Literals(["accept", "reject"]),
+        reasoning: Schema.String,
+      }),
+    ),
+  ),
   deliveredInstruction: Schema.NullOr(Schema.String),
   deliveredAtMs: Schema.NullOr(Schema.Int),
   deliveredEvidenceFingerprint: Schema.NullOr(Schema.String),
@@ -117,6 +134,7 @@ const toPersisted = (record: MemOverseerTaskRecord) => ({
   rejections: record.task.rejections,
   lastInstruction: record.task.lastInstruction,
   spentUsd: record.spentUsd,
+  lastReview: record.lastReview,
   deliveredInstruction: record.deliveredInstruction,
   deliveredAtMs: record.deliveredAtMs,
   deliveredEvidenceFingerprint: record.deliveredEvidenceFingerprint,
@@ -134,6 +152,7 @@ const fromPersisted = (persisted: typeof PersistedTaskRecord.Type): MemOverseerT
     lastInstruction: persisted.lastInstruction,
   },
   spentUsd: persisted.spentUsd,
+  lastReview: persisted.lastReview ?? null,
   deliveredInstruction: persisted.deliveredInstruction,
   deliveredAtMs: persisted.deliveredAtMs,
   deliveredEvidenceFingerprint: persisted.deliveredEvidenceFingerprint,

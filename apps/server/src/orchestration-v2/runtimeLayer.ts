@@ -5,6 +5,7 @@ import * as MemOverseerService from "../overseer/MemOverseerService.ts";
 import * as MemOverseerTaskStore from "../overseer/MemOverseerTaskStore.ts";
 import * as MemReviewer from "../overseer/MemReviewer.ts";
 import * as DiscordPresence from "../presence/DiscordPresence.ts";
+import * as MemMasterThreadService from "../overseer/MemMasterThreadService.ts";
 import * as GoalQueueService from "../rooms/GoalQueueService.ts";
 import * as RoomService from "../rooms/RoomService.ts";
 import * as SubagentReportService from "../rooms/SubagentReportService.ts";
@@ -421,11 +422,17 @@ export const layerProduction = Layer.mergeAll(
     Layer.provide(Layer.merge(layerOrchestratorProvided, layerCommandOutputHubProvided)),
   ),
   DiscordPresence.layer.pipe(Layer.provide(Layer.merge(ProjectionStore.layer, ProjectStore.layer))),
+  MemMasterThreadService.layer.pipe(
+    Layer.provide(
+      Layer.mergeAll(ProjectionStore.layer, ProjectStore.layer, layerThreadManagementProvided),
+    ),
+  ),
   MemOverseerService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         ProjectionStore.layer,
         ProjectStore.layer,
+        layerProjectService,
         layerThreadManagementProvided,
         MemReviewer.layer.pipe(Layer.provide(TextGeneration.layer)),
         MemOverseerTaskStore.layer,

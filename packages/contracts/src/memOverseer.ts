@@ -95,6 +95,120 @@ export const DEFAULT_MEM_OVERSEER_SETTINGS: MemOverseerSettings = Schema.decodeS
   MemOverseerSettings,
 )({});
 
+export const MemThreadLifecycle = Schema.Literals(["none", "in_progress", "complete", "abandoned"]);
+export type MemThreadLifecycle = typeof MemThreadLifecycle.Type;
+
+export const MemWatchedThread = Schema.Struct({
+  threadId: Schema.String,
+  phase: Schema.Literals(["claimed", "awaitingReview", "accepted", "escalated", "parked"]),
+  rejections: Schema.Int,
+  lastInstruction: Schema.NullOr(Schema.String),
+  spendUsd: Schema.Number,
+  pendingApproval: Schema.Boolean,
+});
+export type MemWatchedThread = typeof MemWatchedThread.Type;
+
+export const MemWatchedThreadsResult = Schema.Struct({
+  threads: Schema.Array(MemWatchedThread),
+});
+export type MemWatchedThreadsResult = typeof MemWatchedThreadsResult.Type;
+
+export const MemThreadIdInput = Schema.Struct({
+  threadId: TrimmedString,
+});
+export type MemThreadIdInput = typeof MemThreadIdInput.Type;
+
+/** One review's verdict, in the same shape the tick's reviewer produces. */
+export const MemThreadReview = Schema.Struct({
+  verdict: Schema.Literals(["accept", "reject"]),
+  findings: Schema.Array(Schema.String),
+  reasoning: Schema.String,
+  nextInstruction: Schema.NullOr(Schema.String),
+  /** True only for a usable verdict that accepted the work. */
+  accepted: Schema.Boolean,
+});
+export type MemThreadReview = typeof MemThreadReview.Type;
+
+export const MemSendInstructionInput = Schema.Struct({
+  threadId: TrimmedString,
+  instruction: TrimmedString,
+});
+export type MemSendInstructionInput = typeof MemSendInstructionInput.Type;
+
+/**
+ * `approval_required` means a destructive instruction is queued instead of sent, `cap_reached`
+ * means the budget refused a turn, and `already_delivered` means this text already went out.
+ */
+export const MemSendInstructionResult = Schema.Struct({
+  sent: Schema.Boolean,
+  parked: Schema.optionalKey(
+    Schema.Literals(["approval_required", "cap_reached", "already_delivered"]),
+  ),
+});
+export type MemSendInstructionResult = typeof MemSendInstructionResult.Type;
+
+export const MemSetLifecycleInput = Schema.Struct({
+  threadId: TrimmedString,
+  lifecycle: MemThreadLifecycle,
+});
+export type MemSetLifecycleInput = typeof MemSetLifecycleInput.Type;
+
+export const MemSpawnSessionInput = Schema.Struct({
+  /** The session's first message; also the title when none is given. */
+  prompt: TrimmedString,
+  title: Schema.optionalKey(TrimmedString),
+  modelSelection: ModelSelection,
+});
+export type MemSpawnSessionInput = typeof MemSpawnSessionInput.Type;
+
+export const MemSpawnSessionResult = Schema.Struct({
+  threadId: Schema.String,
+});
+export type MemSpawnSessionResult = typeof MemSpawnSessionResult.Type;
+
+export const MemOverseerRequestOperation = Schema.Literals([
+  "load",
+  "review",
+  "send-instruction",
+  "set-lifecycle",
+  "spawn",
+]);
+export type MemOverseerRequestOperation = typeof MemOverseerRequestOperation.Type;
+
+export const MemOverseerRequestReason = Schema.Literals([
+  "disabled",
+  "failure",
+  "thread_not_found",
+  "no_model",
+  "no_workspace_root",
+  "cap_reached",
+  "spawn_directory_empty",
+  "spawn_project_missing",
+]);
+export type MemOverseerRequestReason = typeof MemOverseerRequestReason.Type;
+
+/** A refused request, never a defect: the caller asked for something the overseer will not do. */
+export class MemOverseerRequestError extends Schema.TaggedError<MemOverseerRequestError>()(
+  "MemOverseerRequestError",
+  {
+    operation: MemOverseerRequestOperation,
+    reason: MemOverseerRequestReason,
+    detail: Schema.String,
+  },
+) {
+  override get message(): string {
+    return `The Mem overseer refused ${this.operation} (${this.reason}): ${this.detail}`;
+  }
+}
+
+/** The last verdict Mem reached for a thread, and the Mem session that owns it when known. */
+export const MemThreadState = Schema.Struct({
+  verdict: Schema.NullOr(Schema.Literals(["accept", "reject"])),
+  reason: Schema.NullOr(Schema.String),
+  masterThreadId: Schema.NullOr(Schema.String),
+});
+export type MemThreadState = typeof MemThreadState.Type;
+
 /** An instruction Mem would not send on its own, waiting for a human answer. */
 export const MemPendingApproval = Schema.Struct({
   approvalId: Schema.String,

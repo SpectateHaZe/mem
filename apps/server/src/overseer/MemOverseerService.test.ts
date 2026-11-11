@@ -131,6 +131,8 @@ const makeHarness = (options: HarnessOptions = {}) => {
       listCalls += 1;
       return Effect.succeed(options.threads ?? [thread()]);
     },
+    readThread: (threadId) =>
+      Effect.succeed((options.threads ?? [thread()]).find((entry) => entry.threadId === threadId)),
     planReview: (target) => {
       plans.push(target);
       return Effect.succeed(options.plan ?? ONE_BATCH);
@@ -155,7 +157,12 @@ const makeHarness = (options: HarnessOptions = {}) => {
       completed.push(target.threadId);
       return Effect.void;
     },
+    setLifecycle: () => Effect.void,
+    findProjectForDirectory: () => Effect.succeed("project-1"),
+    findMasterThreadId: () => Effect.undefined,
+    spawnSession: () => Effect.succeed({ threadId: ThreadId.make("thread-spawned") }),
     store: {
+      all: () => Effect.sync(() => [...store.values()]),
       get: (threadId) => Effect.succeed(store.get(threadId)),
       put: (record) =>
         Effect.sync(() => {

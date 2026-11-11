@@ -3521,6 +3521,7 @@ export default function ChatView(props: ChatViewProps) {
                 awaitingUser={awaitingUser}
                 failed={turnFailed}
                 isWorking={isWorking}
+                thread={activeThreadShell}
                 threadKey={displayedTimelineKey}
               />
 

@@ -25,6 +25,7 @@ import {
   CommandId,
   type GuestMessageId,
   isCompactionCommandMessage,
+  isMemMasterThread,
   isOrchestrationV2WorkActive,
   isProviderNativeSubagentThread,
   MessageId,
@@ -277,6 +278,26 @@ export class OrchestratorSubagentThreadReadOnlyError extends Schema.TaggedError<
   }
 }
 
+/** The environment already has its Mem thread; exactly one may exist. */
+export class OrchestratorMemMasterThreadExistsError extends Schema.TaggedError<OrchestratorMemMasterThreadExistsError>()(
+  "OrchestratorMemMasterThreadExistsError",
+  { commandId: CommandId, threadId: ThreadId },
+) {
+  override get message(): string {
+    return `This environment already has its Mem thread (${this.threadId}).`;
+  }
+}
+
+/** The Mem thread stays where it is: it cannot be deleted, archived, or moved. */
+export class OrchestratorMemMasterThreadImmutableError extends Schema.TaggedError<OrchestratorMemMasterThreadImmutableError>()(
+  "OrchestratorMemMasterThreadImmutableError",
+  { commandId: CommandId, commandType: Schema.String, threadId: ThreadId },
+) {
+  override get message(): string {
+    return "The Mem thread cannot be deleted, archived, or moved.";
+  }
+}
+
 export class OrchestratorThreadAboveModeLimitError extends Schema.TaggedError<OrchestratorThreadAboveModeLimitError>()(
   "OrchestratorThreadAboveModeLimitError",
   {
@@ -368,6 +389,8 @@ export const OrchestratorV2Error = Schema.Union([
   OrchestratorCommandPreviouslyRejectedError,
   OrchestratorCommandIdConflictError,
   OrchestratorSubagentThreadReadOnlyError,
+  OrchestratorMemMasterThreadExistsError,
+  OrchestratorMemMasterThreadImmutableError,
   OrchestratorThreadAboveModeLimitError,
   OrchestratorRuntimeModeAboveCeilingError,
   OrchestratorDailySpendCapError,
@@ -3080,6 +3103,24 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
+    // Only the server stamps this; a client asking for one gets an ordinary thread.
+    const memMaster = command.memMaster === true && command.creationSource === "server";
+    if (memMaster) {
+      const existingMaster = yield* projectionStore
+        .findMemMasterThreadId()
+        .pipe(
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+      if (existingMaster !== null) {
+        return yield* new OrchestratorMemMasterThreadExistsError({
+          commandId: command.commandId,
+          threadId: existingMaster,
+        });
+      }
+    }
+
     const now = yield* DateTime.now;
     const emitEvent = emit(events, command);
     const thread: OrchestrationV2AppThread = {
@@ -3113,6 +3154,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       settledOverride: null,
       settledAt: null,
       lifecycle: "none",
+      ...(memMaster ? { memMaster: true } : {}),
       snoozedUntil: null,
       snoozedAt: null,
       lastVisitedAt: null,
@@ -3417,6 +3459,14 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         cause: `Thread ${command.threadId} is deleted.`,
       });
     }
+    // The Mem thread always stays in the list, so it cannot be archived.
+    if (command.type === "thread.archive" && isMemMasterThread(thread)) {
+      return yield* new OrchestratorMemMasterThreadImmutableError({
+        commandId: command.commandId,
+        commandType: command.type,
+        threadId: command.threadId,
+      });
+    }
     if (
       command.type === "thread.pull-request.watch" &&
       command.watching &&
@@ -3540,7 +3590,11 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
     // Reject reorder after unpin so a raced request cannot restore a cleared pin.
-    if (command.type === "thread.pin.reorder" && thread.pinnedAt == null) {
+    if (
+      command.type === "thread.pin.reorder" &&
+      thread.pinnedAt == null &&
+      !isMemMasterThread(thread)
+    ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
         commandType: command.type,
@@ -3549,7 +3603,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     }
     if (
       command.type === "thread.active.reorder" &&
-      (thread.pinnedAt != null || thread.settledOverride === "settled")
+      (thread.pinnedAt != null || thread.settledOverride === "settled") &&
+      !isMemMasterThread(thread)
     ) {
       return yield* new OrchestratorDispatchError({
         commandId: command.commandId,
@@ -3900,6 +3955,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.pin": {
+          // The Mem thread is out of every ordering: the event is emitted, nothing moves.
+          if (isMemMasterThread(thread)) return thread;
           const alreadyPinned = thread.pinnedAt != null;
           const promotes = thread.settledOverride === "settled" || thread.snoozedUntil != null;
           return {
@@ -3919,6 +3976,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.unpin": {
+          if (isMemMasterThread(thread)) return thread;
           const alreadyUnpinned = thread.pinnedAt == null;
           return {
             ...thread,
@@ -3928,6 +3986,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.pin.reorder": {
+          if (isMemMasterThread(thread)) return thread;
           const keyUnchanged = thread.pinOrderKey === command.orderKey;
           return {
             ...thread,
@@ -3936,6 +3995,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           };
         }
         case "thread.active.reorder": {
+          if (isMemMasterThread(thread)) return thread;
           return {
             ...thread,
             activeOrderKey: command.orderKey,
@@ -13545,6 +13605,21 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         break;
       }
       case "thread.delete": {
+        const master = yield* projectionStore.getThread(command.threadId).pipe(
+          Effect.catchTags({
+            ProjectionStoreThreadNotFoundError: () => Effect.succeed(null),
+          }),
+          Effect.mapError(
+            (cause) => new OrchestratorProjectionError({ threadId: command.threadId, cause }),
+          ),
+        );
+        if (master !== null && isMemMasterThread(master)) {
+          return yield* new OrchestratorMemMasterThreadImmutableError({
+            commandId: command.commandId,
+            commandType: command.type,
+            threadId: command.threadId,
+          });
+        }
         const now = yield* DateTime.now;
         const planDeletion = Effect.fn("Orchestrator.planDeletion")(function* (
           deletion: typeof command,

@@ -2806,6 +2806,16 @@ export const layerWsRpc = (
         [WS_METHODS.memOverseerListApprovals]: (_input) =>
           memOverseer.pendingApprovals().pipe(Effect.map((approvals) => ({ approvals }))),
         [WS_METHODS.memOverseerAnswerApproval]: (input) => memOverseer.answerApproval(input),
+        [WS_METHODS.memOverseerListWatched]: (_input) =>
+          memOverseer.listWatched().pipe(Effect.map((threads) => ({ threads }))),
+        [WS_METHODS.memOverseerThreadState]: (input) => memOverseer.threadState(input.threadId),
+        [WS_METHODS.memOverseerReviewThread]: (input) =>
+          memOverseer.reviewThreadNow(input.threadId),
+        [WS_METHODS.memOverseerSendInstruction]: (input) =>
+          memOverseer.sendInstruction(input.threadId, input.instruction),
+        [WS_METHODS.memOverseerSetLifecycle]: (input) =>
+          memOverseer.setLifecycle(input.threadId, input.lifecycle),
+        [WS_METHODS.memOverseerSpawnSession]: (input) => memOverseer.spawnSession(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

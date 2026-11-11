@@ -7,10 +7,19 @@
 import {
   CommandId,
   MessageId,
+  isMemMasterThread,
   type MemAnswerApprovalInput,
   type MemAnswerApprovalResult,
+  type MemOverseerRequestOperation,
+  type MemOverseerRequestReason,
+  MemOverseerRequestError,
   type MemOverseerSettings,
   type MemPendingApproval,
+  type MemSendInstructionResult,
+  type MemThreadLifecycle,
+  type MemThreadReview,
+  type MemThreadState,
+  type MemWatchedThread,
   type ModelSelection,
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ThreadShell,
@@ -29,6 +38,7 @@ import * as Path from "effect/Path";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SecureRandom from "effect/crypto/SecureRandom";
+import * as Semaphore from "effect/Semaphore";
 
 import { isDestructiveDeletion } from "./MemDestructiveChange.ts";
 import { MemIdleTracker } from "./MemIdleTracker.ts";
@@ -42,6 +52,7 @@ import {
 import {
   reduceTask,
   nextAction,
+  startTask,
   type MemLoopAction,
   type MemTaskState,
 } from "./MemOverseerLoop.ts";
@@ -127,6 +138,7 @@ export interface MemReviewPlan {
 
 /** Structural port so the tests can pass a plain object instead of building the service layers. */
 export interface MemOverseerStateStore {
+  readonly all: () => Effect.Effect<ReadonlyArray<MemOverseerTaskRecord>>;
   readonly get: (threadId: string) => Effect.Effect<MemOverseerTaskRecord | undefined>;
   readonly put: (record: MemOverseerTaskRecord) => Effect.Effect<void>;
   readonly totalSpentUsd: () => Effect.Effect<number>;
@@ -151,6 +163,8 @@ export class MemOverseerFailure extends Schema.TaggedError<MemOverseerFailure>()
       "review",
       "guide",
       "complete",
+      "lifecycle",
+      "spawn",
     ]),
     detail: Schema.String,
     cause: Schema.optional(Schema.Defect()),
@@ -165,6 +179,10 @@ export interface MemOverseerPorts {
   readonly loadSettings: () => Effect.Effect<MemOverseerSettingsSnapshot, MemOverseerFailure>;
   readonly isOwnerAway: (thresholdMinutes: number) => Effect.Effect<boolean, MemOverseerFailure>;
   readonly listThreads: () => Effect.Effect<ReadonlyArray<MemOverseerThread>, MemOverseerFailure>;
+  /** One thread by id, claimed or not, so a request can look at any session the owner names. */
+  readonly readThread: (
+    threadId: string,
+  ) => Effect.Effect<MemOverseerThread | undefined, MemOverseerFailure>;
   readonly planReview: (
     thread: MemOverseerThread,
   ) => Effect.Effect<MemReviewPlan, MemOverseerFailure>;
@@ -176,7 +194,29 @@ export interface MemOverseerPorts {
     instruction: string,
   ) => Effect.Effect<void, MemOverseerFailure>;
   readonly complete: (thread: MemOverseerThread) => Effect.Effect<void, MemOverseerFailure>;
+  readonly setLifecycle: (
+    threadId: string,
+    lifecycle: MemThreadLifecycle,
+  ) => Effect.Effect<void, MemOverseerFailure>;
+  /** The active project rooted at this directory, or none: Mem never invents a project root. */
+  readonly findProjectForDirectory: (
+    directory: string,
+  ) => Effect.Effect<string | undefined, MemOverseerFailure>;
+  /** The environment's single Mem thread, when one exists. */
+  readonly findMasterThreadId: () => Effect.Effect<string | undefined, MemOverseerFailure>;
+  readonly spawnSession: (
+    input: MemOverseerSpawnRequest,
+  ) => Effect.Effect<{ readonly threadId: ThreadId }, MemOverseerFailure>;
   readonly store: MemOverseerStateStore;
+}
+
+/** Everything a spawn needs once the setting has been read; the adapter owns the exact wiring. */
+export interface MemOverseerSpawnRequest {
+  readonly projectId: string;
+  readonly spawnDirectory: string;
+  readonly prompt: string;
+  readonly title: string;
+  readonly modelSelection: ModelSelection;
 }
 
 export interface MemOverseerServiceShape {
@@ -185,6 +225,29 @@ export interface MemOverseerServiceShape {
   readonly answerApproval: (
     input: MemAnswerApprovalInput,
   ) => Effect.Effect<MemAnswerApprovalResult>;
+  readonly listWatched: () => Effect.Effect<
+    ReadonlyArray<MemWatchedThread>,
+    MemOverseerRequestError
+  >;
+  readonly threadState: (
+    threadId: string,
+  ) => Effect.Effect<MemThreadState, MemOverseerRequestError>;
+  readonly reviewThreadNow: (
+    threadId: string,
+  ) => Effect.Effect<MemThreadReview, MemOverseerRequestError>;
+  readonly sendInstruction: (
+    threadId: string,
+    instruction: string,
+  ) => Effect.Effect<MemSendInstructionResult, MemOverseerRequestError>;
+  readonly setLifecycle: (
+    threadId: string,
+    lifecycle: MemThreadLifecycle,
+  ) => Effect.Effect<void, MemOverseerRequestError>;
+  readonly spawnSession: (input: {
+    readonly prompt: string;
+    readonly title?: string | undefined;
+    readonly modelSelection: ModelSelection;
+  }) => Effect.Effect<{ readonly threadId: string }, MemOverseerRequestError>;
 }
 
 /** FNV-1a over the evidence text; short enough to persist, stable across restarts. */
@@ -244,6 +307,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           ...record,
           spentUsd: accrueSpend({ spentUsd: record.spentUsd, actualUsd: usd }).spentUsd,
         };
+
+  /**
+   * One permit for every action that moves a task or spends money, so a chat-driven request and a
+   * tick can never interleave on the same thread. It is held per action rather than per tick, so a
+   * slow review blocks another actor for one action instead of the whole sweep.
+   */
+  const actorLock = Semaphore.makeUnsafe(1);
 
   interface ReviewOutcome {
     readonly type: "reviewed" | "parked";
@@ -481,6 +551,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             deletedLines = plan.deletedLines;
             deletedFiles = plan.deletedFiles;
             state = reduceTask(state, { type: "reviewed", result: outcome.result });
+            record = {
+              ...record,
+              lastReview: {
+                verdict: outcome.result.verdict,
+                reasoning: outcome.result.reasoning,
+              },
+            };
           }
         }
       }
@@ -768,6 +845,420 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     return { outcome: "sent" as const };
   });
 
+  /** A refusal is the only way a request fails: typed, warned about by name, never a defect. */
+  const refuse = (
+    operation: MemOverseerRequestOperation,
+    reason: MemOverseerRequestReason,
+    detail: string,
+  ): Effect.Effect<never, MemOverseerRequestError> =>
+    Effect.logWarning("Mem refused a request.", { operation, reason }).pipe(
+      Effect.andThen(Effect.fail(new MemOverseerRequestError({ operation, reason, detail }))),
+    );
+
+  const readSettingsFor = (operation: MemOverseerRequestOperation) =>
+    ports
+      .loadSettings()
+      .pipe(
+        Effect.catchCause(() =>
+          refuse(operation, "failure", "the overseer settings could not be read."),
+        ),
+      );
+
+  const requireEnabled = (operation: MemOverseerRequestOperation, mem: MemOverseerSettings) =>
+    mem.enabled ? Effect.void : refuse(operation, "disabled", "the overseer is switched off.");
+
+  const readThreadFor = (operation: MemOverseerRequestOperation, threadId: string) =>
+    ports
+      .readThread(threadId)
+      .pipe(Effect.catchCause(() => refuse(operation, "failure", "the thread could not be read.")));
+
+  const spendForTurn = (mem: MemOverseerSettings) =>
+    ports.store.totalSpentUsd().pipe(
+      Effect.orElseSucceed(() => 0),
+      Effect.map((spentUsd) => ({
+        spentUsd,
+        spend: decideSpend({
+          capUsd: mem.spendingCapUsd,
+          spentUsd,
+          estimatedNextTurnUsd: MEM_ESTIMATED_TURN_USD,
+        }),
+      })),
+    );
+
+  /** Titles come from the owner or the first line of the prompt; both are bounded and trimmed. */
+  const sessionTitle = (input: {
+    readonly prompt: string;
+    readonly title?: string | undefined;
+  }) => {
+    const given = input.title?.trim() ?? "";
+    if (given !== "") return given;
+    const firstLine = input.prompt
+      .split("\n")
+      .map((line) => line.trim())
+      .find((line) => line !== "");
+    return (firstLine ?? "Mem session").slice(0, 80);
+  };
+
+  const listWatched = Effect.fn("MemOverseerService.listWatched")(function* () {
+    const records = yield* ports.store
+      .all()
+      .pipe(
+        Effect.catchCause(() =>
+          refuse("load", "failure", "the watched threads could not be read."),
+        ),
+      );
+    return [...records]
+      .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
+      .map((record): MemWatchedThread => ({
+        threadId: record.task.threadId,
+        phase: record.task.phase,
+        rejections: record.task.rejections,
+        lastInstruction: record.task.lastInstruction,
+        spendUsd: record.spentUsd,
+        pendingApproval: record.pendingApproval !== null,
+      }));
+  });
+
+  const threadState = Effect.fn("MemOverseerService.threadState")(function* (threadId: string) {
+    const record = yield* ports.store
+      .get(threadId)
+      .pipe(
+        Effect.catchCause(() =>
+          refuse("load", "failure", "the thread's Mem state could not be read."),
+        ),
+      );
+    const review = record?.lastReview ?? null;
+    const masterThreadId = yield* ports
+      .findMasterThreadId()
+      .pipe(Effect.orElseSucceed(() => undefined));
+    return {
+      verdict: review?.verdict ?? null,
+      reason: review?.reasoning ?? null,
+      masterThreadId: masterThreadId ?? null,
+    } satisfies MemThreadState;
+  });
+
+  /**
+   * The same plan-then-review path the tick takes, so a verdict reached from chat is the verdict
+   * the next tick would reach for the same code. It records what it found and never sends.
+   */
+  const reviewThreadNow = Effect.fn("MemOverseerService.reviewThreadNow")(function* (
+    threadId: string,
+  ) {
+    return yield* actorLock
+      .withPermit(
+        Effect.gen(function* () {
+          const settings = yield* readSettingsFor("review");
+          yield* requireEnabled("review", settings.mem);
+          const thread = yield* readThreadFor("review", threadId);
+          if (thread === undefined) {
+            return yield* refuse("review", "thread_not_found", "no thread has that id.");
+          }
+          if (settings.pace.kind === "unset") {
+            return yield* refuse("review", "no_model", "no review model is set.");
+          }
+
+          const plan = yield* ports
+            .planReview(thread)
+            .pipe(
+              Effect.catchCause(() =>
+                refuse("review", "failure", "the thread's change set could not be read."),
+              ),
+            );
+          const outcome = yield* reviewBatches(thread, plan, settings.mem, settings.pace.selection);
+
+          const nowMs = yield* Clock.currentTimeMillis;
+          const existing = yield* ports.store
+            .get(threadId)
+            .pipe(Effect.orElseSucceed(() => undefined as MemOverseerTaskRecord | undefined));
+          const record = charge(existing ?? newTaskRecord(threadId, nowMs), outcome.costUsd);
+
+          if (outcome.type === "parked") {
+            yield* ports.store.put({
+              ...record,
+              task: reduceTask(record.task, { type: "capReached" }),
+              settledPhase: "parked",
+              pendingApproval: null,
+              updatedAtMs: nowMs,
+            });
+            const total = yield* ports.store.totalSpentUsd().pipe(Effect.orElseSucceed(() => 0));
+            yield* Effect.logWarning("Mem parked a thread instead of reviewing it.", {
+              threadId,
+              spend: describeCap({ capUsd: settings.mem.spendingCapUsd, spentUsd: total }),
+            });
+            return yield* refuse(
+              "review",
+              "cap_reached",
+              "the spending cap has no budget for another review batch.",
+            );
+          }
+
+          if (outcome.result === null) {
+            return yield* refuse("review", "failure", "the review produced no verdict.");
+          }
+
+          yield* ports.store.put({
+            ...record,
+            task: reduceTask(record.task, { type: "reviewed", result: outcome.result }),
+            lastReview: {
+              verdict: outcome.result.verdict,
+              reasoning: outcome.result.reasoning,
+            },
+            updatedAtMs: nowMs,
+          });
+          return {
+            verdict: outcome.result.verdict,
+            findings: outcome.result.findings,
+            reasoning: outcome.result.reasoning,
+            nextInstruction: outcome.result.nextInstruction,
+            accepted: outcome.result.usable && outcome.result.verdict === "accept",
+          } satisfies MemThreadReview;
+        }),
+      )
+      .pipe(Effect.catchDefect(() => refuse("review", "failure", "the review did not complete.")));
+  });
+
+  /**
+   * A chat instruction takes the tick's exact path: budget first, then the destructive guard, then
+   * one delivery. A blocked instruction joins the same approval queue and waits there for a human.
+   */
+  const sendInstruction = Effect.fn("MemOverseerService.sendInstruction")(function* (
+    threadId: string,
+    instruction: string,
+  ) {
+    return yield* actorLock
+      .withPermit(
+        Effect.gen(function* () {
+          const settings = yield* readSettingsFor("send-instruction");
+          yield* requireEnabled("send-instruction", settings.mem);
+          const thread = yield* readThreadFor("send-instruction", threadId);
+          if (thread === undefined) {
+            return yield* refuse("send-instruction", "thread_not_found", "no thread has that id.");
+          }
+
+          const nowMs = yield* Clock.currentTimeMillis;
+          const existing = yield* ports.store
+            .get(threadId)
+            .pipe(Effect.orElseSucceed(() => undefined as MemOverseerTaskRecord | undefined));
+          let record = existing ?? newTaskRecord(threadId, nowMs);
+
+          // The same text is never handed to a session twice, whether it already went out or waits.
+          if (record.deliveredInstruction === instruction) {
+            return { sent: false, parked: "already_delivered" } satisfies MemSendInstructionResult;
+          }
+          if (record.pendingApproval?.instruction === instruction) {
+            return { sent: false, parked: "approval_required" } satisfies MemSendInstructionResult;
+          }
+
+          const { spentUsd, spend } = yield* spendForTurn(settings.mem);
+          if (!spend.allowed) {
+            const parked = reduceTask(record.task, { type: "capReached" });
+            yield* ports.store.put({
+              ...record,
+              task: parked,
+              settledPhase: parked.phase,
+              pendingApproval: null,
+              updatedAtMs: nowMs,
+            });
+            yield* Effect.logWarning("Mem parked a thread instead of sending a chat instruction.", {
+              threadId,
+              spend: describeCap({ capUsd: settings.mem.spendingCapUsd, spentUsd }),
+            });
+            return { sent: false, parked: "cap_reached" } satisfies MemSendInstructionResult;
+          }
+
+          // The same signals the tick measures: the words, plus the change set when it can be read.
+          const plan = yield* ports.planReview(thread).pipe(Effect.orElseSucceed(() => null));
+          if (
+            isDestructiveDeletion({
+              instruction,
+              evidence: thread.evidence,
+              deletedLines: plan?.deletedLines ?? 0,
+              deletedFiles: plan?.deletedFiles ?? [],
+            })
+          ) {
+            const fingerprint = fingerprintEvidence(thread.evidence);
+            yield* ports.store.put({
+              ...record,
+              // The queued text becomes the pending instruction, so a later tick waits on the same
+              // human answer instead of reviewing the thread and replacing it.
+              task: { ...record.task, phase: "claimed", lastInstruction: instruction },
+              pendingApproval: {
+                approvalId: fingerprint,
+                threadId: thread.threadId,
+                projectId: thread.projectId,
+                instruction,
+                createdAtMs: nowMs,
+                evidenceFingerprint: fingerprint,
+                blocking: true,
+              },
+              updatedAtMs: nowMs,
+            });
+            yield* Effect.logWarning(
+              "Mem blocked a destructive chat instruction (awaiting owner).",
+              {
+                threadId,
+              },
+            );
+            return { sent: false, parked: "approval_required" } satisfies MemSendInstructionResult;
+          }
+
+          const delivered = yield* deliver(
+            { threadId: thread.threadId, projectId: thread.projectId },
+            instruction,
+          );
+          if (!delivered) return { sent: false } satisfies MemSendInstructionResult;
+
+          yield* ports.store.put(
+            accrueTurn({
+              ...record,
+              task: { ...record.task, phase: "claimed", lastInstruction: instruction },
+              // An owner who steers a settled thread reopens it for review.
+              settledPhase: null,
+              pendingApproval: null,
+              deliveredInstruction: instruction,
+              deliveredAtMs: nowMs,
+              deliveredEvidenceFingerprint: fingerprintEvidence(thread.evidence),
+              lastGuideSource: "owner",
+              updatedAtMs: nowMs,
+            }),
+          );
+          yield* Effect.logInfo("Mem sent a chat instruction.", { threadId });
+          return { sent: true } satisfies MemSendInstructionResult;
+        }),
+      )
+      .pipe(
+        Effect.catchDefect(() =>
+          refuse("send-instruction", "failure", "the instruction could not be sent."),
+        ),
+      );
+  });
+
+  const setLifecycle = Effect.fn("MemOverseerService.setLifecycle")(function* (
+    threadId: string,
+    lifecycle: MemThreadLifecycle,
+  ) {
+    // Marking a thread starts no turn, so this path reads no budget.
+    yield* actorLock
+      .withPermit(
+        Effect.gen(function* () {
+          yield* ports
+            .setLifecycle(threadId, lifecycle)
+            .pipe(
+              Effect.catchCause(() =>
+                refuse(
+                  "set-lifecycle",
+                  "failure",
+                  "the lifecycle command could not be dispatched.",
+                ),
+              ),
+            );
+          // Re-opening a settled thread must let the loop review it again.
+          if (lifecycle !== "in_progress") return;
+          const existing = yield* ports.store
+            .get(threadId)
+            .pipe(Effect.orElseSucceed(() => undefined as MemOverseerTaskRecord | undefined));
+          if (existing === undefined) return;
+          const nowMs = yield* Clock.currentTimeMillis;
+          yield* ports.store.put({
+            ...existing,
+            task: startTask(threadId),
+            settledPhase: null,
+            pendingApproval: null,
+            updatedAtMs: nowMs,
+          });
+        }),
+      )
+      .pipe(
+        Effect.catchDefect(() =>
+          refuse("set-lifecycle", "failure", "the lifecycle command could not be dispatched."),
+        ),
+      );
+  });
+
+  const spawnSession = Effect.fn("MemOverseerService.spawnSession")(function* (input: {
+    readonly prompt: string;
+    readonly title?: string | undefined;
+    readonly modelSelection: ModelSelection;
+  }) {
+    return yield* actorLock
+      .withPermit(
+        Effect.gen(function* () {
+          const settings = yield* readSettingsFor("spawn");
+          yield* requireEnabled("spawn", settings.mem);
+          const spawnDirectory = settings.mem.spawnDirectory.trim();
+          if (spawnDirectory === "") {
+            return yield* refuse(
+              "spawn",
+              "spawn_directory_empty",
+              "no spawn directory is configured.",
+            );
+          }
+          const projectId = yield* ports
+            .findProjectForDirectory(spawnDirectory)
+            .pipe(
+              Effect.catchCause(() =>
+                refuse("spawn", "failure", "the projects could not be read."),
+              ),
+            );
+          if (projectId === undefined) {
+            return yield* refuse(
+              "spawn",
+              "spawn_project_missing",
+              "the spawn directory is not a project workspace.",
+            );
+          }
+
+          const { spentUsd, spend } = yield* spendForTurn(settings.mem);
+          if (!spend.allowed) {
+            yield* Effect.logWarning(
+              "Mem refused to spawn a session: no budget for its first turn.",
+              {
+                spend: describeCap({ capUsd: settings.mem.spendingCapUsd, spentUsd }),
+              },
+            );
+            return yield* refuse(
+              "spawn",
+              "cap_reached",
+              "the spending cap has no budget for a new session.",
+            );
+          }
+
+          const spawned = yield* ports
+            .spawnSession({
+              projectId,
+              spawnDirectory,
+              prompt: input.prompt,
+              title: sessionTitle(input),
+              modelSelection: input.modelSelection,
+            })
+            .pipe(
+              Effect.catchCause(() =>
+                refuse("spawn", "failure", "the session could not be created."),
+              ),
+            );
+
+          const nowMs = yield* Clock.currentTimeMillis;
+          yield* ports.store.put(
+            accrueTurn({
+              ...newTaskRecord(spawned.threadId, nowMs),
+              // The prompt is already in the new thread, so the loop must never send it again.
+              deliveredInstruction: input.prompt,
+              deliveredAtMs: nowMs,
+              deliveredEvidenceFingerprint: null,
+              lastGuideSource: "owner",
+              updatedAtMs: nowMs,
+            }),
+          );
+          yield* Effect.logInfo("Mem spawned a session.", { threadId: spawned.threadId });
+          return { threadId: spawned.threadId };
+        }),
+      )
+      .pipe(
+        Effect.catchDefect(() => refuse("spawn", "failure", "the session could not be created.")),
+      );
+  });
+
   const tick = Effect.fn("MemOverseerService.tick")(function* () {
     const settings = yield* ports
       .loadSettings()
@@ -794,7 +1285,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       );
 
     // Nothing answered the last question, so Mem's own recommendation goes out before anything new.
-    const settledThreads = yield* expireApprovals(settings.mem);
+    const settledThreads = yield* actorLock.withPermit(expireApprovals(settings.mem));
 
     const threads = yield* ports
       .listThreads()
@@ -815,10 +1306,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     });
 
     // Sequential on purpose: one action per thread, and the spend total feeds the next decision.
+    // Each thread is one actor action, so a chat request can take the lock between threads only.
     yield* Effect.forEach(
       threads.filter((thread) => !settledThreads.has(thread.threadId)),
       (thread) =>
-        runThread(thread, settings.mem, spend, settings.pace, ownerAway).pipe(
+        actorLock.withPermit(runThread(thread, settings.mem, spend, settings.pace, ownerAway)).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Mem skipped a thread after an unexpected failure.", {
               threadId: thread.threadId,
@@ -830,7 +1322,17 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     );
   });
 
-  return { tick, pendingApprovals, answerApproval };
+  return {
+    tick,
+    pendingApprovals,
+    answerApproval,
+    listWatched,
+    threadState,
+    reviewThreadNow,
+    sendInstruction,
+    setLifecycle,
+    spawnSession,
+  };
 };
 
 export class MemOverseerService extends Context.Service<
@@ -991,6 +1493,44 @@ const make = Effect.gen(function* () {
   const scheduler = yield* Scheduler.Scheduler;
   const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
 
+  const shellSnapshot = () =>
+    projections.getShellSnapshot({ location: "active" }).pipe(
+      Effect.mapError(
+        (cause) =>
+          new MemOverseerFailure({
+            operation: "list-threads",
+            detail: "the thread shell could not be read.",
+            cause,
+          }),
+      ),
+    );
+
+  /** One project lookup per project, not per thread: a worktree is preferred when it exists. */
+  const rootForShell = Effect.fn("MemOverseerService.rootForShell")(function* (
+    shell: OrchestrationV2ThreadShell,
+    roots: Map<string, string | null>,
+  ) {
+    if (shell.worktreePath) return shell.worktreePath;
+    const cached = roots.get(shell.projectId);
+    if (cached !== undefined) return cached;
+    const project = yield* projects.getShell(shell.projectId).pipe(
+      Effect.map((value) => Option.getOrUndefined(value)),
+      Effect.orElseSucceed(() => undefined),
+    );
+    const root = project?.workspaceRoot ?? null;
+    roots.set(shell.projectId, root);
+    return root;
+  });
+
+  const threadForShell = (shell: OrchestrationV2ThreadShell, roots: Map<string, string | null>) =>
+    Effect.map(
+      Effect.all([readRecentActivity(projections, shell.id), rootForShell(shell, roots)]),
+      ([activity, root]) => toThread(shell, activity, root),
+    );
+
+  /** The same directory comparison the project store makes: resolved absolute paths. */
+  const resolvedDirectory = (value: string) => path.resolve(value.trim());
+
   const service = makeMemOverseerService({
     loadSettings: Effect.fn("MemOverseerService.loadSettings")(function* () {
       const current = yield* settings.getSettings.pipe(
@@ -1029,41 +1569,18 @@ const make = Effect.gen(function* () {
         ),
       ),
     listThreads: Effect.fn("MemOverseerService.listThreads")(function* () {
-      const snapshot = yield* projections.getShellSnapshot({ location: "active" }).pipe(
-        Effect.mapError(
-          (cause) =>
-            new MemOverseerFailure({
-              operation: "list-threads",
-              detail: "the thread shell could not be read.",
-              cause,
-            }),
-        ),
-      );
+      const snapshot = yield* shellSnapshot();
       const claimed = snapshot.threads.filter(
-        (shell) => (shell.lifecycle ?? "none") === "in_progress",
+        (shell) => (shell.lifecycle ?? "none") === "in_progress" && !isMemMasterThread(shell),
       );
-      // One project lookup per project, not per thread: a worktree is preferred when it exists.
       const roots = new Map<string, string | null>();
-      const rootFor = Effect.fn("MemOverseerService.rootFor")(function* (
-        shell: OrchestrationV2ThreadShell,
-      ) {
-        if (shell.worktreePath) return shell.worktreePath;
-        const cached = roots.get(shell.projectId);
-        if (cached !== undefined) return cached;
-        const project = yield* projects.getShell(shell.projectId).pipe(
-          Effect.map((value) => Option.getOrUndefined(value)),
-          Effect.orElseSucceed(() => undefined),
-        );
-        const root = project?.workspaceRoot ?? null;
-        roots.set(shell.projectId, root);
-        return root;
-      });
-      return yield* Effect.forEach(claimed, (shell) =>
-        Effect.map(
-          Effect.all([readRecentActivity(projections, shell.id), rootFor(shell)]),
-          ([activity, root]) => toThread(shell, activity, root),
-        ),
-      );
+      return yield* Effect.forEach(claimed, (shell) => threadForShell(shell, roots));
+    }),
+    readThread: Effect.fn("MemOverseerService.readThread")(function* (threadId) {
+      const snapshot = yield* shellSnapshot();
+      const shell = snapshot.threads.find((entry) => entry.id === threadId);
+      if (shell === undefined) return undefined;
+      return yield* threadForShell(shell, new Map());
     }),
     planReview: Effect.fn("MemOverseerService.planReview")(function* (thread) {
       if (thread.root === null) {
@@ -1168,6 +1685,112 @@ const make = Effect.gen(function* () {
               }),
           ),
         );
+    }),
+    setLifecycle: Effect.fn("MemOverseerService.setLifecycleCommand")(
+      function* (threadId, lifecycle) {
+        const id = yield* random.uuidV4();
+        yield* threads
+          .dispatch({
+            type: "thread.lifecycle.set",
+            commandId: CommandId.make(`mem-lifecycle:${id}`),
+            threadId: ThreadId.make(threadId),
+            lifecycle,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new MemOverseerFailure({
+                  operation: "lifecycle",
+                  detail: "the lifecycle command could not be dispatched.",
+                  cause,
+                }),
+            ),
+          );
+      },
+    ),
+    findProjectForDirectory: Effect.fn("MemOverseerService.findProjectForDirectory")(
+      function* (directory) {
+        const rows = yield* projects.list().pipe(
+          Effect.mapError(
+            (cause) =>
+              new MemOverseerFailure({
+                operation: "spawn",
+                detail: "the projects could not be read.",
+                cause,
+              }),
+          ),
+        );
+        const wanted = resolvedDirectory(directory);
+        return rows.find((row) => resolvedDirectory(row.workspaceRoot) === wanted)?.projectId;
+      },
+    ),
+    findMasterThreadId: Effect.fn("MemOverseerService.findMasterThreadId")(function* () {
+      const snapshot = yield* shellSnapshot();
+      return snapshot.threads.find((shell) => shell.memMaster === true)?.id;
+    }),
+    spawnSession: Effect.fn("MemOverseerService.spawn")(function* (input) {
+      const id = yield* random.uuidV4();
+      const sessionDirectory = path.join(input.spawnDirectory, `mem-${id.slice(0, 8)}`);
+      // The session gets its own folder under the configured directory; nothing else is guessed.
+      yield* fileSystem.makeDirectory(sessionDirectory, { recursive: true }).pipe(
+        Effect.mapError(
+          (cause) =>
+            new MemOverseerFailure({
+              operation: "spawn",
+              detail: "the session folder could not be created.",
+              cause,
+            }),
+        ),
+      );
+      const threadId = ThreadId.make(`thread-${id}`);
+      yield* threads
+        .dispatch({
+          type: "thread.create",
+          createdBy: "user",
+          creationSource: "server",
+          commandId: CommandId.make(`mem-spawn:${id}`),
+          threadId,
+          projectId: ProjectId.make(input.projectId),
+          title: input.title,
+          modelSelection: input.modelSelection,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: sessionDirectory,
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new MemOverseerFailure({
+                operation: "spawn",
+                detail: "the thread could not be created.",
+                cause,
+              }),
+          ),
+        );
+      yield* threads
+        .sendToThread({
+          projectId: ProjectId.make(input.projectId),
+          commandId: CommandId.make(`mem-spawn-prompt:${id}`),
+          messageId: MessageId.make(id),
+          threadId,
+          text: input.prompt,
+          attachments: [],
+          mode: "auto",
+          createdBy: "user",
+          creationSource: "server",
+        })
+        .pipe(
+          Effect.mapError(
+            (cause) =>
+              new MemOverseerFailure({
+                operation: "spawn",
+                detail: "the first message could not be sent.",
+                cause,
+              }),
+          ),
+        );
+      return { threadId };
     }),
     store,
   });

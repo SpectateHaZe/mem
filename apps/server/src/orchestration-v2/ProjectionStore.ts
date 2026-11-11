@@ -50,6 +50,7 @@ import type {
 import {
   IDLE_COMPACTION_TEXT,
   idleCompactionOf,
+  isMemMasterThread,
   OrchestrationV2AppThreadJson as OrchestrationV2AppThreadJsonSchema,
   OrchestrationV2CheckpointJson as OrchestrationV2CheckpointJsonSchema,
   OrchestrationV2CheckpointScopeJson as OrchestrationV2CheckpointScopeJsonSchema,
@@ -550,6 +551,8 @@ export interface ProjectionStoreV2Shape {
   readonly findGuestShareThreadId: (
     shareId: GuestShareId,
   ) => Effect.Effect<ThreadId | null, ProjectionStoreV2Error>;
+  /** The environment's Mem master thread, if this environment already has one. */
+  readonly findMemMasterThreadId: () => Effect.Effect<ThreadId | null, ProjectionStoreV2Error>;
   readonly getThread: (
     threadId: ThreadId,
   ) => Effect.Effect<OrchestrationV2AppThread, ProjectionStoreV2Error>;
@@ -1913,10 +1916,21 @@ function visibleItemCountForShell(input: {
   );
 }
 
+/** Stable partition: the Mem thread leads the list, every other thread keeps its order. */
+function memMasterFirst(
+  shells: ReadonlyArray<OrchestrationV2ThreadShell>,
+): ReadonlyArray<OrchestrationV2ThreadShell> {
+  return shells.toSorted(
+    (left, right) => Number(isMemMasterThread(right)) - Number(isMemMasterThread(left)),
+  );
+}
+
 function shellFromState(input: {
   readonly state: ShellThreadState;
   readonly visibleItemCount: number;
 }): OrchestrationV2ThreadShell {
+  // The Mem thread is always visible and always out of every ordering, whatever events landed.
+  const memMaster = isMemMasterThread(input.state.thread);
   return {
     createdBy: input.state.thread.createdBy,
     creationSource: input.state.thread.creationSource,
@@ -1945,6 +1959,7 @@ function shellFromState(input: {
     ...(input.state.thread.lifecycle === undefined
       ? {}
       : { lifecycle: input.state.thread.lifecycle }),
+    ...(memMaster ? { memMaster: true } : {}),
     ...(input.state.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: input.state.thread.historyOrigin }),
@@ -1981,12 +1996,12 @@ function shellFromState(input: {
     visibleItemCount: input.visibleItemCount,
     createdAt: input.state.thread.createdAt,
     updatedAt: input.state.updatedAt,
-    archivedAt: input.state.thread.archivedAt,
-    settledOverride: input.state.thread.settledOverride,
-    settledAt: input.state.thread.settledAt,
+    archivedAt: memMaster ? null : input.state.thread.archivedAt,
+    settledOverride: memMaster ? null : input.state.thread.settledOverride,
+    settledAt: memMaster ? null : input.state.thread.settledAt,
     unsettledAt: input.state.thread.unsettledAt ?? null,
-    snoozedUntil: input.state.thread.snoozedUntil ?? null,
-    snoozedAt: input.state.thread.snoozedAt ?? null,
+    snoozedUntil: memMaster ? null : (input.state.thread.snoozedUntil ?? null),
+    snoozedAt: memMaster ? null : (input.state.thread.snoozedAt ?? null),
     pinnedAt: input.state.thread.pinnedAt ?? null,
 
     autoSettleDisabledAt: input.state.thread.autoSettleDisabledAt ?? null,
@@ -7134,7 +7149,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return {
         schemaVersion: ORCHESTRATION_V2_PROJECTION_SCHEMA_VERSION,
         snapshotSequence: sequenceRows[0]?.snapshot_sequence ?? 0,
-        threads: shells.filter((thread) => thread.archivedAt === null),
+        threads: memMasterFirst(shells.filter((thread) => thread.archivedAt === null)),
         archivedThreads: shells.filter((thread) => thread.archivedAt !== null),
       };
     }, Effect.mapError(shellSnapshotReadError));
@@ -7419,6 +7434,17 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       return rows[0] === undefined ? null : ThreadId.make(rows[0].thread_id);
     }, Effect.mapError(shellSnapshotReadError));
 
+    const findMemMasterThreadId = Effect.fn("ProjectionStore.findMemMasterThreadId")(function* () {
+      const rows = yield* sql<{ readonly thread_id: string }>`
+        SELECT thread_id
+        FROM orchestration_v2_projection_threads
+        WHERE deleted_at IS NULL
+          AND json_extract(payload_json, '$.memMaster') = 1
+        LIMIT 1
+      `;
+      return rows[0] === undefined ? null : ThreadId.make(rows[0].thread_id);
+    }, Effect.mapError(shellSnapshotReadError));
+
     const listOlderSettledThreads: ProjectionStoreV2Shape["listOlderSettledThreads"] = Effect.fn(
       "ProjectionStore.listOlderSettledThreads",
     )(function* ({ before, projectIds, limit }) {
@@ -7571,6 +7597,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
       listOlderSettledThreads: readOnReader(listOlderSettledThreads),
       getThreadShell: readOnReader(getThreadShell),
       findGuestShareThreadId: readOnReader(findGuestShareThreadId),
+      findMemMasterThreadId: readOnReader(findMemMasterThreadId),
       getThread: readOnReader(getThread),
       getSettlementCandidates: readOnReader(getSettlementCandidates),
       getThreadsWithPullRequests: readOnReader(getThreadsWithPullRequests),

@@ -163,6 +163,14 @@ export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLin
 export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage): boolean =>
   lineage.relationshipToParent !== "subagent" && lineage.sideChat !== true;
 
+/**
+ * The one thread where the owner talks to Mem. It always exists, sorts first, and can never be
+ * deleted, archived, or reordered; identity is this flag, never a fixed thread id.
+ */
+export const MEM_MASTER_THREAD_TITLE = "Mem";
+export const isMemMasterThread = (thread: { readonly memMaster?: boolean | undefined }): boolean =>
+  thread.memMaster === true;
+
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",
   "provider_handoff",
@@ -482,6 +490,8 @@ export const OrchestrationV2AppThread = Schema.Struct({
    * overseer steer it; absent or `none` means unmarked and therefore untouchable.
    */
   lifecycle: Schema.optional(Schema.Literals(["none", "in_progress", "complete", "abandoned"])),
+  /** True only on the environment's single Mem thread; absent on every other thread. */
+  memMaster: Schema.optional(Schema.Boolean),
   settledAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2122,6 +2132,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
   /** Absent on threads written before the owner could mark them; read as `none`. */
   lifecycle: Schema.optional(Schema.Literals(["none", "in_progress", "complete", "abandoned"])),
+  /** True only on the environment's single Mem thread; absent on every other thread. */
+  memMaster: Schema.optional(Schema.Boolean),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
@@ -2955,6 +2967,8 @@ export const OrchestrationV2Command = Schema.Union([
     threadId: ThreadId,
     projectId: ProjectId,
     title: TrimmedNonEmptyString,
+    /** Only the server sets this, when it creates the environment's Mem thread. */
+    memMaster: Schema.optional(Schema.Boolean),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,

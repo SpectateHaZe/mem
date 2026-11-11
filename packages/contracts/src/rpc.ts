@@ -36,7 +36,17 @@ import {
 import {
   MemAnswerApprovalInput,
   MemAnswerApprovalResult,
+  MemOverseerRequestError,
   MemPendingApprovalsResult,
+  MemSendInstructionInput,
+  MemSendInstructionResult,
+  MemSetLifecycleInput,
+  MemSpawnSessionInput,
+  MemSpawnSessionResult,
+  MemThreadIdInput,
+  MemThreadReview,
+  MemThreadState,
+  MemWatchedThreadsResult,
 } from "./memOverseer.ts";
 import * as Schema from "effect/Schema";
 import {
@@ -571,6 +581,12 @@ export const WS_METHODS = {
   serverReportClientActivity: "server.reportClientActivity",
   memOverseerListApprovals: "memOverseer.listApprovals",
   memOverseerAnswerApproval: "memOverseer.answerApproval",
+  memOverseerListWatched: "memOverseer.listWatched",
+  memOverseerThreadState: "memOverseer.threadState",
+  memOverseerReviewThread: "memOverseer.reviewThread",
+  memOverseerSendInstruction: "memOverseer.sendInstruction",
+  memOverseerSetLifecycle: "memOverseer.setLifecycle",
+  memOverseerSpawnSession: "memOverseer.spawnSession",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
   claudeSettingsRead: "claude.readSettings",
@@ -1080,6 +1096,44 @@ const WsMemOverseerAnswerApprovalRpc = Rpc.make(WS_METHODS.memOverseerAnswerAppr
   payload: MemAnswerApprovalInput,
   success: MemAnswerApprovalResult,
   error: EnvironmentAuthorizationError,
+});
+
+const MemOverseerRpcError = Schema.Union([MemOverseerRequestError, EnvironmentAuthorizationError]);
+
+const WsMemOverseerListWatchedRpc = Rpc.make(WS_METHODS.memOverseerListWatched, {
+  payload: Schema.Struct({}),
+  success: MemWatchedThreadsResult,
+  error: MemOverseerRpcError,
+});
+
+const WsMemOverseerThreadStateRpc = Rpc.make(WS_METHODS.memOverseerThreadState, {
+  payload: MemThreadIdInput,
+  success: MemThreadState,
+  error: MemOverseerRpcError,
+});
+
+/** A review spends a model call, so it is an operate action even though it only reads code. */
+const WsMemOverseerReviewThreadRpc = Rpc.make(WS_METHODS.memOverseerReviewThread, {
+  payload: MemThreadIdInput,
+  success: MemThreadReview,
+  error: MemOverseerRpcError,
+});
+
+const WsMemOverseerSendInstructionRpc = Rpc.make(WS_METHODS.memOverseerSendInstruction, {
+  payload: MemSendInstructionInput,
+  success: MemSendInstructionResult,
+  error: MemOverseerRpcError,
+});
+
+const WsMemOverseerSetLifecycleRpc = Rpc.make(WS_METHODS.memOverseerSetLifecycle, {
+  payload: MemSetLifecycleInput,
+  error: MemOverseerRpcError,
+});
+
+const WsMemOverseerSpawnSessionRpc = Rpc.make(WS_METHODS.memOverseerSpawnSession, {
+  payload: MemSpawnSessionInput,
+  success: MemSpawnSessionResult,
+  error: MemOverseerRpcError,
 });
 
 const PullRequestRpcError = Schema.Union([
@@ -2259,6 +2313,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerReportClientActivityRpc,
   WsMemOverseerListApprovalsRpc,
   WsMemOverseerAnswerApprovalRpc,
+  WsMemOverseerListWatchedRpc,
+  WsMemOverseerThreadStateRpc,
+  WsMemOverseerReviewThreadRpc,
+  WsMemOverseerSendInstructionRpc,
+  WsMemOverseerSetLifecycleRpc,
+  WsMemOverseerSpawnSessionRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,
