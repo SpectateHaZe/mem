@@ -40,6 +40,7 @@ import {
   interruptThreadTurn,
   revertThreadCheckpoint,
   resumeThreadQueue,
+  setThreadLifecycle,
   startThreadTurn,
 } from "./commands.ts";
 
@@ -162,9 +163,20 @@ describe("V2 environment commands", () => {
         commandId: CommandId.make("queued-command"),
         threadId: ThreadId.make("thread-1"),
       }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
+      yield* setThreadLifecycle({
+        commandId: CommandId.make("lifecycle-command"),
+        threadId: ThreadId.make("thread-1"),
+        lifecycle: "abandoned",
+      }).pipe(Effect.provideService(EnvironmentSupervisor.EnvironmentSupervisor, supervisor));
 
       expect(commands).toEqual([
         { type: "thread.archive", commandId: "queued-command", threadId: "thread-1" },
+        {
+          type: "thread.lifecycle.set",
+          commandId: "lifecycle-command",
+          threadId: "thread-1",
+          lifecycle: "abandoned",
+        },
       ]);
     }).pipe(Effect.provide(layerTestRandom)),
   );

@@ -47,6 +47,7 @@ export function makeThreadProjectionFixture(): OrchestrationV2ThreadProjection {
       archivedAt: null,
       settledOverride: null,
       settledAt: null,
+      lifecycle: "none" as const,
       lastVisitedAt: null,
       deletedAt: null,
     },

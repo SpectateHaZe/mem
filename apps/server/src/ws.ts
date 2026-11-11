@@ -100,6 +100,7 @@ import {
   ThreadId,
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
+  ClaudeSettingsWriteError,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -244,7 +245,13 @@ import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as RoomService from "./rooms/RoomService.ts";
 import * as SubagentReportService from "./rooms/SubagentReportService.ts";
+import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
+import * as MemOverseerService from "./overseer/MemOverseerService.ts";
 import * as UsageService from "./usage/UsageService.ts";
+import {
+  readClaudeSettingsSnapshot,
+  writeClaudeSettingsScope,
+} from "./provider/Drivers/ClaudeSettingsFiles.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -1519,6 +1526,8 @@ export const layerWsRpc = (
       const databaseStorage = yield* DatabaseStorage.DatabaseStorage;
       const serverSettings = yield* ServerSettings.ServerSettingsService;
       const secretResolver = yield* SecretResolver.SecretResolver;
+      const memOverseer = yield* MemOverseerService.MemOverseerService;
+      const memIdleTracker = yield* MemIdleTracker.MemIdleTracker;
       const peerLinks = yield* PeerLinks.PeerLinks;
       const peerLinkRequests = yield* PeerLinkRequests.PeerLinkRequests;
       const startup = yield* ServerRuntimeStartup.ServerRuntimeStartup;
@@ -2748,6 +2757,32 @@ export const layerWsRpc = (
           resourceTelemetry.readHistory(input),
         [WS_METHODS.serverGetUsageSummary]: (input) => usage.readSummary(input),
         [WS_METHODS.serverRefreshUsageRates]: (_input) => usage.refreshRates,
+        [WS_METHODS.claudeSettingsRead]: (input) =>
+          readClaudeSettingsSnapshot({ homePath: "" }, input.cwd),
+        [WS_METHODS.claudeSettingsWrite]: (input) =>
+          writeClaudeSettingsScope({
+            config: { homePath: "" },
+            cwd: input.cwd,
+            scope: input.scope,
+            contents: input.contents,
+          }).pipe(
+            Effect.mapError(
+              (error) =>
+                new ClaudeSettingsWriteError({
+                  reason:
+                    error._tag === "ScopeNotWritable"
+                      ? "scopeNotWritable"
+                      : error._tag === "InvalidJson"
+                        ? "invalidJson"
+                        : "writeFailed",
+                  detail:
+                    error._tag === "ScopeNotWritable"
+                      ? `${error.scope} settings are not writable from Mem.`
+                      : error.message,
+                }),
+            ),
+            Effect.andThen(readClaudeSettingsSnapshot({ homePath: "" }, input.cwd)),
+          ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),
         [WS_METHODS.serverPrepareTriage]: (input) => triage.prepare(input),
@@ -2765,7 +2800,12 @@ export const layerWsRpc = (
                 input,
               ),
             ),
+            // Every connected client's report moves the one idle clock the overseer reads.
+            Effect.andThen(memIdleTracker.recordActivity()),
           ),
+        [WS_METHODS.memOverseerListApprovals]: (_input) =>
+          memOverseer.pendingApprovals().pipe(Effect.map((approvals) => ({ approvals }))),
+        [WS_METHODS.memOverseerAnswerApproval]: (input) => memOverseer.answerApproval(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>
           Stream.callback<RelayClientInstallProgressEvent, RelayClientInstallFailedError>((queue) =>

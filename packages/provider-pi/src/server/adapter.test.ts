@@ -570,6 +570,7 @@ const makeAppThread = Effect.fnUntraced(function* (model: string, threadId = THR
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    lifecycle: "none" as const,
     lastVisitedAt: null,
     deletedAt: null,
   } satisfies OrchestrationV2AppThread;

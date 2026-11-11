@@ -3,13 +3,18 @@ import { useRef, useState, type ChangeEvent } from "react";
 
 import { useClientSettings } from "../../hooks/useSettings";
 import { useStickerImage } from "../../hooks/useStickerImage";
+import { BUILTIN_STICKER_LABELS, BUILTIN_STICKER_SRC } from "../../lib/memStickers";
 import { cn } from "../../lib/utils";
 import {
+  BUILTIN_STICKER_IDS,
   clearSticker,
+  parseBuiltinStickerSetting,
   saveSticker,
+  selectBuiltinSticker,
   stickerFileError,
   stickerSettingKey,
   STICKER_SLOTS,
+  type BuiltinStickerId,
   type StickerSlotId,
 } from "../../lib/stickers";
 import { Button } from "../ui/button";
@@ -38,6 +43,7 @@ function StickerRow({ slot }: { slot: StickerSlotId }) {
   const label = STICKER_LABELS[slot];
   const nameKey = stickerSettingKey(slot);
   const name = useClientSettings((settings) => settings[nameKey]);
+  const builtinId = parseBuiltinStickerSetting(name);
   const image = useStickerImage(slot);
   const inputRef = useRef<HTMLInputElement>(null);
   const [error, setError] = useState<string | null>(null);
@@ -64,6 +70,17 @@ function StickerRow({ slot }: { slot: StickerSlotId }) {
     setBusy(false);
   };
 
+  const choosePreset = async (preset: BuiltinStickerId) => {
+    setError(null);
+    setBusy(true);
+    const failure = await selectBuiltinSticker(slot, preset).then(
+      () => null,
+      () => "Couldn't save that sticker on this device.",
+    );
+    if (failure !== null) setError(failure);
+    setBusy(false);
+  };
+
   const clearImage = async () => {
     setError(null);
     setBusy(true);
@@ -78,10 +95,12 @@ function StickerRow({ slot }: { slot: StickerSlotId }) {
   return (
     <SettingsRow
       {...searchableSetting(STICKER_SEARCH_IDS[slot])}
-      description={`${STICKER_DESCRIPTIONS[slot]} Accepts a PNG, JPEG, or WebP image up to 1 MB. It stays on this device.`}
+      description={`${STICKER_DESCRIPTIONS[slot]} Pick a Mem sprite, or upload a PNG, JPEG, or WebP image up to 1 MB. Uploads stay on this device.`}
       status={
         error ? (
           <span className="text-destructive">{error}</span>
+        ) : builtinId !== null ? (
+          `Using the ${BUILTIN_STICKER_LABELS[builtinId]} sprite.`
         ) : name ? (
           `Using ${name}.`
         ) : (
@@ -139,7 +158,28 @@ function StickerRow({ slot }: { slot: StickerSlotId }) {
           ) : null}
         </div>
       }
-    />
+    >
+      <div className="flex flex-wrap items-center gap-1.5 pb-2">
+        {BUILTIN_STICKER_IDS.map((preset) => (
+          <Button
+            aria-label={`Use the ${BUILTIN_STICKER_LABELS[preset]} sprite for ${label}`}
+            aria-pressed={builtinId === preset}
+            disabled={busy}
+            key={preset}
+            onClick={() => void choosePreset(preset)}
+            size="icon-lg"
+            variant={builtinId === preset ? "secondary" : "ghost"}
+          >
+            <img
+              alt=""
+              className="max-h-6 max-w-6 object-contain"
+              draggable={false}
+              src={BUILTIN_STICKER_SRC[preset]}
+            />
+          </Button>
+        ))}
+      </div>
+    </SettingsRow>
   );
 }
 

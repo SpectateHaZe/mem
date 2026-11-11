@@ -33,6 +33,61 @@ export function stickerSettingKey(slot: StickerSlotId): StickerSettingNameKey {
   return STICKER_SETTINGS_KEY[slot];
 }
 
+/**
+ * Built-in sprites ship inside the bundle, so a slot's setting stores the id
+ * behind a prefix instead of an uploaded file's name. Anything without the
+ * prefix is an upload, which keeps existing settings readable.
+ */
+export type BuiltinStickerId =
+  | "mem-happy"
+  | "mem-wave"
+  | "mem-sleeping"
+  | "mem-celebrate"
+  | "mem-distressed"
+  | "mem-in-control";
+
+export const BUILTIN_STICKER_IDS: ReadonlyArray<BuiltinStickerId> = [
+  "mem-happy",
+  "mem-wave",
+  "mem-sleeping",
+  "mem-celebrate",
+  "mem-distressed",
+  "mem-in-control",
+];
+
+const BUILTIN_SETTING_PREFIX = "mem:";
+
+export function builtinStickerSettingValue(id: BuiltinStickerId): string {
+  return `${BUILTIN_SETTING_PREFIX}${id}`;
+}
+
+export function parseBuiltinStickerSetting(value: string): BuiltinStickerId | null {
+  if (!value.startsWith(BUILTIN_SETTING_PREFIX)) return null;
+  const id = value.slice(BUILTIN_SETTING_PREFIX.length);
+  return BUILTIN_STICKER_IDS.find((candidate) => candidate === id) ?? null;
+}
+
+/** A turn's end is celebrated briefly, or mourned a little longer when it failed. */
+const STICKER_TRANSIENT_CELEBRATE_MS = 1200;
+const STICKER_TRANSIENT_DISTRESS_MS = 2000;
+
+export type StickerReaction = "celebrate" | "distressed";
+
+export function stickerReactionForTurnEnd(input: { readonly failed: boolean }): StickerReaction {
+  return input.failed ? "distressed" : "celebrate";
+}
+
+export function stickerReactionDurationMs(reaction: StickerReaction): number {
+  return reaction === "distressed" ? STICKER_TRANSIENT_DISTRESS_MS : STICKER_TRANSIENT_CELEBRATE_MS;
+}
+
+export async function selectBuiltinSticker(
+  slot: StickerSlotId,
+  id: BuiltinStickerId,
+): Promise<void> {
+  await updateClientSettings({ [stickerSettingKey(slot)]: builtinStickerSettingValue(id) });
+}
+
 /** The state shown in the chat view for each slot; see the ThreadSticker component. */
 export type ThreadStickerAttention = "approval" | "input" | null;
 

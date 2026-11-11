@@ -93,6 +93,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.serverRefreshUsageRates]: "server",
   [WS_METHODS.serverSignalProcess]: "server",
   [WS_METHODS.serverReportClientActivity]: "server",
+  [WS_METHODS.memOverseerListApprovals]: "memOverseer",
+  [WS_METHODS.memOverseerAnswerApproval]: "memOverseer",
   [WS_METHODS.roomsSubscribe]: "rooms",
   [WS_METHODS.roomsCreate]: "rooms",
   [WS_METHODS.roomsSend]: "rooms",
@@ -238,6 +240,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeServerConfig]: "server",
   [WS_METHODS.subscribeServerLifecycle]: "server",
   [WS_METHODS.subscribeAuthAccess]: "auth",
+  [WS_METHODS.claudeSettingsRead]: "claude",
+  [WS_METHODS.claudeSettingsWrite]: "claude",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

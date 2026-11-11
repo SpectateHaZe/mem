@@ -238,6 +238,7 @@ function importedThread(row: LegacyThreadRow): OrchestrationV2AppThread {
     updatedAt: dateTime(row.updated_at),
     archivedAt: nullableDateTime(row.archived_at),
     settledOverride: settledOverrideFor(row.settled_override),
+    lifecycle: "none",
     settledAt: nullableDateTime(row.settled_at),
     unsettledAt: nullableDateTime(row.unsettled_at),
     snoozedUntil: nullableDateTime(row.snoozed_until),

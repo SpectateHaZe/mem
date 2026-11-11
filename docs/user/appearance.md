@@ -48,6 +48,16 @@ The main sidebar, right panel, and terminal drawer open and close immediately by
 in your operating system. Moving between threads always snaps to the selected thread's panel state
 without replaying its transitions.
 
+## Stickers and the mascot
+
+On web and desktop, **Settings → Appearance** shows a sticker in the corner of the chat lane for three
+states: while the agent works, while it waits on you, and right after a turn ends. Choose one of Mem's
+built-in sprites or upload your own PNG, JPEG, or WebP image up to 1 MB. Uploads stay on that device.
+
+On wide windows, Mem also floats in the opposite corner and drifts gently while idle. It reacts as a
+turn moves through those states and ends on a short celebration, or on a frown when the turn fails.
+The drift stops while the window is in the background, and reduced motion turns it off entirely.
+
 ## Custom themes
 
 On web and desktop, choose **Create theme** to adjust a palette, or import a T3 Code or VS Code

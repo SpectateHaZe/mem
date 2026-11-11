@@ -8,6 +8,7 @@ import * as Layer from "effect/Layer";
 
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
+import * as MemIdleTracker from "../overseer/MemIdleTracker.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -166,17 +167,40 @@ export const presenceActivity = (
     readonly modelNames?: ReadonlyArray<string>;
     readonly projectNames?: ReadonlyArray<string>;
     readonly largeImageKey?: string;
+    /** The overseer is driving the sessions, so presence survives with no thread running. */
+    readonly overseerInControl?: boolean;
+    /** Only claim the owner is away when idle detection actually said so. */
+    readonly ownerAfk?: boolean;
   } = {},
 ): DiscordActivity | null => {
   const agents = Number.isFinite(liveAgents) ? Math.max(0, Math.floor(liveAgents)) : 0;
-  if (agents === 0) return null;
+  const overseer = options.overseerInControl === true;
+  if (agents === 0 && !overseer) return null;
+  const summarized = [
+    summarizeStatePart(options.projectNames ?? []),
+    summarizeStatePart(options.modelNames ?? []),
+  ]
+    .filter((part) => part !== undefined)
+    .join(" · ");
   const state = truncateDiscordText(
-    [summarizeStatePart(options.projectNames ?? []), summarizeStatePart(options.modelNames ?? [])]
-      .filter((part) => part !== undefined)
+    [
+      overseer && options.ownerAfk === true ? "user is afk" : "",
+      overseer
+        ? agents === 0
+          ? "mem in control"
+          : `mem in control · ${agents} working`
+        : summarized,
+    ]
+      .filter((part) => part !== "")
       .join(" · "),
   );
+  const details = overseer
+    ? "Mem is in control"
+    : agents === 1
+      ? "1 agent working"
+      : `${agents} agents working`;
   const activity: DiscordActivity = {
-    details: agents === 1 ? "1 agent working" : `${agents} agents working`,
+    details,
     ...(state.length < DISCORD_FIELD_MIN_LENGTH ? {} : { state }),
     timestamps: { start: Math.floor(startedAtMs) },
   };
@@ -366,6 +390,7 @@ const makeSweep = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
+  const idleTracker = yield* MemIdleTracker.MemIdleTracker;
   const ipc = new DiscordIpc(
     discordIpcPathCandidates(yield* HostProcess.Platform, yield* HostProcess.Environment),
   );
@@ -376,7 +401,7 @@ const makeSweep = Effect.gen(function* () {
 
   return Effect.fn("DiscordPresence.sweep")(function* () {
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-    const { discordClientId, discordPresenceShowProjectName } = yield* settings.getSettings;
+    const { discordClientId, discordPresenceShowProjectName, mem } = yield* settings.getSettings;
     const clientId = discordClientId.trim();
     // Settings changes apply on the next tick instead of after the presence interval.
     if (clientId === lastClientId && nowMs - lastCheckMs < CHECK_INTERVAL_MS) return;
@@ -389,7 +414,7 @@ const makeSweep = Effect.gen(function* () {
       clientId === ""
         ? []
         : (yield* projections.listActiveShellIndex()).filter((thread) => thread.mayBeLive);
-    if (liveThreads.length === 0) {
+    if (liveThreads.length === 0 && !mem.enabled) {
       activityStartedAtMs = undefined;
       ipc.update(clientId, null);
       return;
@@ -401,6 +426,8 @@ const makeSweep = Effect.gen(function* () {
       discordPresenceShowProjectName && projectIds.length > 0
         ? (yield* projects.list({ projectIds })).map((project) => project.title)
         : [];
+    // The sweep already runs on its own interval, so the idle check rides along instead of a timer.
+    const ownerAfk = mem.enabled ? yield* idleTracker.isOwnerAway(mem.idleThresholdMinutes) : false;
     ipc.update(
       clientId,
       presenceActivity(liveThreads.length, activityStartedAtMs, {
@@ -408,6 +435,8 @@ const makeSweep = Effect.gen(function* () {
           .map((thread) => thread.modelName)
           .filter((name): name is string => name !== null),
         projectNames,
+        overseerInControl: mem.enabled,
+        ownerAfk,
       }),
     );
   });

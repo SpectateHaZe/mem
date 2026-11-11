@@ -80,6 +80,34 @@ it("clears the status when no agent is working", () => {
   assert.equal(presenceActivity(3, 1_700_000_000_000)?.details, "3 agents working");
 });
 
+it("says Mem is in control while the overseer is on, even with no thread running", () => {
+  assert.isNull(presenceActivity(0, 1_700_000_000_000));
+  const idle = presenceActivity(0, 1_700_000_000_000, { overseerInControl: true });
+  assert.equal(idle?.details, "Mem is in control");
+  assert.equal(idle?.state, "mem in control");
+
+  const busy = presenceActivity(2, 1_700_000_000_000, {
+    overseerInControl: true,
+    modelNames: ["gpt-5.4"],
+  });
+  assert.equal(busy?.details, "Mem is in control");
+  assert.equal(busy?.state, "mem in control · 2 working");
+});
+
+it("claims the owner is away only when idle detection says so", () => {
+  const away = presenceActivity(1, 1_700_000_000_000, {
+    overseerInControl: true,
+    ownerAfk: true,
+  });
+  assert.equal(away?.state, "user is afk · mem in control · 1 working");
+
+  const present = presenceActivity(1, 1_700_000_000_000, {
+    overseerInControl: true,
+    ownerAfk: false,
+  });
+  assert.notInclude(present?.state ?? "", "afk");
+});
+
 it("keeps the details count and shows one model in state", () => {
   const activity = presenceActivity(2, 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
   assert.equal(activity?.details, "2 agents working");

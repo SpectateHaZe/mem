@@ -288,6 +288,7 @@ function projectionOf(thread: FakeThread): OrchestrationV2ThreadProjection {
       archivedAt: null,
       settledOverride: null,
       settledAt: null,
+      lifecycle: "none" as const,
       lastVisitedAt: AT,
       deletedAt: null,
     },

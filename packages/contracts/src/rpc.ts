@@ -33,6 +33,11 @@ import {
   ChatGptHandoffInput,
   ChatGptHandoffState,
 } from "./providerSetup.ts";
+import {
+  MemAnswerApprovalInput,
+  MemAnswerApprovalResult,
+  MemPendingApprovalsResult,
+} from "./memOverseer.ts";
 import * as Schema from "effect/Schema";
 import {
   Room,
@@ -94,6 +99,12 @@ import {
   AcpRegistrySetProviderResult,
 } from "./acpRegistry.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
+import {
+  ClaudeSettingsReadInput,
+  ClaudeSettingsSnapshot,
+  ClaudeSettingsWriteError,
+  ClaudeSettingsWriteInput,
+} from "./claudeSettings.ts";
 import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
@@ -558,8 +569,12 @@ export const WS_METHODS = {
   serverPrepareTriage: "server.prepareTriage",
   serverSignalProcess: "server.signalProcess",
   serverReportClientActivity: "server.reportClientActivity",
+  memOverseerListApprovals: "memOverseer.listApprovals",
+  memOverseerAnswerApproval: "memOverseer.answerApproval",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
+  claudeSettingsRead: "claude.readSettings",
+  claudeSettingsWrite: "claude.writeSettings",
 
   roomsSubscribe: "rooms.subscribe",
   roomsCreate: "rooms.create",
@@ -1019,6 +1034,18 @@ const WsServerRefreshUsageRatesRpc = Rpc.make(WS_METHODS.serverRefreshUsageRates
   error: EnvironmentAuthorizationError,
 });
 
+const WsClaudeSettingsReadRpc = Rpc.make(WS_METHODS.claudeSettingsRead, {
+  payload: ClaudeSettingsReadInput,
+  success: ClaudeSettingsSnapshot,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsClaudeSettingsWriteRpc = Rpc.make(WS_METHODS.claudeSettingsWrite, {
+  payload: ClaudeSettingsWriteInput,
+  success: ClaudeSettingsSnapshot,
+  error: Schema.Union([ClaudeSettingsWriteError, EnvironmentAuthorizationError]),
+});
+
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
   payload: ServerSignalProcessInput,
   success: ServerSignalProcessResult,
@@ -1040,6 +1067,18 @@ const WsCloudInstallRelayClientRpc = Rpc.make(WS_METHODS.cloudInstallRelayClient
 
 const WsServerReportClientActivityRpc = Rpc.make(WS_METHODS.serverReportClientActivity, {
   payload: ClientActivityReportInput,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsMemOverseerListApprovalsRpc = Rpc.make(WS_METHODS.memOverseerListApprovals, {
+  payload: Schema.Struct({}),
+  success: MemPendingApprovalsResult,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsMemOverseerAnswerApprovalRpc = Rpc.make(WS_METHODS.memOverseerAnswerApproval, {
+  payload: MemAnswerApprovalInput,
+  success: MemAnswerApprovalResult,
   error: EnvironmentAuthorizationError,
 });
 
@@ -2195,6 +2234,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerPrepareTriageRpc,
   WsServerGetUsageSummaryRpc,
   WsServerRefreshUsageRatesRpc,
+  WsClaudeSettingsReadRpc,
+  WsClaudeSettingsWriteRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
   WsRoomsSubscribeRpc,
@@ -2216,6 +2257,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsScheduledTasksListWebhookDeliveriesRpc,
   WsScheduledTasksGetWebhookDeliveryRpc,
   WsServerReportClientActivityRpc,
+  WsMemOverseerListApprovalsRpc,
+  WsMemOverseerAnswerApprovalRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,
   WsPullRequestsListRpc,

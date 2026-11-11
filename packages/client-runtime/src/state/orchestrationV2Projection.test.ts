@@ -83,6 +83,7 @@ const emptyProjection = {
     archivedAt: null,
     settledOverride: null,
     settledAt: null,
+    lifecycle: "none",
     lastVisitedAt: null,
     deletedAt: null,
   },

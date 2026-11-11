@@ -175,6 +175,8 @@ export interface EnvironmentThreadShell {
   readonly archivedAt: string | null;
   readonly settledOverride: "settled" | "active" | null;
   readonly settledAt: string | null;
+  /** Absent on threads marked before this existed; read with `threadLifecycleOf`. */
+  readonly lifecycle?: ThreadLifecycle | undefined;
   readonly unsettledAt: string | null;
   readonly snoozedUntil: string | null;
   readonly snoozedAt: string | null;
@@ -255,6 +257,23 @@ export function scopeProject(
 
 export type PendingSubagentRequest = "approval" | "user_input";
 
+export const THREAD_LIFECYCLES = ["none", "in_progress", "complete", "abandoned"] as const;
+
+export type ThreadLifecycle = (typeof THREAD_LIFECYCLES)[number];
+
+function isThreadLifecycle(value: unknown): value is ThreadLifecycle {
+  return (THREAD_LIFECYCLES as ReadonlyArray<unknown>).includes(value);
+}
+
+/**
+ * The shell payload forwards the stored thread's mark; the contract shell type has not caught up,
+ * so read it at runtime and treat anything unknown as unmarked.
+ */
+export function threadLifecycleOf(thread: object): ThreadLifecycle {
+  const value = (thread as { readonly lifecycle?: unknown }).lifecycle;
+  return isThreadLifecycle(value) ? value : "none";
+}
+
 export function presentThreadShell(
   environmentId: EnvironmentId,
   thread: OrchestrationV2ThreadShell,
@@ -330,6 +349,7 @@ export function presentThreadShell(
     archivedAt: nullableIso(thread.archivedAt),
     settledOverride: thread.settledOverride,
     settledAt: nullableIso(thread.settledAt),
+    lifecycle: threadLifecycleOf(thread),
     unsettledAt: nullableIso(thread.unsettledAt ?? null),
     snoozedUntil: nullableIso(thread.snoozedUntil ?? null),
     snoozedAt: nullableIso(thread.snoozedAt ?? null),

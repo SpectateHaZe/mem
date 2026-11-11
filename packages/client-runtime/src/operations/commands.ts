@@ -523,6 +523,20 @@ export const setThreadAutoSettle = Effect.fn("EnvironmentCommands.setThreadAutoS
   });
 });
 
+export interface SetThreadLifecycleInput extends ThreadCommandInput {
+  readonly lifecycle: "none" | "in_progress" | "complete" | "abandoned";
+}
+export const setThreadLifecycle = Effect.fn("EnvironmentCommands.setThreadLifecycle")(function* (
+  input: SetThreadLifecycleInput,
+) {
+  return yield* dispatch({
+    type: "thread.lifecycle.set",
+    commandId: yield* allocateCommandId(input),
+    threadId: input.threadId,
+    lifecycle: input.lifecycle,
+  });
+});
+
 export const reorderPinnedThread = Effect.fn("EnvironmentCommands.reorderPinnedThread")(function* (
   input: ReorderPinnedThreadInput,
 ) {

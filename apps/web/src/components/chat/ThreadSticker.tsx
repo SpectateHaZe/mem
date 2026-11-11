@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { useClientSettings } from "../../hooks/useSettings";
 import { cn } from "../../lib/utils";
 import { useStickerImage } from "../../hooks/useStickerImage";
+import { useTurnEndReaction } from "../../hooks/useTurnEndReaction";
+import { BUILTIN_STICKER_SRC } from "../../lib/memStickers";
 import {
   stickerSettingKey,
   stickerSlotForTurnState,
@@ -10,18 +12,24 @@ import {
 } from "../../lib/stickers";
 
 /**
- * The state machine itself (which slot answers which turn state) lives in
- * stickerSlotForTurnState so it can be tested without the view. "Finished"
- * here is a transition: the chat is free and was working on the same thread.
+ * stickerSlotForTurnState owns the slot decision so it stays testable; the
+ * reaction layers Mem over the slot for a moment. "Finished" here is a
+ * transition: the chat is free and was working on the same thread.
  */
 export function ThreadSticker(props: {
   readonly threadKey: string;
   readonly isWorking: boolean;
   readonly awaitingUser: ThreadStickerAttention;
+  readonly failed: boolean;
   readonly className?: string;
 }) {
   const [turnRecentlyCompleted, setTurnRecentlyCompleted] = useState(false);
   const wasWorkingRef = useRef(false);
+  const reaction = useTurnEndReaction({
+    isWorking: props.isWorking,
+    failed: props.failed,
+    resetKey: props.threadKey,
+  });
   const slot = stickerSlotForTurnState({
     isWorking: props.isWorking,
     awaitingUser: props.awaitingUser,
@@ -55,8 +63,13 @@ export function ThreadSticker(props: {
   const nameKey = slot === null ? "stickerWorkingName" : stickerSettingKey(slot);
   const configured = useClientSettings((settings) => settings[nameKey].length > 0);
   const image = useStickerImage(slot ?? "working");
+  const reactionImage =
+    reaction === null
+      ? null
+      : BUILTIN_STICKER_SRC[reaction === "distressed" ? "mem-distressed" : "mem-celebrate"];
+  const src = reactionImage ?? (configured ? image : null);
 
-  if (slot === null || !configured) return null;
+  if (slot === null || src === null) return null;
 
   return (
     <div
@@ -68,9 +81,7 @@ export function ThreadSticker(props: {
         props.className,
       )}
     >
-      {image === null ? null : (
-        <img alt="" className="max-h-16 max-w-24 object-contain" draggable={false} src={image} />
-      )}
+      <img alt="" className="max-h-16 max-w-24 object-contain" draggable={false} src={src} />
     </div>
   );
 }

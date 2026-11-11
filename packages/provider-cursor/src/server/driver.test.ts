@@ -312,6 +312,7 @@ it.layer(layerTest)("CursorDriver", (it) => {
             archivedAt: null,
             settledOverride: null,
             settledAt: null,
+            lifecycle: "none" as const,
             lastVisitedAt: null,
             deletedAt: null,
           },

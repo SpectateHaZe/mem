@@ -1,9 +1,14 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  BUILTIN_STICKER_IDS,
+  builtinStickerSettingValue,
+  parseBuiltinStickerSetting,
   STICKERS_MAX_BYTES,
   stickerContentError,
   stickerFileError,
+  stickerReactionDurationMs,
+  stickerReactionForTurnEnd,
   stickerSlotForTurnState,
 } from "./stickers";
 
@@ -156,5 +161,32 @@ describe("sticker slot for turn state", () => {
         turnRecentlyCompleted: false,
       }),
     ).toBeNull();
+  });
+});
+
+describe("built-in sticker settings", () => {
+  it("round-trips every shipped sprite id", () => {
+    for (const id of BUILTIN_STICKER_IDS) {
+      expect(parseBuiltinStickerSetting(builtinStickerSettingValue(id))).toBe(id);
+    }
+  });
+
+  it("reads anything else as an uploaded file's name", () => {
+    expect(parseBuiltinStickerSetting("")).toBeNull();
+    expect(parseBuiltinStickerSetting("my-cat.png")).toBeNull();
+    expect(parseBuiltinStickerSetting("mem-happy.webp")).toBeNull();
+    expect(parseBuiltinStickerSetting("mem:mem-happy.png")).toBeNull();
+  });
+});
+
+describe("sticker reaction for a turn that ended", () => {
+  it("celebrates a completed turn briefly", () => {
+    expect(stickerReactionForTurnEnd({ failed: false })).toBe("celebrate");
+    expect(stickerReactionDurationMs("celebrate")).toBe(1200);
+  });
+
+  it("holds the distressed sprite a little longer after a failure", () => {
+    expect(stickerReactionForTurnEnd({ failed: true })).toBe("distressed");
+    expect(stickerReactionDurationMs("distressed")).toBe(2000);
   });
 });

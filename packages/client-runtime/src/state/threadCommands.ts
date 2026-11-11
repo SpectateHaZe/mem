@@ -7,6 +7,7 @@ import {
   WS_METHODS,
   type EnvironmentId,
   type OrchestrationV2ShellSnapshot,
+  type OrchestrationV2ThreadShell,
 } from "@t3tools/contracts";
 
 import { createOptimisticThreadLifecycle } from "./threadLifecycle.ts";
@@ -45,6 +46,7 @@ import {
   reorderPinnedThread,
   reorderActiveThread,
   setThreadAutoSettle,
+  setThreadLifecycle,
   settleThread,
   snoozeThread,
   startThreadTurn,
@@ -200,6 +202,12 @@ export function createThreadEnvironmentAtoms<R, E>(
     setAutoSettle: createEnvironmentCommand(runtime, {
       label: "environment-data:commands:thread:set-auto-settle",
       execute: setThreadAutoSettle,
+      scheduler,
+      concurrency,
+    }),
+    setLifecycle: createEnvironmentCommand(runtime, {
+      label: "environment-data:commands:thread:set-lifecycle",
+      execute: setThreadLifecycle,
       scheduler,
       concurrency,
     }),
@@ -424,6 +432,15 @@ export function createThreadEnvironmentAtoms<R, E>(
       ...thread,
       autoSettleDisabledAt: input.enabled ? null : (thread.autoSettleDisabledAt ?? now),
     })),
+    setLifecycle: optimistic.wrap(
+      commands.setLifecycle,
+      (thread, input) =>
+        ({
+          ...thread,
+          lifecycle: input.lifecycle,
+          // The shell forwards the stored mark at runtime; its contract type has not caught up yet.
+        }) as OrchestrationV2ThreadShell,
+    ),
     pin: optimistic.wrap(commands.pin, (thread, input, now) => ({
       ...thread,
       pinnedAt: thread.pinnedAt ?? now,

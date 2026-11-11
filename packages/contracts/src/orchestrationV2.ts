@@ -477,6 +477,11 @@ export const OrchestrationV2AppThread = Schema.Struct({
   settledOverride: Schema.NullOr(Schema.Literals(["settled", "active"])).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /**
+   * What the owner decided this thread is for. `in_progress` is the only value that lets the Mem
+   * overseer steer it; absent or `none` means unmarked and therefore untouchable.
+   */
+  lifecycle: Schema.optional(Schema.Literals(["none", "in_progress", "complete", "abandoned"])),
   settledAt: Schema.NullOr(Schema.DateTimeUtc).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
@@ -2115,6 +2120,8 @@ export const OrchestrationV2ThreadShell = Schema.Struct({
   lineage: OrchestrationV2AppThreadLineage,
   forkedFrom: Schema.NullOr(OrchestrationV2AppThread.fields.forkedFrom),
   activeProviderThreadId: Schema.NullOr(ProviderThreadId),
+  /** Absent on threads written before the owner could mark them; read as `none`. */
+  lifecycle: Schema.optional(Schema.Literals(["none", "in_progress", "complete", "abandoned"])),
   historyOrigin: Schema.optional(OrchestrationV2ThreadHistoryOrigin),
   linkOrigin: Schema.optional(OrchestrationV2LinkOrigin),
   delegatedFrom: Schema.optional(OrchestrationV2DelegatedFrom),
@@ -3028,6 +3035,13 @@ export const OrchestrationV2Command = Schema.Union([
     commandId: CommandId,
     threadId: ThreadId,
     reason: Schema.Literal("user"),
+  }),
+  /** The owner's intent for this thread; only `in_progress` lets the Mem overseer steer it. */
+  Schema.Struct({
+    type: Schema.Literal("thread.lifecycle.set"),
+    commandId: CommandId,
+    threadId: ThreadId,
+    lifecycle: Schema.Literals(["none", "in_progress", "complete", "abandoned"]),
   }),
   Schema.Struct({
     type: Schema.Literal("thread.auto-settle.set"),

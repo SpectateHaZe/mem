@@ -35,12 +35,14 @@ import { usageLimitRecoveryBannerItem } from "./chat/UsageLimitRecoveryBanner";
 import { resolveDraftHeroState } from "./ChatView.logic";
 import { useQueuedRunEdit } from "./chat/useQueuedRunEdit";
 import { recallCheckoutIsRepo, rememberCheckoutIsRepo } from "./ChatView.logic";
+import { useComputerUseOverlayState } from "../hooks/useComputerUseOverlayState";
 import { useLogicalProjectEnvironments } from "../hooks/useLogicalProjectEnvironments";
 import { useStableCallback } from "../hooks/useStableCallback";
 import { useProjectScriptEditing } from "./chat/useProjectScriptEditing";
 import { RightPanelSurfaceContent } from "./chat/RightPanelSurfaceContent";
 import { usePendingThreadRequests } from "./chat/usePendingThreadRequests";
 import { ThreadSticker } from "./chat/ThreadSticker";
+import { MemMascot } from "./chat/MemMascot";
 import { isScratchProject } from "@t3tools/client-runtime/state/projects";
 import { visibleThreadPullRequests } from "@t3tools/shared/threadPullRequests";
 import type { UsageLimitSourceSnapshots } from "@t3tools/contracts";
@@ -809,6 +811,10 @@ export default function ChatView(props: ChatViewProps) {
   const activeLatestRun = isServerThread ? serverLatestRun : (activeThread?.latestRun ?? null);
   const activeActivityRun = isServerThread ? serverActivityRun : (activeThread?.latestRun ?? null);
   const activeRuntime = isServerThread ? serverRuntime : (activeThread?.runtime ?? null);
+  useComputerUseOverlayState({
+    rows: serverVisibleTurnItems,
+    runId: activeActivityRun?.runId ?? null,
+  });
   const hasHeldQueuedRuns =
     isServerThread &&
     serverProjection?.runs.some((run) => run.status === "queued" && run.queueHeld === true) ===
@@ -3209,6 +3215,7 @@ export default function ChatView(props: ChatViewProps) {
           activeThreadShell?.hasPendingUserInput === true
         ? "input"
         : null;
+  const turnFailed = activeActivityRun?.status === "failed";
 
   const rightPanelContent = activeThreadRef ? (
     <RightPanelSurfaceContent
@@ -3505,6 +3512,14 @@ export default function ChatView(props: ChatViewProps) {
 
               <ThreadSticker
                 awaitingUser={awaitingUser}
+                failed={turnFailed}
+                isWorking={isWorking}
+                threadKey={displayedTimelineKey}
+              />
+
+              <MemMascot
+                awaitingUser={awaitingUser}
+                failed={turnFailed}
                 isWorking={isWorking}
                 threadKey={displayedTimelineKey}
               />

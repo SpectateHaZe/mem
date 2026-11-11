@@ -583,6 +583,7 @@ function commandThreadId(command: OrchestrationV2ServerCommand): ThreadId {
     case "thread.unsettle":
     case "thread.snooze":
     case "thread.unsnooze":
+    case "thread.lifecycle.set":
     case "thread.auto-settle.set":
     case "thread.pin":
     case "thread.unpin":
@@ -3111,6 +3112,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       archivedAt: null,
       settledOverride: null,
       settledAt: null,
+      lifecycle: "none",
       snoozedUntil: null,
       snoozedAt: null,
       lastVisitedAt: null,
@@ -3374,6 +3376,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           | "thread.unsettle"
           | "thread.snooze"
           | "thread.unsnooze"
+          | "thread.lifecycle.set"
           | "thread.auto-settle.set"
           | "thread.pin"
           | "thread.unpin"
@@ -3884,6 +3887,10 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
             updatedAt: alreadyAwake ? thread.updatedAt : now,
           };
         }
+        case "thread.lifecycle.set": {
+          if (thread.lifecycle === command.lifecycle) return thread;
+          return { ...thread, lifecycle: command.lifecycle, updatedAt: now };
+        }
         case "thread.auto-settle.set": {
           const unchanged = command.enabled === (thread.autoSettleDisabledAt == null);
           return {
@@ -4307,6 +4314,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           return "thread.snoozed" as const;
         case "thread.unsnooze":
           return "thread.unsnoozed" as const;
+        case "thread.lifecycle.set":
+          return "thread.metadata-updated" as const;
         case "thread.auto-settle.set":
           return "thread.auto-settle-set" as const;
         case "thread.pin":

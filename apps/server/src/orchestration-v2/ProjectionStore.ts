@@ -1942,6 +1942,9 @@ function shellFromState(input: {
     lineage: input.state.thread.lineage,
     forkedFrom: input.state.thread.forkedFrom,
     activeProviderThreadId: input.state.thread.activeProviderThreadId,
+    ...(input.state.thread.lifecycle === undefined
+      ? {}
+      : { lifecycle: input.state.thread.lifecycle }),
     ...(input.state.thread.historyOrigin === undefined
       ? {}
       : { historyOrigin: input.state.thread.historyOrigin }),

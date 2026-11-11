@@ -583,6 +583,32 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
   will-change: var(--visible-animation-will-change, auto);
 }
 
+/* The mascot's idle drift: one eased lift per cycle with a hold at each end, so
+   the compositor moves a single composited transform and nothing repaints. */
+@keyframes mem-mascot-bob {
+  0%,
+  12% {
+    transform: translate3d(0, 0, 0);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  45%,
+  62% {
+    transform: translate3d(0, -5px, 0);
+    animation-timing-function: cubic-bezier(0.45, 0, 0.55, 1);
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+}
+
+@utility mem-mascot-bob {
+  @media (prefers-reduced-motion: no-preference) {
+    animation: mem-mascot-bob 3.6s infinite;
+    animation-play-state: var(--visible-animation-state, paused);
+    will-change: var(--visible-animation-will-change, auto);
+  }
+}
+
 @keyframes live-activity-focus {
   from {
     transform: translateX(0);

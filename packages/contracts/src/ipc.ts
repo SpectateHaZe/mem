@@ -95,6 +95,9 @@ export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Beta", "Dev", "Nightly"]);
 
+export const DesktopComputerUseOverlayState = Schema.Literals(["hidden", "driving", "inspecting"]);
+export type DesktopComputerUseOverlayState = typeof DesktopComputerUseOverlayState.Type;
+
 export interface DesktopAppBranding {
   baseName: string;
   stageLabel: DesktopAppStageLabel;
@@ -1048,6 +1051,7 @@ export interface DesktopBridge {
   getPathForFile: (file: File) => string;
   getClientPlatform: () => string;
   setNotificationBadge: (badge: { count: number; image: string | null }) => Promise<void>;
+  setComputerUseOverlayState: (state: DesktopComputerUseOverlayState) => Promise<void>;
   onNotificationBadgeClear: (listener: () => void) => () => void;
   onTrackpadScrollBegin: (listener: () => void) => () => void;
   onTrackpadScrollEnd: (listener: () => void) => () => void;
