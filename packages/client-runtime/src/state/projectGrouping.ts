@@ -13,6 +13,16 @@ import { normalizeProjectPathForComparison } from "./projects.ts";
 
 const SCRATCH_PROJECT_SCOPE_KEY = "\0no-project";
 
+/**
+ * Quick chats share one logical sidebar section. It is presented as its own
+ * place, not as a project, so the label lives here and nowhere else.
+ */
+const SCRATCH_PROJECT_GROUP_LABEL = "Chats";
+
+export function isScratchProjectGroupKey(key: string): boolean {
+  return key === SCRATCH_PROJECT_SCOPE_KEY;
+}
+
 export interface ProjectGroupingSettings {
   readonly sidebarProjectGroupingMode: SidebarProjectGroupingMode;
   readonly sidebarProjectGroupingOverrides: Record<string, SidebarProjectGroupingMode>;
@@ -364,7 +374,7 @@ export function buildProjectGroups<TProject extends EnvironmentProject>(input: {
       key,
       label:
         input.groupScratchProjects && representative.isScratch
-          ? "No project"
+          ? SCRATCH_PROJECT_GROUP_LABEL
           : members.length > 1
             ? deriveProjectGroupLabel({
                 representative,

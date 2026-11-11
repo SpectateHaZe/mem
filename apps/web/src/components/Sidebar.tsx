@@ -126,6 +126,7 @@ import {
   useThreadActions,
 } from "../hooks/useThreadActions";
 import { useHandleNewThread } from "../hooks/useHandleNewThread";
+import { useScratchProject } from "../hooks/useScratchProject";
 import { useOrderWhileOpen } from "../hooks/useOrderWhileOpen";
 import { useProjectPin } from "../hooks/useProjectGroupUpdate";
 import { useSidebarProjectGroups } from "../hooks/useSidebarProjectGroups";
@@ -2951,6 +2952,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   );
   const showJumpHints = useThreadJumpHintsVisible(shouldShowJumpHintsNow);
 
+  // Quick chats reuse the existing scratch workspace: no project is picked, and
+  // the thread still owns a real directory so it can be promoted later.
+  const scratchProjectActions = useScratchProject();
+  const handleNewChatClick = useStableCallback(() => {
+    const environmentId = scratchProjectActions.scratchEnvironmentId(
+      newThreadContext.activeThread?.environmentId ??
+        newThreadContext.activeDraftThread?.environmentId ??
+        null,
+    );
+    if (environmentId === null) return;
+    if (isMobile) setOpenMobile(false);
+    void scratchProjectActions.startScratchThread(environmentId);
+  });
+
   const handleNewThreadClick = (event?: ReactMouseEvent) => {
     if (
       shouldCreateNewThreadInCurrentProject(
@@ -2981,6 +2996,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       ? shortcutLabelForCommand(keybindings, "chat.newLocal")
       : undefined);
   const newThreadInProjectShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newLocal");
+  const newChatShortcutLabel = shortcutLabelForCommand(keybindings, "chat.newWithoutProject");
   return (
     <>
       <ThreadContextDragGhost />
@@ -2992,6 +3008,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           <SidebarGroup className="z-[1]">
             <SidebarThreadHeader
               hasProjects={projectGroups.length > 0}
+              onNewChat={handleNewChatClick}
+              newChatShortcutLabel={newChatShortcutLabel}
               projectScope={
                 <Combobox
                   items={projectScopeItems}

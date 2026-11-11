@@ -301,7 +301,7 @@ export function DraftHeroHeadline({
           }
         >
           <DraftProjectName
-            value={isScratchDraft ? "No project" : (activeProjectTitle ?? "Choose a project")}
+            value={isScratchDraft ? "Chats" : (activeProjectTitle ?? "Choose a project")}
             singleLine
           />
         </TooltipTrigger>

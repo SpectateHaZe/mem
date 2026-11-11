@@ -1,4 +1,10 @@
-import { FolderPlusIcon, SearchIcon, SquarePenIcon, XIcon } from "lucide-react";
+import {
+  FolderPlusIcon,
+  MessageSquareDashedIcon,
+  SearchIcon,
+  SquarePenIcon,
+  XIcon,
+} from "lucide-react";
 import {
   type ComponentProps,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -14,6 +20,8 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export interface SidebarThreadHeaderProps {
   hasProjects: boolean;
+  onNewChat: () => void;
+  newChatShortcutLabel: string | null | undefined;
   projectScope: ReactNode;
   onNewProject: () => void;
   onNewThread: (event: ReactMouseEvent) => void;
@@ -33,6 +41,8 @@ export interface SidebarThreadHeaderProps {
 
 export function SidebarThreadHeader({
   hasProjects,
+  onNewChat,
+  newChatShortcutLabel,
   projectScope,
   onNewProject,
   onNewThread,
@@ -105,6 +115,12 @@ export function SidebarThreadHeader({
             </SidebarHeaderIconButton>
           </>
         ) : null}
+        <SidebarHeaderIconButton
+          label={newChatShortcutLabel ? `New chat (${newChatShortcutLabel})` : "New chat"}
+          onClick={onNewChat}
+        >
+          <MessageSquareDashedIcon />
+        </SidebarHeaderIconButton>
         <SidebarHeaderIconButton
           label="New thread"
           tooltip={

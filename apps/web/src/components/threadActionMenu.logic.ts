@@ -196,7 +196,7 @@ export function buildThreadActionMenuItems(
       ? [
           {
             id: "turn-into-project" as const,
-            label: "Turn into project",
+            label: "Turn chat into project",
             icon: "folder-plus",
             disabled: state.isRunning,
           },

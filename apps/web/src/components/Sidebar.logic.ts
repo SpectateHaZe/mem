@@ -1,5 +1,6 @@
 import type { EnvironmentServerConfig } from "@t3tools/client-runtime/connection";
 import { scopeThreadRef, scopedThreadKey } from "@t3tools/client-runtime/environment";
+import { isScratchProjectGroupKey } from "@t3tools/client-runtime/state/project-grouping";
 import { resolveThreadWorkingStartedAt } from "@t3tools/client-runtime/state/models";
 import { isShownUnderParent } from "@t3tools/client-runtime/state/threads";
 import { backgroundWorkHoldsCompletion } from "@t3tools/shared/orchestrationV2PendingBackgroundWork";
@@ -1294,13 +1295,22 @@ export function sortLogicalProjectsForSidebar<
     }
   }
 
-  return sortProjectsByActivity(
+  const sorted = sortProjectsByActivity(
     projects,
     sortOrder,
     (project) => threadsByProjectKey.get(project.projectKey) ?? [],
     (left, right) =>
       left.title.localeCompare(right.title) || left.projectKey.localeCompare(right.projectKey),
   );
+
+  // Quick chats are a separate workspace, not a project: they always sit above
+  // the project list so a stray chat never lands between two repositories.
+  const chatGroups = sorted.filter((project) => isScratchProjectGroupKey(project.projectKey));
+  if (chatGroups.length === 0) return sorted;
+  return [
+    ...chatGroups,
+    ...sorted.filter((project) => !isScratchProjectGroupKey(project.projectKey)),
+  ];
 }
 
 export function sortSidebarV2ProjectGroups<
