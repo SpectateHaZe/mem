@@ -2,6 +2,7 @@ import * as Effect from "effect/Effect";
 import * as Schema from "effect/Schema";
 
 import { TrimmedString } from "./baseSchemas.ts";
+import { ModelSelection } from "./modelSelection.ts";
 
 /**
  * The bar Mem holds a finished session to before it accepts the work.
@@ -72,6 +73,21 @@ export const MemOverseerSettings = Schema.Struct({
   ),
   /** Screenshot the finished work for the completion summary. Costs a computer-use pass. */
   summaryWithImages: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /**
+   * How Mem spends the owner's weekly budget. `on_pace` drops to the economy model when spending
+   * runs ahead of the week; `full` always uses the premium model.
+   */
+  paceMode: Schema.Literals(["on_pace", "full"]).pipe(
+    Schema.withDecodingDefault(Effect.succeed("on_pace")),
+  ),
+  /** The model Mem uses when the pace allows, or always in `full` mode. */
+  premiumModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
+  /** The model Mem drops to when spending outruns the week. */
+  economyModelSelection: Schema.NullOr(ModelSelection).pipe(
+    Schema.withDecodingDefault(Effect.succeed(null)),
+  ),
 });
 export type MemOverseerSettings = typeof MemOverseerSettings.Type;
 

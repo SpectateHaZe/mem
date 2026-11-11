@@ -559,6 +559,27 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["idle away inactivity minutes untouched overseer threshold"],
   },
   {
+    id: "mem-pace-mode",
+    title: "Spending pace",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["pace weekly budget economy premium model full on pace spending ahead overspend"],
+  },
+  {
+    id: "mem-premium-model",
+    title: "Premium model",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["model premium review strong expensive overseer"],
+  },
+  {
+    id: "mem-economy-model",
+    title: "Economy model",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: ["model economy cheap review budget fallback overseer"],
+  },
+  {
     id: "mem-quality-prompt",
     title: "Quality bar",
     to: "/settings/threads",

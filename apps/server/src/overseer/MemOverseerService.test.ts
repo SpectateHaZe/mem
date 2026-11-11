@@ -17,6 +17,7 @@ import { describe, expect, it } from "vite-plus/test";
 import * as ServerConfig from "../config.ts";
 import { isDestructiveDeletion, type MemDestructiveSignals } from "./MemDestructiveChange.ts";
 import * as MemIdleTracker from "./MemIdleTracker.ts";
+import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
   fingerprintEvidence,
   makeMemOverseerService,
@@ -108,12 +109,23 @@ const makeHarness = (options: HarnessOptions = {}) => {
   let listCalls = 0;
 
   const ports: MemOverseerPorts = {
-    loadSettings: () =>
-      Effect.succeed({
+    loadSettings: () => {
+      const selection =
+        options.modelSelection === undefined ? modelSelection : options.modelSelection;
+      const pace: MemPaceDecision =
+        selection === null
+          ? { kind: "unset", reason: "no premium or economy model is set" }
+          : {
+              kind: "premium",
+              selection,
+              reason: "on pace (20% spent, 40% of week elapsed)",
+            };
+      return Effect.succeed({
         mem: { ...DEFAULT_MEM_OVERSEER_SETTINGS, enabled: true, ...options.mem },
-        modelSelection:
-          options.modelSelection === undefined ? modelSelection : options.modelSelection,
-      }),
+        modelSelection: selection,
+        pace,
+      });
+    },
     isOwnerAway: () => Effect.succeed(options.away ?? true),
     listThreads: () => {
       listCalls += 1;

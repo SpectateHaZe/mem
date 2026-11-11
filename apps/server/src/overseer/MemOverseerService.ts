@@ -18,11 +18,7 @@ import {
   type ServerSettings as ServerSettingsValue,
   ThreadId,
 } from "@t3tools/contracts";
-import {
-  defaultTextGenerationModel,
-  fallbackTextGenerationModelSelection,
-  isModelSelectionProviderEnabled,
-} from "@t3tools/shared/serverSettings";
+import { elapsedShare } from "@t3tools/shared/usageLimits";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
@@ -36,6 +32,7 @@ import * as SecureRandom from "effect/crypto/SecureRandom";
 
 import { isDestructiveDeletion } from "./MemDestructiveChange.ts";
 import { MemIdleTracker } from "./MemIdleTracker.ts";
+import { chooseModel, type MemPaceDecision, type MemPaceInputs } from "./MemModelPace.ts";
 import {
   buildReviewContext,
   MEM_REVIEW_MAX_BATCHES,
@@ -58,6 +55,7 @@ import {
 } from "./MemOverseerTaskStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
@@ -104,8 +102,10 @@ export interface MemOverseerThread {
 
 export interface MemOverseerSettingsSnapshot {
   readonly mem: MemOverseerSettings;
-  /** Null when no enabled provider can run the review; the task parks instead of calling out. */
+  /** Null when the pace decision found no model; the task parks instead of calling out. */
   readonly modelSelection: ModelSelection | null;
+  /** Why this tick chose its model, logged when it is not the premium tier. */
+  readonly pace: MemPaceDecision;
 }
 
 export interface MemOverseerReviewRequest {
@@ -355,7 +355,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     thread: MemOverseerThread,
     mem: MemOverseerSettings,
     spend: SpendDecision,
-    modelSelection: ModelSelection | null,
+    pace: MemPaceDecision,
     ownerAway: boolean,
   ) {
     const existing = yield* ports.store.get(thread.threadId).pipe(
@@ -435,9 +435,10 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     let deletedFiles: ReadonlyArray<string> = [];
 
     if (action.type === "review") {
-      if (modelSelection === null) {
-        yield* Effect.logWarning("Mem parked a thread: no enabled model can run the review.", {
+      if (pace.kind === "unset") {
+        yield* Effect.logWarning("Mem parked a thread: no model is set to run the review.", {
           threadId: thread.threadId,
+          reason: pace.reason,
         });
         state = reduceTask(state, { type: "capReached" });
       } else {
@@ -461,7 +462,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             },
           });
         } else {
-          const outcome = yield* reviewBatches(thread, plan, mem, modelSelection);
+          const outcome = yield* reviewBatches(thread, plan, mem, pace.selection);
           record = charge(record, outcome.costUsd);
           if (outcome.type === "parked") {
             state = reduceTask(state, { type: "capReached" });
@@ -777,6 +778,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       );
     if (settings === null || !settings.mem.enabled) return;
 
+    if (settings.pace.kind !== "premium") {
+      yield* Effect.logInfo("Mem chose its review model.", {
+        tier: settings.pace.kind,
+        reason: settings.pace.reason,
+      });
+    }
+
     const ownerAway = yield* ports
       .isOwnerAway(settings.mem.idleThresholdMinutes)
       .pipe(
@@ -810,7 +818,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     yield* Effect.forEach(
       threads.filter((thread) => !settledThreads.has(thread.threadId)),
       (thread) =>
-        runThread(thread, settings.mem, spend, settings.modelSelection, ownerAway).pipe(
+        runThread(thread, settings.mem, spend, settings.pace, ownerAway).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Mem skipped a thread after an unexpected failure.", {
               threadId: thread.threadId,
@@ -830,20 +838,45 @@ export class MemOverseerService extends Context.Service<
   MemOverseerServiceShape
 >()("t3/overseer/MemOverseerService") {}
 
-/** Text generation follows the same resolution as the other text ops: preferred, then enabled fallback. */
-const resolveOverseerModelSelection = (settings: ServerSettingsValue): ModelSelection | null => {
-  const preferred = settings.textGenerationModelSelection;
-  if (isModelSelectionProviderEnabled(settings, preferred)) return preferred;
-  return fallbackTextGenerationModelSelection(
-    settings.providerInstances,
-    (instanceId, driver) =>
-      isModelSelectionProviderEnabled(settings, {
-        instanceId,
-        model: defaultTextGenerationModel(driver),
-      }),
-    { includeConfiguredInstances: true },
-  );
-};
+/** The review model follows the owner's pace choice: premium, economy, or unset. */
+const resolveOverseerModelSelection = (
+  settings: ServerSettingsValue,
+  fractions: Pick<MemPaceInputs, "usedFraction" | "elapsedFraction">,
+): MemPaceDecision =>
+  chooseModel({
+    paceMode: settings.mem.paceMode,
+    premium: settings.mem.premiumModelSelection,
+    economy: settings.mem.economyModelSelection,
+    ...fractions,
+  });
+
+interface PaceFractions {
+  readonly usedFraction: number | null;
+  readonly elapsedFraction: number | null;
+}
+
+const UNKNOWN_PACE: PaceFractions = { usedFraction: null, elapsedFraction: null };
+
+/**
+ * The weekly window belongs to the login Mem spends on. Provider snapshots are already in memory,
+ * so this costs nothing per tick; a missing window or an unreadable snapshot reads as unknown.
+ */
+const readWeeklyPace = Effect.fn("MemOverseerService.readWeeklyPace")(function* (
+  instances: ProviderInstanceRegistry.ProviderInstanceRegistry["Service"],
+  selection: ModelSelection | null,
+  nowMs: number,
+) {
+  if (selection === null) return UNKNOWN_PACE;
+  const instance = yield* instances.getInstance(selection.instanceId);
+  if (instance === undefined) return UNKNOWN_PACE;
+  const provider = yield* instance.snapshot.getSnapshot;
+  const window = provider.usageLimits?.windows.find((entry) => entry.kind === "weekly");
+  if (window === undefined) return UNKNOWN_PACE;
+  return {
+    usedFraction: window.usedPercent / 100,
+    elapsedFraction: elapsedShare(window, nowMs),
+  };
+});
 
 interface RecentActivity {
   readonly lastUserText: string;
@@ -956,14 +989,11 @@ const make = Effect.gen(function* () {
   const store = yield* MemOverseerTaskStore;
   const random = yield* SecureRandom.SecureRandom;
   const scheduler = yield* Scheduler.Scheduler;
+  const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
 
   const service = makeMemOverseerService({
-    loadSettings: () =>
-      settings.getSettings.pipe(
-        Effect.map((current) => ({
-          mem: current.mem,
-          modelSelection: resolveOverseerModelSelection(current),
-        })),
+    loadSettings: Effect.fn("MemOverseerService.loadSettings")(function* () {
+      const current = yield* settings.getSettings.pipe(
         Effect.mapError(
           (cause) =>
             new MemOverseerFailure({
@@ -972,7 +1002,21 @@ const make = Effect.gen(function* () {
               cause,
             }),
         ),
-      ),
+      );
+      const nowMs = yield* Clock.currentTimeMillis;
+      // One read per tick, before any thread runs, so every thread in this tick shares one pace.
+      const fractions = yield* readWeeklyPace(
+        providerInstances,
+        current.mem.premiumModelSelection ?? current.mem.economyModelSelection,
+        nowMs,
+      ).pipe(Effect.catchCause(() => Effect.succeed(UNKNOWN_PACE)));
+      const pace = resolveOverseerModelSelection(current, fractions);
+      return {
+        mem: current.mem,
+        modelSelection: pace.kind === "unset" ? null : pace.selection,
+        pace,
+      };
+    }),
     isOwnerAway: (thresholdMinutes) =>
       idleTracker.isOwnerAway(thresholdMinutes).pipe(
         Effect.mapError(
