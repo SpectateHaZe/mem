@@ -121,6 +121,7 @@ import { Menu, MenuItem, MenuItemDetail, MenuPopup, MenuSeparator, MenuTrigger }
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { MiddleTruncate } from "../ui/middle-truncate";
 import { useThreadHasUnsentDraft } from "../../composerDraftStore";
+import type { SidebarSurface } from "./sidebarSurface";
 
 // The fields thread rows show. Provider status pushes refresh `checkedAt`,
 // status and auth on every provider; leaving those out keeps each
@@ -540,6 +541,8 @@ type SidebarThreadRowProps = {
   // "folder" is a one-line row inside a boring sidebar project folder;
   // "folder-multiline" adds the card's branch and PR line under it.
   variant: "card" | "slim" | "folder" | "folder-multiline";
+  /** Chats rows drop branch, worktree, diff, and pull-request affordances. */
+  surface: SidebarSurface;
   navigationParent?: string | undefined;
   variantAction: SidebarSweepAction;
   settlementSupported: boolean;
@@ -658,6 +661,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
   } = props;
   const threadRef = scopeThreadRef(thread.environmentId, thread.id);
   const threadKey = scopedThreadKey(threadRef);
+  const isChatSurface = props.surface === "chats";
   const canOperateThread = useEnvironmentScope(thread.environmentId, AuthOrchestrationOperateScope);
   const { openMenu: openLifecycleMenu } = useThreadLifecycleMenu();
   const { leaseLiveStatus, rowRef: leaseRowRef } = useSidebarRowSubscriptionLease(props.isActive);
@@ -684,7 +688,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     discardComposerDraft(threadRef);
   };
 
-  const gitCwd = thread.worktreePath ?? props.project?.workspaceRoot ?? null;
+  const gitCwd = isChatSurface
+    ? null
+    : (thread.worktreePath ?? props.project?.workspaceRoot ?? null);
   const linkedPullRequestStatus = useLinkedThreadPullRequest(
     thread.environmentId,
     thread.linkedPullRequest,
@@ -693,7 +699,10 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     thread.branchPullRequest,
   );
   const branchTarget =
-    leaseLiveStatus && (thread.branch != null || thread.worktreePath !== null) && gitCwd !== null
+    !isChatSurface &&
+    leaseLiveStatus &&
+    (thread.branch != null || thread.worktreePath !== null) &&
+    gitCwd !== null
       ? { environmentId: thread.environmentId, cwd: gitCwd }
       : null;
   const gitStatus = useEnvironmentQuery(
@@ -709,11 +718,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     JSON.stringify([thread.environmentId, gitCwd]),
     gitStatus.data,
   );
-  const pr = linkedPullRequestStatus?.pr ?? null;
+  const pr = isChatSurface ? null : (linkedPullRequestStatus?.pr ?? null);
   const supportsMultiplePullRequests = useSupportsMultiplePullRequests(thread.environmentId);
-  const currentLinkedPr = supportsMultiplePullRequests
-    ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
-    : null;
+  const currentLinkedPr =
+    !isChatSurface && supportsMultiplePullRequests
+      ? resolveThreadCurrentPullRequestLink(thread.pullRequests)
+      : null;
 
   const isUnread = hasUnseenCompletion({ ...thread, lastVisitedAt });
   const status = resolveSidebarThreadStatus(thread);
@@ -793,12 +803,14 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       : null;
   const isWokeStatus = topStatus?.icon === "woke";
 
-  const branchMismatch = resolveLocalCheckoutBranchMismatch({
-    effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
-    activeWorktreePath: thread.worktreePath,
-    activeThreadBranch: thread.branch,
-    currentGitBranch: visibleGitStatus?.refName ?? null,
-  });
+  const branchMismatch = isChatSurface
+    ? null
+    : resolveLocalCheckoutBranchMismatch({
+        effectiveEnvMode: thread.worktreePath === null ? "local" : "worktree",
+        activeWorktreePath: thread.worktreePath,
+        activeThreadBranch: thread.branch,
+        currentGitBranch: visibleGitStatus?.refName ?? null,
+      });
   const prStatus = prStatusIndicator(pr, linkedPullRequestStatus?.sourceControlProvider);
 
   const modelInstanceId = thread.runtime?.providerInstanceId ?? thread.modelSelection.instanceId;
@@ -1067,7 +1079,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     if (!props.isRouteThread) onThreadActivate(threadRef);
   };
   const prBadge =
-    prBadgeShape?.kind === "stack" || pr || currentLinkedPr ? (
+    !isChatSurface && (prBadgeShape?.kind === "stack" || pr || currentLinkedPr) ? (
       <ThreadPullRequestBadgeControl
         render={<InlineButton />}
         badge={prBadgeShape}
@@ -1152,21 +1164,22 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
         <EnvironmentMachineIcon aria-hidden kind={props.environmentMachine} className="size-3.5" />
       </span>
     ) : null;
-  const diff = latestRunDiff(thread);
+  const diff = isChatSurface ? null : latestRunDiff(thread);
+  const showsBranch = !isChatSurface && thread.branch !== null;
   // Only the trailing icons would remain, so the row moves them to the title line instead.
   const metaLineEmpty =
-    !thread.branch &&
+    !showsBranch &&
     !showsScratchMachine &&
     prBadge === null &&
     diff === null &&
     runningTerminalIds.length === 0;
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
-      {thread.branch ? (
+      {showsBranch ? (
         <>
           <ThreadWorktreeIndicator thread={thread} />
           <span className="flex min-w-0 flex-1">
-            <MiddleTruncate value={thread.branch} showTitle={false} />
+            <MiddleTruncate value={thread.branch ?? ""} showTitle={false} />
           </span>
         </>
       ) : showsScratchMachine ? (

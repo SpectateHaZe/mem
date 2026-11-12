@@ -17,6 +17,7 @@ import {
   PROJECT_SCOPED_SERVER_SETTING_KEYS,
   requiredScopesForProjectMutation,
   resolveAutoCompactWindow,
+  resolveDiscordPresenceShowProjectName,
   resolveIdleCompaction,
   resolveProjectProviderInstanceEnabled,
   resolveProviderInstanceEnabled,
@@ -570,5 +571,50 @@ describe("server model preferences", () => {
     const input = { favorites: [], providerModelPreferences: {} };
     expect(encodeServerSettings(decodeServerSettings(input))).toMatchObject(input);
     expect(decodeServerSettingsPatch(input)).toEqual(input);
+  });
+});
+
+describe("Discord presence settings", () => {
+  const defaults = {
+    enabled: true,
+    detailsTemplate: "{agents} working",
+    stateTemplate: "{project} · {model}",
+    largeImageKey: "",
+    largeImageText: "Mem",
+    smallImageKey: "",
+    smallImageText: "",
+    showElapsedTimer: true,
+    idleText: "mem in control",
+  };
+
+  it("decodes the card defaults with no stored presence settings", () => {
+    expect(decodeServerSettings({}).discordPresence).toEqual(defaults);
+  });
+
+  it("merges a patched field without resetting the other rows", () => {
+    const patched = decodeServerSettingsPatch({
+      discordPresence: { detailsTemplate: "With {project}", enabled: false },
+    });
+    expect(patched.discordPresence).toEqual({
+      detailsTemplate: "With {project}",
+      enabled: false,
+    });
+    expect(decodeServerSettingsPatch({ discordPresence: {} })).toEqual({ discordPresence: {} });
+  });
+
+  it("falls back to the retired project-name toggle until the nested one is stored", () => {
+    const legacy = decodeServerSettings({ discordPresenceShowProjectName: true });
+    expect(resolveDiscordPresenceShowProjectName(legacy)).toBe(true);
+    expect(resolveDiscordPresenceShowProjectName(decodeServerSettings({}))).toBe(false);
+
+    const stored = decodeServerSettings({
+      discordPresenceShowProjectName: true,
+      discordPresence: { showProjectName: false },
+    });
+    expect(resolveDiscordPresenceShowProjectName(stored)).toBe(false);
+    // The new key survives a settings round trip, so switching it off is not undone.
+    expect(
+      resolveDiscordPresenceShowProjectName(decodeServerSettings(encodeServerSettings(stored))),
+    ).toBe(false);
   });
 });

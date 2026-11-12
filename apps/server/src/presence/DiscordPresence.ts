@@ -1,6 +1,11 @@
 // @effect-diagnostics globalTimers:off - The Discord socket owns its handshake deadline outside the Effect runtime.
 import * as NodeNet from "node:net";
 
+import {
+  DEFAULT_DISCORD_PRESENCE_SETTINGS,
+  resolveDiscordPresenceShowProjectName,
+  type DiscordPresenceSettings,
+} from "@t3tools/contracts/settings";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
@@ -23,8 +28,6 @@ const OP_FRAME = 1;
 const OP_CLOSE = 2;
 const OP_PING = 3;
 const OP_PONG = 4;
-
-const DISCORD_APP_NAME = "Mem";
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === "object" && value !== null && !Array.isArray(value);
@@ -97,12 +100,14 @@ export const discordIpcPathCandidates = (
       })();
 
 export interface DiscordActivity {
-  readonly details: string;
+  readonly details?: string;
   readonly state?: string;
-  readonly timestamps: { readonly start: number };
+  readonly timestamps?: { readonly start: number };
   readonly assets?: {
-    readonly large_image: string;
-    readonly large_text: string;
+    readonly large_image?: string;
+    readonly large_text?: string;
+    readonly small_image?: string;
+    readonly small_text?: string;
   };
 }
 
@@ -166,7 +171,8 @@ export const presenceActivity = (
   options: {
     readonly modelNames?: ReadonlyArray<string>;
     readonly projectNames?: ReadonlyArray<string>;
-    readonly largeImageKey?: string;
+    /** The user's Rich Presence text and images; the defaults keep Discord's original card. */
+    readonly presence?: DiscordPresenceSettings;
     /** The overseer is driving the sessions, so presence survives with no thread running. */
     readonly overseerInControl?: boolean;
     /** Only claim the owner is away when idle detection actually said so. */
@@ -176,38 +182,93 @@ export const presenceActivity = (
   const agents = Number.isFinite(liveAgents) ? Math.max(0, Math.floor(liveAgents)) : 0;
   const overseer = options.overseerInControl === true;
   if (agents === 0 && !overseer) return null;
-  const summarized = [
-    summarizeStatePart(options.projectNames ?? []),
-    summarizeStatePart(options.modelNames ?? []),
-  ]
-    .filter((part) => part !== undefined)
-    .join(" · ");
-  const state = truncateDiscordText(
-    [
-      overseer && options.ownerAfk === true ? "user is afk" : "",
-      overseer
-        ? agents === 0
-          ? "mem in control"
-          : `mem in control · ${agents} working`
-        : summarized,
-    ]
-      .filter((part) => part !== "")
-      .join(" · "),
-  );
-  const details = overseer
-    ? "Mem is in control"
-    : agents === 1
-      ? "1 agent working"
-      : `${agents} agents working`;
-  const activity: DiscordActivity = {
-    details,
-    ...(state.length < DISCORD_FIELD_MIN_LENGTH ? {} : { state }),
-    timestamps: { start: Math.floor(startedAtMs) },
+  const presence = options.presence ?? DEFAULT_DISCORD_PRESENCE_SETTINGS;
+  if (!presence.enabled) return null;
+  const values: DiscordTemplateValues = {
+    agents,
+    project: summarizeStatePart(options.projectNames ?? []) ?? "",
+    model: summarizeStatePart(options.modelNames ?? []) ?? "",
+    mode: summarizeMode({ overseer, ownerAfk: options.ownerAfk === true }),
   };
-  if (options.largeImageKey === undefined || options.largeImageKey === "") return activity;
+  // Mem driving with nothing running is a state, not a count, so the idle text replaces the template.
+  const details = discordField(
+    overseer && agents === 0
+      ? presence.idleText
+      : renderDiscordTemplate(presence.detailsTemplate, values),
+  );
+  const state = discordField(renderDiscordTemplate(presence.stateTemplate, values));
+  const assets = presenceAssets(presence);
+  const activity: DiscordActivity = {
+    ...(details === undefined ? {} : { details }),
+    ...(state === undefined ? {} : { state }),
+    ...(presence.showElapsedTimer ? { timestamps: { start: Math.floor(startedAtMs) } } : {}),
+    ...(Object.keys(assets).length === 0 ? {} : { assets }),
+  };
+  // Discord's SET_ACTIVITY with an empty object clears the card anyway, so report it as no presence.
+  return Object.keys(activity).length === 0 ? null : activity;
+};
+
+export interface DiscordTemplateValues {
+  readonly agents: number;
+  /** The summarized project names, or empty when the owner keeps them private. */
+  readonly project: string;
+  /** The summarized model names. */
+  readonly model: string;
+  /** Who is driving, such as "mem in control". */
+  readonly mode: string;
+}
+
+const PLACEHOLDER = /\{(agents|project|model|mode)\}/g;
+
+/**
+ * Fills a presence template and keeps it Discord-legal: empty placeholders never leave a
+ * dangling " · " separator, and the result stays within the field's character limit.
+ */
+export const renderDiscordTemplate = (template: string, values: DiscordTemplateValues): string => {
+  const agents = Number.isFinite(values.agents) ? Math.max(0, Math.floor(values.agents)) : 0;
+  const replacements: Readonly<Record<string, string>> = {
+    agents: agents === 1 ? "1 agent" : `${agents} agents`,
+    project: values.project,
+    model: values.model,
+    mode: values.mode,
+  };
+  const substituted = template.replace(
+    PLACEHOLDER,
+    (_match, placeholder: string) => replacements[placeholder] ?? "",
+  );
+  const joined = substituted
+    .split("·")
+    .map((part) => part.trim())
+    .filter((part) => part !== "")
+    .join(" · ");
+  return truncateDiscordText(joined.replace(/\s+/g, " "));
+};
+
+const summarizeMode = (input: { readonly overseer: boolean; readonly ownerAfk: boolean }): string =>
+  [input.overseer && input.ownerAfk ? "user is afk" : "", input.overseer ? "mem in control" : ""]
+    .filter((part) => part !== "")
+    .join(" · ");
+
+/** Discord rejects fields shorter than two characters, so a blank line drops instead. */
+const discordField = (value: string): string | undefined => {
+  const text = truncateDiscordText(value.trim());
+  return text.length >= DISCORD_FIELD_MIN_LENGTH ? text : undefined;
+};
+
+const presenceAssets = (
+  presence: DiscordPresenceSettings,
+): NonNullable<DiscordActivity["assets"]> => {
+  const largeImage = presence.largeImageKey.trim();
+  const smallImage = presence.smallImageKey.trim();
+  const largeText = discordField(presence.largeImageText);
+  const smallText = discordField(presence.smallImageText);
   return {
-    ...activity,
-    assets: { large_image: options.largeImageKey, large_text: DISCORD_APP_NAME },
+    ...(largeImage === ""
+      ? {}
+      : { large_image: largeImage, ...(largeText === undefined ? {} : { large_text: largeText }) }),
+    ...(smallImage === ""
+      ? {}
+      : { small_image: smallImage, ...(smallText === undefined ? {} : { small_text: smallText }) }),
   };
 };
 
@@ -397,23 +458,38 @@ const makeSweep = Effect.gen(function* () {
   yield* Effect.addFinalizer(() => Effect.sync(() => ipc.close()));
   let lastCheckMs = 0;
   let lastClientId: string | undefined;
+  let lastEnabled: boolean | undefined;
   let activityStartedAtMs: number | undefined;
 
   return Effect.fn("DiscordPresence.sweep")(function* () {
     const nowMs = DateTime.toEpochMillis(yield* DateTime.now);
-    const { discordClientId, discordPresenceShowProjectName, mem } = yield* settings.getSettings;
+    const settingsValue = yield* settings.getSettings;
+    const { discordClientId, discordPresence, mem } = settingsValue;
     const clientId = discordClientId.trim();
+    const enabled = discordPresence.enabled;
     // Settings changes apply on the next tick instead of after the presence interval.
-    if (clientId === lastClientId && nowMs - lastCheckMs < CHECK_INTERVAL_MS) return;
-    if (clientId !== lastClientId) activityStartedAtMs = undefined;
+    if (
+      clientId === lastClientId &&
+      enabled === lastEnabled &&
+      nowMs - lastCheckMs < CHECK_INTERVAL_MS
+    )
+      return;
+    if (clientId !== lastClientId || enabled !== lastEnabled) activityStartedAtMs = undefined;
     lastClientId = clientId;
+    lastEnabled = enabled;
     lastCheckMs = nowMs;
 
+    // A disabled presence clears the card, and leaving the socket up avoids a mid-handshake teardown.
+    if (clientId === "" || !enabled) {
+      activityStartedAtMs = undefined;
+      ipc.update(clientId, null);
+      return;
+    }
+
     // shortcut: mayBeLive also counts threads only watching a PR, so the count can run high.
-    const liveThreads =
-      clientId === ""
-        ? []
-        : (yield* projections.listActiveShellIndex()).filter((thread) => thread.mayBeLive);
+    const liveThreads = (yield* projections.listActiveShellIndex()).filter(
+      (thread) => thread.mayBeLive,
+    );
     if (liveThreads.length === 0 && !mem.enabled) {
       activityStartedAtMs = undefined;
       ipc.update(clientId, null);
@@ -422,8 +498,9 @@ const makeSweep = Effect.gen(function* () {
     activityStartedAtMs ??= nowMs;
     // Project names are opt-in: list them in thread order, so the first live thread's project leads.
     const projectIds = [...new Set(liveThreads.map((thread) => thread.projectId))];
+    const showProjectName = resolveDiscordPresenceShowProjectName(settingsValue);
     const projectNames =
-      discordPresenceShowProjectName && projectIds.length > 0
+      showProjectName && projectIds.length > 0
         ? (yield* projects.list({ projectIds })).map((project) => project.title)
         : [];
     // The sweep already runs on its own interval, so the idle check rides along instead of a timer.
@@ -435,6 +512,7 @@ const makeSweep = Effect.gen(function* () {
           .map((thread) => thread.modelName)
           .filter((name): name is string => name !== null),
         projectNames,
+        presence: discordPresence,
         overseerInControl: mem.enabled,
         ownerAfk,
       }),

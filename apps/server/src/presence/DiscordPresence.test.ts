@@ -1,10 +1,12 @@
 import { assert, it } from "@effect/vitest";
+import { DEFAULT_DISCORD_PRESENCE_SETTINGS } from "@t3tools/contracts/settings";
 
 import {
   decodeDiscordFrames,
   discordIpcPathCandidates,
   encodeDiscordFrame,
   presenceActivity,
+  renderDiscordTemplate,
   shouldOpenDiscordConnection,
 } from "./DiscordPresence.ts";
 
@@ -83,29 +85,36 @@ it("clears the status when no agent is working", () => {
 it("says Mem is in control while the overseer is on, even with no thread running", () => {
   assert.isNull(presenceActivity(0, 1_700_000_000_000));
   const idle = presenceActivity(0, 1_700_000_000_000, { overseerInControl: true });
-  assert.equal(idle?.details, "Mem is in control");
-  assert.equal(idle?.state, "mem in control");
+  // The idle text replaces the count, which would otherwise claim zero agents are working.
+  assert.equal(idle?.details, "mem in control");
+  assert.notProperty(idle, "state");
 
   const busy = presenceActivity(2, 1_700_000_000_000, {
     overseerInControl: true,
     modelNames: ["gpt-5.4"],
   });
-  assert.equal(busy?.details, "Mem is in control");
-  assert.equal(busy?.state, "mem in control · 2 working");
+  assert.equal(busy?.details, "2 agents working");
+  assert.equal(busy?.state, "gpt-5.4");
 });
 
 it("claims the owner is away only when idle detection says so", () => {
+  const presence = {
+    ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+    detailsTemplate: "{mode} · {agents} working",
+  };
   const away = presenceActivity(1, 1_700_000_000_000, {
     overseerInControl: true,
     ownerAfk: true,
+    presence,
   });
-  assert.equal(away?.state, "user is afk · mem in control · 1 working");
+  assert.equal(away?.details, "user is afk · mem in control · 1 agent working");
 
   const present = presenceActivity(1, 1_700_000_000_000, {
     overseerInControl: true,
     ownerAfk: false,
+    presence,
   });
-  assert.notInclude(present?.state ?? "", "afk");
+  assert.equal(present?.details, "mem in control · 1 agent working");
 });
 
 it("keeps the details count and shows one model in state", () => {
@@ -211,11 +220,95 @@ it("builds a public activity with a stable start time", () => {
 
 it("only adds an image when one is configured", () => {
   assert.notProperty(presenceActivity(2, 5), "assets");
-  assert.deepEqual(presenceActivity(2, 5, { largeImageKey: "mem" }), {
-    details: "2 agents working",
-    timestamps: { start: 5 },
-    assets: { large_image: "mem", large_text: "Mem" },
+  assert.deepEqual(
+    presenceActivity(2, 5, {
+      presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, largeImageKey: "mem" },
+    }),
+    {
+      details: "2 agents working",
+      timestamps: { start: 5 },
+      assets: { large_image: "mem", large_text: "Mem" },
+    },
+  );
+});
+
+it("keeps every configured image and its own text", () => {
+  const activity = presenceActivity(1, 5, {
+    presence: {
+      ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+      largeImageKey: "mem",
+      largeImageText: "Working",
+      smallImageKey: "busy",
+      smallImageText: "Live",
+    },
   });
+  assert.deepEqual(activity?.assets, {
+    large_image: "mem",
+    large_text: "Working",
+    small_image: "busy",
+    small_text: "Live",
+  });
+});
+
+it("drops a line the owner emptied and hides the timer when asked", () => {
+  const presence = {
+    ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+    detailsTemplate: "",
+    stateTemplate: "   ",
+    showElapsedTimer: false,
+  };
+  assert.isNull(presenceActivity(2, 5, { presence }));
+  assert.deepEqual(presenceActivity(2, 5, { presence: { ...presence, detailsTemplate: "Busy" } }), {
+    details: "Busy",
+  });
+});
+
+it("clears the card when the owner turns presence off", () => {
+  assert.isNull(
+    presenceActivity(2, 5, {
+      presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, enabled: false },
+    }),
+  );
+});
+
+it("renders the details template with the agent count and its noun", () => {
+  const values = { agents: 3, project: "", model: "", mode: "" };
+  assert.equal(renderDiscordTemplate("{agents} working", values), "3 agents working");
+  assert.equal(
+    renderDiscordTemplate("{agents} working", { ...values, agents: 1 }),
+    "1 agent working",
+  );
+});
+
+it("drops empty placeholders instead of leaving a loose separator", () => {
+  const values = { agents: 2, project: "Mem", model: "gpt-5.4", mode: "mem in control" };
+  assert.equal(renderDiscordTemplate("{project} · {model}", { ...values, project: "" }), "gpt-5.4");
+  assert.equal(
+    renderDiscordTemplate("{project} · {model}", { ...values, project: "", model: "" }),
+    "",
+  );
+  assert.equal(renderDiscordTemplate("  · {model}  ", values), "gpt-5.4");
+  assert.equal(renderDiscordTemplate("{state} · {model}", values), "{state} · gpt-5.4");
+  assert.equal(
+    renderDiscordTemplate("{mode} · {agents} working", { ...values, mode: "" }),
+    "2 agents working",
+  );
+});
+
+it("trims and collapses the whitespace around placeholders", () => {
+  const values = { agents: 1, project: " My Project ", model: " gpt-5.4 ", mode: "" };
+  assert.equal(renderDiscordTemplate("  {project}   ·   {model} ", values), "My Project · gpt-5.4");
+});
+
+it("truncates a rendered template to Discord's limit", () => {
+  const rendered = renderDiscordTemplate("{project}", {
+    agents: 0,
+    project: "p".repeat(500),
+    model: "",
+    mode: "",
+  });
+  assert.equal(rendered.length, 128);
+  assert.isTrue(rendered.endsWith("…"));
 });
 
 it("only opens a socket when there is a client and something to show", () => {

@@ -3,6 +3,16 @@
 Use a new thread for a separate task. Choose **New worktree** when its code changes
 need a separate branch and working directory.
 
+## Chats and Code
+
+The sidebar has two views, switched at its top. **Chats** lists only quick chats: threads
+started without a project, which run in the scratch folder described below. **Code** lists
+threads in your projects, with their branches, worktrees, and diffs. Each view shows only its
+own threads, and your choice is kept on that device.
+
+Start a chat with **New chat** in the sidebar header or the empty Chats view. **Mem** sits
+above both lists; open it to talk to Mem about work across your threads.
+
 ## Start a thread
 
 On web and desktop, **New thread** opens the project picker when you have more than one

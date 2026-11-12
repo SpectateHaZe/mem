@@ -27,6 +27,7 @@ export type SettingsPath =
   | "/settings/snap-shot"
   | "/settings/providers"
   | "/settings/threads"
+  | "/settings/discord"
   | "/settings/browser"
   | "/settings/devices"
   | "/settings/scheduled-tasks"
@@ -97,6 +98,7 @@ export const SETTINGS_SECTION_LABELS: Readonly<Record<SettingsPath, string>> = {
   "/settings/snap-shot": "SnapShots",
   "/settings/providers": "Providers",
   "/settings/threads": "Threads",
+  "/settings/discord": "Discord RPC",
   "/settings/browser": "Browser",
   "/settings/devices": "Devices",
   "/settings/scheduled-tasks": "Scheduled tasks",
@@ -134,6 +136,7 @@ export const SETTINGS_NAV_GROUPS: ReadonlyArray<{
     paths: [
       "/settings/providers",
       "/settings/threads",
+      "/settings/discord",
       "/settings/browser",
       "/settings/devices",
       "/settings/scheduled-tasks",
@@ -491,9 +494,59 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "discord-status",
-    title: "Discord status",
-    to: "/settings/threads",
-    searchTerms: ["discord rich presence rpc activity status model agent"],
+    title: "Application ID",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc app client id application"],
+  },
+  {
+    id: "discord-enabled",
+    title: "Presence",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc on off enable disable activity status"],
+  },
+  {
+    id: "discord-details",
+    title: "Details",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc activity line template agents working text"],
+  },
+  {
+    id: "discord-state",
+    title: "State",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc second line template project model text"],
+  },
+  {
+    id: "discord-large-image",
+    title: "Large image",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc asset key artwork cover image hover text"],
+  },
+  {
+    id: "discord-small-image",
+    title: "Small image",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc asset key badge thumbnail image hover text"],
+  },
+  {
+    id: "discord-elapsed-timer",
+    title: "Elapsed timer",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc elapsed timer duration clock time"],
+  },
+  {
+    id: "discord-idle-text",
+    title: "Idle text",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc idle mem in control no agents waiting"],
   },
   {
     id: "import-conversations",
@@ -503,8 +556,9 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "discord-show-project",
-    title: "Discord project name",
-    to: "/settings/threads",
+    title: "Show project name",
+    to: "/settings/discord",
+    scope: "environment-defaults",
     searchTerms: ["discord rich presence project name privacy share status"],
   },
   {
@@ -1500,6 +1554,7 @@ const SETTINGS_CATEGORY_SCOPES: Readonly<Record<SettingsPath, SettingsSearchScop
   "/settings/keybindings": null,
   "/settings/providers": null,
   "/settings/threads": null,
+  "/settings/discord": "environment-defaults",
   "/settings/browser": null,
   "/settings/devices": null,
   "/settings/source-control": "environment-defaults",
@@ -1524,12 +1579,14 @@ const SPLIT_SETTINGS_PATHS: ReadonlySet<string> = new Set([
   "/settings/appearance",
   "/settings/source-control",
   "/settings/connections",
+  "/settings/threads",
   ...Object.keys(RENAMED_SETTINGS_PATHS),
 ]);
 // Section anchors that moved but are not search results themselves.
 const MOVED_SECTION_ANCHORS: Readonly<Record<string, SettingsPath>> = {
   "authorized-clients": "/settings/access",
   "text-generation": "/settings/threads",
+  discord: "/settings/discord",
   about: "/settings/about",
 };
 

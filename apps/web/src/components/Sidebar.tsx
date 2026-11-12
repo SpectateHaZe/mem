@@ -45,6 +45,7 @@ import { foldSearchQuery, rankMessageMatches } from "@t3tools/shared/paletteSear
 import { findForMessageMatch, openThreadFindOnQuery } from "./chat/threadFindStore";
 import {
   threadRuntimeCanArchive,
+  threadRuntimeIsActive,
   type EnvironmentThreadShell,
 } from "@t3tools/client-runtime/state/models";
 import {
@@ -56,6 +57,7 @@ import {
 import {
   AuthOrchestrationOperateScope,
   ProjectId,
+  isMemMasterThread,
   type ScopedThreadRef,
   type ThreadId,
 } from "@t3tools/contracts";
@@ -272,6 +274,17 @@ import {
   SidebarSectionHeader,
   SidebarSectionPlaceholder,
 } from "./sidebar/SidebarListMarkers";
+import { SidebarSurfaceSwitcher } from "./sidebar/SidebarSurfaceSwitcher";
+import {
+  DEFAULT_SIDEBAR_SURFACE,
+  SIDEBAR_SURFACE_STORAGE_KEY,
+  filterSidebarSurfaceProjectGroups,
+  filterSidebarSurfaceThreads,
+  scratchProjectKeysOf,
+  sidebarSurfaceSchema,
+} from "./sidebar/sidebarSurface";
+import { MemMasterCard } from "./mem/MemMasterCard";
+import { Separator } from "./ui/separator";
 
 function sameSidebarProviderEntries(
   left: ReadonlyMap<string, SidebarProviderEntry>,
@@ -900,7 +913,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const {
     projects,
     serverConfigs,
-    projectGroups,
+    projectGroups: allProjectGroups,
     environmentLabelById,
     providerEntriesByEnvironment,
     projectByKey,
@@ -908,6 +921,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     projectGroupByScopeKey,
     projectScopeItems: lookupProjectScopeItems,
   } = useSidebarLookups();
+  const [sidebarSurface, setSidebarSurface] = useLocalStorage(
+    SIDEBAR_SURFACE_STORAGE_KEY,
+    DEFAULT_SIDEBAR_SURFACE,
+    sidebarSurfaceSchema,
+  );
+  const scratchProjectKeys = scratchProjectKeysOf(projects);
+  const projectGroups = filterSidebarSurfaceProjectGroups(
+    allProjectGroups,
+    sidebarSurface,
+    scratchProjectKeys,
+  );
   const delegatedUnderParent = useDelegatedUnderParent();
   const router = useRouter();
   const { isMobile, setOpenMobile } = useSidebar();
@@ -1103,6 +1127,23 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
           ),
         );
   const threads = useQuietThreadShells();
+  const surfaceThreads = filterSidebarSurfaceThreads(threads, sidebarSurface, scratchProjectKeys);
+  const memMasterThread = threads.find((thread) => isMemMasterThread(thread.source)) ?? null;
+  const memMasterThreadKey =
+    memMasterThread === null
+      ? null
+      : scopedThreadKey(scopeThreadRef(memMasterThread.environmentId, memMasterThread.id));
+  // Cheap, honest status: how many threads are doing work right now.
+  const watchingThreadCount = threads.filter(
+    (thread) =>
+      thread.archivedAt === null &&
+      !isMemMasterThread(thread.source) &&
+      threadRuntimeIsActive(thread.runtime),
+  ).length;
+  const memMasterStatusLine =
+    watchingThreadCount === 0
+      ? "your overseer"
+      : `watching ${watchingThreadCount} thread${watchingThreadCount === 1 ? "" : "s"}`;
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
@@ -1112,7 +1153,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             resolveSidebarRowThreadId(
               routeThreadRef.threadId,
               routeThreadRef.environmentId,
-              threads,
+              surfaceThreads,
             ),
           ),
         );
@@ -1126,11 +1167,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     reveal: routeReveal,
     routeKey: routeRowThreadKey,
     isSearching: isSearchingThreads,
-    scopedProjectKeys: chosenScopeProjectKeys,
+    // Chats never widens the Code project scope; each surface keeps its own list.
+    scopedProjectKeys: sidebarSurface === "chats" ? null : chosenScopeProjectKeys,
     delegatedUnderParent,
-    findThread: (key) => threads.find((candidate) => threadShellKey(candidate) === key),
+    findThread: (key) => surfaceThreads.find((candidate) => threadShellKey(candidate) === key),
   });
-  const projectScopeKeys = revealWidensScope ? [] : chosenProjectScopeKeys;
+  // Chats is scoped to its scratch projects; Code keeps the user's project scope.
+  const projectScopeKeys =
+    sidebarSurface === "chats"
+      ? [...scratchProjectKeys]
+      : revealWidensScope
+        ? []
+        : chosenProjectScopeKeys;
   const projectScopeKey = projectScopeKeys.length === 0 ? null : projectScopeKeys.join("\n");
   const toggleProjectScopeKey = (key: string) =>
     setProjectScopeKeys(
@@ -1164,8 +1212,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     return environmentLabelById.get(thread.environmentId) ?? null;
   };
   // Pinning from a row keeps rows in place while the menu is open.
+  const surfaceProjectScopeItems = lookupProjectScopeItems.filter(
+    (item) =>
+      item.value === "all" || projectGroups.some((group) => group.projectKey === item.value),
+  );
   const projectScopeItems = useOrderWhileOpen(
-    lookupProjectScopeItems,
+    surfaceProjectScopeItems,
     (item) => item.value,
     projectScopeMenuState.open,
   );
@@ -1182,7 +1234,12 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   });
   const scopedProjectGroups = revealWidensScope ? [] : chosenProjectGroups;
   const scopedProjectRefs = scopedProjectGroups.flatMap((project) => project.memberProjectRefs);
-  const scopedProjectKeys = revealWidensScope ? null : chosenScopeProjectKeys;
+  const scopedProjectKeys =
+    sidebarSurface === "chats"
+      ? scratchProjectKeys
+      : revealWidensScope
+        ? null
+        : chosenScopeProjectKeys;
   const threadSearch = useThreadSearch(
     connectedEnvironmentIds,
     threadSearchQuery,
@@ -1334,15 +1391,16 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     serverConfigs,
     connectedEnvironmentIds,
     optimisticDrop,
-    threads,
+    threads: surfaceThreads,
     delegatedUnderParent,
     routeRowThreadKey,
-    folderGroups: boringSidebarEnabled
-      ? scopedProjectGroups.length === 0
-        ? // An archived project keeps a folder for its active threads, below the rest.
-          [...scopeGroups, ...projectGroups.filter((project) => project.archived)]
-        : scopedProjectGroups
-      : null,
+    folderGroups:
+      sidebarSurface === "code" && boringSidebarEnabled
+        ? scopedProjectGroups.length === 0
+          ? // An archived project keeps a folder for its active threads, below the rest.
+            [...scopeGroups, ...projectGroups.filter((project) => project.archived)]
+          : scopedProjectGroups
+        : null,
     keepEmptyFolders: (group) =>
       scopedProjectGroups.length > 0 || (group.pinned && !group.archived),
   });
@@ -1853,7 +1911,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
     optimisticDrop !== null &&
     isOptimisticDropReleased({
       optimisticDrop,
-      threads,
+      threads: surfaceThreads,
       pinnedKeys,
       activeKeys,
       now: snoozeNow,
@@ -2962,6 +3020,8 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         null,
     );
     if (environmentId === null) return;
+    // A new chat only exists on Chats, so Code must not swallow it.
+    setSidebarSurface("chats");
     if (isMobile) setOpenMobile(false);
     void scratchProjectActions.startScratchThread(environmentId);
   });
@@ -3006,8 +3066,20 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
         className="min-h-full"
         fixedHeader={
           <SidebarGroup className="z-[1]">
+            <div className="pb-1">
+              <SidebarSurfaceSwitcher
+                surface={sidebarSurface}
+                onSurfaceChange={(surface) => {
+                  if (surface === sidebarSurface) return;
+                  // A selection made on one surface can hold threads the next one hides.
+                  clearSelection();
+                  setSidebarSurface(surface);
+                }}
+              />
+            </div>
             <SidebarThreadHeader
-              hasProjects={projectGroups.length > 0}
+              surface={sidebarSurface}
+              hasProjects={sidebarSurface === "code" && projectGroups.length > 0}
               onNewChat={handleNewChatClick}
               newChatShortcutLabel={newChatShortcutLabel}
               projectScope={
@@ -3235,6 +3307,21 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
               activeSearchResultIndex={activeSearchResultIndex}
               onClearSearch={clearThreadSearch}
             />
+            {memMasterThread === null ? null : (
+              <div className="flex flex-col pt-2">
+                <MemMasterCard
+                  isActive={memMasterThreadKey === routeThreadKey}
+                  isWatching={watchingThreadCount > 0}
+                  statusLine={memMasterStatusLine}
+                  onOpen={() =>
+                    navigateToThread(
+                      scopeThreadRef(memMasterThread.environmentId, memMasterThread.id),
+                    )
+                  }
+                />
+                <Separator className="mt-2" />
+              </div>
+            )}
           </SidebarGroup>
         }
       >
@@ -3271,12 +3358,17 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                           key={threadKey}
                           thread={thread}
                           project={
-                            projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ?? null
+                            sidebarSurface === "chats"
+                              ? null
+                              : (projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
+                                null)
                           }
                           projectDisplayName={
-                            projectDisplayNameByKey.get(
-                              `${thread.environmentId}:${thread.projectId}`,
-                            ) ?? null
+                            sidebarSurface === "chats"
+                              ? null
+                              : (projectDisplayNameByKey.get(
+                                  `${thread.environmentId}:${thread.projectId}`,
+                                ) ?? null)
                           }
                           environmentLabel={environmentLabelById.get(thread.environmentId) ?? null}
                           environmentMachine={
@@ -3380,6 +3472,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             thread={thread}
                             variant={rowVariant}
+                            surface={sidebarSurface}
                             navigationParent={
                               folderRow ??
                               (section === "working" ||
@@ -3436,13 +3529,18 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                             }
                             scratchMachineLabel={scratchMachineLabelFor(thread)}
                             project={
-                              projectByKey.get(`${thread.environmentId}:${thread.projectId}`) ??
-                              null
+                              sidebarSurface === "chats"
+                                ? null
+                                : (projectByKey.get(
+                                    `${thread.environmentId}:${thread.projectId}`,
+                                  ) ?? null)
                             }
                             projectDisplayName={
-                              projectDisplayNameByKey.get(
-                                `${thread.environmentId}:${thread.projectId}`,
-                              ) ?? null
+                              sidebarSurface === "chats"
+                                ? null
+                                : (projectDisplayNameByKey.get(
+                                    `${thread.environmentId}:${thread.projectId}`,
+                                  ) ?? null)
                             }
                             providerEntryByInstanceId={
                               providerEntriesByEnvironment.get(thread.environmentId) ??
@@ -3663,7 +3761,19 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             settledCount ===
             0 ? (
             <div className="flex flex-col items-center gap-2 px-2 py-6 text-center text-xs text-muted-foreground/60">
-              {projects.length === 0 ? (
+              {sidebarSurface === "chats" ? (
+                <>
+                  <span>No chats yet</span>
+                  <button
+                    type="button"
+                    onClick={handleNewChatClick}
+                    className="inline-flex cursor-pointer items-center gap-1.5 rounded-md border border-sidebar-border px-2.5 py-1 text-2xs font-medium text-sidebar-muted-foreground transition-colors hover:bg-sidebar-row-hover hover:text-sidebar-foreground"
+                  >
+                    <PlusIcon className="-mx-0.5 size-3" />
+                    New chat
+                  </button>
+                </>
+              ) : projects.length === 0 ? (
                 <>
                   <span>No projects yet</span>
                   <button

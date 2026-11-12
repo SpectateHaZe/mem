@@ -532,9 +532,10 @@ export function useSettingsRestore(onRestored?: () => void) {
     ...(settings.discordClientId !== DEFAULT_UNIFIED_SETTINGS.discordClientId
       ? ["Discord status"]
       : []),
-    ...(settings.discordPresenceShowProjectName !==
-    DEFAULT_UNIFIED_SETTINGS.discordPresenceShowProjectName
-      ? ["Discord project name"]
+    ...(!Equal.equals(settings.discordPresence, DEFAULT_UNIFIED_SETTINGS.discordPresence) ||
+    settings.discordPresenceShowProjectName !==
+      DEFAULT_UNIFIED_SETTINGS.discordPresenceShowProjectName
+      ? ["Discord presence"]
       : []),
     ...(settings.computerUseMode !== DEFAULT_UNIFIED_SETTINGS.computerUseMode
       ? ["Computer control"]
@@ -713,6 +714,7 @@ export function useSettingsRestore(onRestored?: () => void) {
       sidebarAutoSettleOnMerge: DEFAULT_UNIFIED_SETTINGS.sidebarAutoSettleOnMerge,
       dailySpendCapUsd: DEFAULT_UNIFIED_SETTINGS.dailySpendCapUsd,
       discordClientId: DEFAULT_UNIFIED_SETTINGS.discordClientId,
+      discordPresence: DEFAULT_UNIFIED_SETTINGS.discordPresence,
       discordPresenceShowProjectName: DEFAULT_UNIFIED_SETTINGS.discordPresenceShowProjectName,
       computerUseMode: DEFAULT_UNIFIED_SETTINGS.computerUseMode,
       obscuraEnabled: DEFAULT_UNIFIED_SETTINGS.obscuraEnabled,
@@ -1793,44 +1795,6 @@ export function ThreadsSettingsPanel() {
               checked={settings.obscuraEnabled}
               onCheckedChange={(checked) => updateSettings({ obscuraEnabled: Boolean(checked) })}
               aria-label="Enable Obscura"
-            />
-          }
-        />
-      </SettingsSection>
-      <SettingsSection id="discord" title="Discord">
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("discord-status")}
-          description="Shows how many agents are working on your Discord profile, and which model they use. Thread names are never shared. Clear the Application ID to turn it off."
-          settingKeys={["discordClientId"]}
-          control={
-            <DraftInput
-              size="sm"
-              className="w-full sm:w-48"
-              inputMode="numeric"
-              value={settings.discordClientId}
-              onCommit={(next) => {
-                const clientId = next.trim();
-                if (/^\d*$/.test(clientId)) updateSettings({ discordClientId: clientId });
-              }}
-              placeholder="Off"
-              aria-label="Discord Application ID"
-            />
-          }
-        />
-        <SettingsRow
-          serverScoped
-          {...searchableSetting("discord-show-project")}
-          description="Adds the project's name to the Discord status. Your project names can be private, so this stays off by default."
-          settingKeys={["discordPresenceShowProjectName"]}
-          control={
-            <ScopedSwitch
-              settingKeys={["discordPresenceShowProjectName"]}
-              checked={settings.discordPresenceShowProjectName}
-              onCheckedChange={(checked) =>
-                updateSettings({ discordPresenceShowProjectName: Boolean(checked) })
-              }
-              aria-label="Show project name in Discord status"
             />
           }
         />

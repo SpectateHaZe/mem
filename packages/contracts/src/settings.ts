@@ -1306,6 +1306,34 @@ export const CloudSpeechCredentials = Schema.Struct({
 
 const MEM_DISCORD_CLIENT_ID = "1569225354881662976";
 
+/**
+ * Rich Presence text. Templates substitute `{agents}` (the count with its noun, so one template
+ * stays grammatical), `{project}`, `{model}`, and `{mode}`; a line that renders empty is dropped.
+ */
+export const DiscordPresenceSettings = Schema.Struct({
+  enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  detailsTemplate: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed("{agents} working")),
+  ),
+  /** Empty hides the state line. */
+  stateTemplate: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed("{project} · {model}")),
+  ),
+  largeImageKey: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  largeImageText: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("Mem"))),
+  smallImageKey: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  smallImageText: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  showElapsedTimer: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Absent falls back to the retired `discordPresenceShowProjectName`; see the resolver below. */
+  showProjectName: Schema.optionalKey(Schema.Boolean),
+  /** Shown instead of the templates while Mem is in control and no agent is live. */
+  idleText: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("mem in control"))),
+});
+export type DiscordPresenceSettings = typeof DiscordPresenceSettings.Type;
+export const DEFAULT_DISCORD_PRESENCE_SETTINGS: DiscordPresenceSettings = Schema.decodeSync(
+  DiscordPresenceSettings,
+)({});
+
 /** A thread whose main agent only leads subagents, and the model they run on. */
 export const LowUsageThread = Schema.Struct({
   threadId: ThreadId,
@@ -1553,6 +1581,10 @@ export const ServerSettings = Schema.Struct({
   discordPresenceShowProjectName: Schema.Boolean.pipe(
     Schema.withDecodingDefault(Effect.succeed(false)),
   ),
+  /** What the Discord profile card shows. `discordClientId` still decides whether Discord is used. */
+  discordPresence: DiscordPresenceSettings.pipe(
+    Schema.withDecodingDefault(Effect.succeed(DEFAULT_DISCORD_PRESENCE_SETTINGS)),
+  ),
   /** What agents in full-access threads may do with the desktop. */
   computerUseMode: ComputerUseMode.pipe(Schema.withDecodingDefault(Effect.succeed("full"))),
   obscuraEnabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
@@ -1563,6 +1595,14 @@ export const ServerSettings = Schema.Struct({
 export type ServerSettings = typeof ServerSettings.Type;
 
 export const DEFAULT_SERVER_SETTINGS: ServerSettings = Schema.decodeSync(ServerSettings)({});
+
+/**
+ * `discordPresenceShowProjectName` predates the nested toggle. Absent means "never written", so
+ * machines that already shared project names keep doing so; once the new key is stored it wins.
+ */
+export const resolveDiscordPresenceShowProjectName = (
+  settings: Pick<ServerSettings, "discordPresence" | "discordPresenceShowProjectName">,
+): boolean => settings.discordPresence.showProjectName ?? settings.discordPresenceShowProjectName;
 
 export const providerInstanceConfigEnabledFlag = (config: unknown): boolean | undefined => {
   if (config === null || typeof config !== "object" || Array.isArray(config)) {
@@ -1934,6 +1974,21 @@ export const ServerSettingsPatch = Schema.Struct({
   dailySpendCapUsd: Schema.optionalKey(Schema.NullOr(DailySpendCapUsd)),
   discordClientId: Schema.optionalKey(Schema.String),
   discordPresenceShowProjectName: Schema.optionalKey(Schema.Boolean),
+  /** Merged per field, so a client can change one row. */
+  discordPresence: Schema.optionalKey(
+    Schema.Struct({
+      enabled: Schema.optionalKey(Schema.Boolean),
+      detailsTemplate: Schema.optionalKey(Schema.String),
+      stateTemplate: Schema.optionalKey(Schema.String),
+      largeImageKey: Schema.optionalKey(Schema.String),
+      largeImageText: Schema.optionalKey(Schema.String),
+      smallImageKey: Schema.optionalKey(Schema.String),
+      smallImageText: Schema.optionalKey(Schema.String),
+      showElapsedTimer: Schema.optionalKey(Schema.Boolean),
+      showProjectName: Schema.optionalKey(Schema.Boolean),
+      idleText: Schema.optionalKey(Schema.String),
+    }),
+  ),
   computerUseMode: Schema.optionalKey(ComputerUseMode),
   obscuraEnabled: Schema.optionalKey(Schema.Boolean),
   lowUsageThreads: Schema.optionalKey(Schema.Array(LowUsageThread)),

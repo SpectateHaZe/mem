@@ -17,8 +17,11 @@ import { cn } from "~/lib/utils";
 import { Button } from "../ui/button";
 import { SidebarInput, SidebarMenuButton } from "../ui/sidebar";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import type { SidebarSurface } from "./sidebarSurface";
 
 export interface SidebarThreadHeaderProps {
+  /** Chats only offers a new chat; project scope and new threads belong to Code. */
+  surface: SidebarSurface;
   hasProjects: boolean;
   onNewChat: () => void;
   newChatShortcutLabel: string | null | undefined;
@@ -40,6 +43,7 @@ export interface SidebarThreadHeaderProps {
 }
 
 export function SidebarThreadHeader({
+  surface,
   hasProjects,
   onNewChat,
   newChatShortcutLabel,
@@ -121,26 +125,28 @@ export function SidebarThreadHeader({
         >
           <MessageSquareDashedIcon />
         </SidebarHeaderIconButton>
-        <SidebarHeaderIconButton
-          label="New thread"
-          tooltip={
-            showNewThreadInProjectHint ? (
-              <span className="flex flex-col gap-0.5">
-                <span>{newThreadLabel}</span>
-                <span className="text-muted-foreground">
-                  New thread in current project: Shift+click
-                  {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+        {surface === "code" ? (
+          <SidebarHeaderIconButton
+            label="New thread"
+            tooltip={
+              showNewThreadInProjectHint ? (
+                <span className="flex flex-col gap-0.5">
+                  <span>{newThreadLabel}</span>
+                  <span className="text-muted-foreground">
+                    New thread in current project: Shift+click
+                    {newThreadInProjectShortcutLabel ? ` (${newThreadInProjectShortcutLabel})` : ""}
+                  </span>
                 </span>
-              </span>
-            ) : (
-              newThreadLabel
-            )
-          }
-          disabled={newThreadDisabled}
-          onClick={onNewThread}
-        >
-          <SquarePenIcon />
-        </SidebarHeaderIconButton>
+              ) : (
+                newThreadLabel
+              )
+            }
+            disabled={newThreadDisabled}
+            onClick={onNewThread}
+          >
+            <SquarePenIcon />
+          </SidebarHeaderIconButton>
+        ) : null}
       </div>
     </div>
   );
