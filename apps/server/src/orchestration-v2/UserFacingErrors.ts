@@ -144,3 +144,19 @@ export function userFacingDispatchErrorMessage(cause: unknown): string | undefin
   );
   return messages.at(-1);
 }
+
+/**
+ * Last resort for a dispatch failure nothing else explained: the error tags in the cause chain beat
+ * a toast that only says "failed", and they name the file to open.
+ */
+export function dispatchFailureTags(cause: unknown): string | undefined {
+  const tags: string[] = [];
+  const seen = new Set<unknown>();
+  let value = cause;
+  while (Predicate.isObject(value) && !seen.has(value)) {
+    seen.add(value);
+    if (typeof value._tag === "string" && value._tag.length > 0) tags.push(value._tag);
+    value = value.cause;
+  }
+  return tags.length === 0 ? undefined : [...new Set(tags)].join(" <- ");
+}
