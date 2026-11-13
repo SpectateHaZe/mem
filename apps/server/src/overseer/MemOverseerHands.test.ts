@@ -7,6 +7,7 @@ import {
   type MemOverseerSettings,
   type ModelSelection,
 } from "@t3tools/contracts";
+import * as Clock from "effect/Clock";
 import * as Effect from "effect/Effect";
 import * as Result from "effect/Result";
 import { describe, expect, it } from "vite-plus/test";
@@ -16,7 +17,6 @@ import {
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_ESTIMATED_REVIEW_USD,
-  MEM_ESTIMATED_TURN_USD,
   MemOverseerFailure,
   type MemOverseerPorts,
   type MemOverseerReviewRequest,
@@ -24,6 +24,7 @@ import {
   type MemReviewPlan,
 } from "./MemOverseerService.ts";
 import { newTaskRecord, type MemOverseerTaskRecord } from "./MemOverseerTaskStore.ts";
+import { sumSpendInWindow, type MemSpendEntry } from "./MemSpendingCap.ts";
 import type { QualityGateResult } from "./MemQualityGate.ts";
 
 const modelSelection: ModelSelection = {
@@ -62,6 +63,7 @@ const thread = (overrides: Partial<MemOverseerThread> = {}): MemOverseerThread =
   root: "/repo",
   files: [{ path: "parser.ts", additions: 4, deletions: 2 }],
   evidence: "vitest: 6 passed",
+  lastTurn: null,
   ...overrides,
 });
 
@@ -77,6 +79,8 @@ interface HarnessOptions {
   readonly review?: () => Effect.Effect<QualityGateResult, MemOverseerFailure>;
   readonly plan?: MemReviewPlan;
   readonly store?: Map<string, MemOverseerTaskRecord>;
+  /** Ledger entries already spent, so a test can start at the cap. */
+  readonly spend?: ReadonlyArray<MemSpendEntry>;
   readonly modelSelection?: ModelSelection | null;
 }
 
@@ -87,6 +91,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
   const spawned: string[] = [];
   const lifecycles: string[] = [];
   const store = options.store ?? new Map<string, MemOverseerTaskRecord>();
+  const spend = [...(options.spend ?? [])];
 
   const ports: MemOverseerPorts = {
     loadSettings: () => {
@@ -141,7 +146,13 @@ const makeHarness = (options: HarnessOptions = {}) => {
           store.set(record.task.threadId, record);
         }),
       totalSpentUsd: () =>
-        Effect.sync(() => [...store.values()].reduce((sum, record) => sum + record.spentUsd, 0)),
+        Clock.currentTimeMillis.pipe(
+          Effect.map((nowMs) => sumSpendInWindow({ entries: spend, nowMs })),
+        ),
+      recordSpend: (entry) =>
+        Effect.sync(() => {
+          spend.push(entry);
+        }),
       approvals: () =>
         Effect.sync(() =>
           [...store.values()]
@@ -233,7 +244,7 @@ describe("MemOverseerService.reviewThreadNow", () => {
 });
 
 describe("MemOverseerService.sendInstruction", () => {
-  it("sends a harmless instruction once and charges the turn", async () => {
+  it("sends a harmless instruction once and holds the turn for charging", async () => {
     const harness = makeHarness();
 
     const result = await run(harness.service.sendInstruction("thread-1", REJECTED_INSTRUCTION));
@@ -241,7 +252,8 @@ describe("MemOverseerService.sendInstruction", () => {
     expect(result).toStrictEqual({ sent: true });
     expect(harness.sent).toStrictEqual([REJECTED_INSTRUCTION]);
     const record = harness.store.get("thread-1");
-    expect(record?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD);
+    expect(record?.spentUsd).toBe(0);
+    expect(record?.pendingCharge).toBe(true);
     expect(record?.deliveredInstruction).toBe(REJECTED_INSTRUCTION);
     expect(record?.lastGuideSource).toBe("owner");
   });
@@ -323,7 +335,7 @@ describe("MemOverseerService.spawnSession", () => {
     expect(harness.store.size).toBe(0);
   });
 
-  it("creates a session under the configured directory and charges its first turn", async () => {
+  it("creates a session under the configured directory and holds its first turn", async () => {
     const harness = makeHarness({ mem: { spawnDirectory: "C:/work" } });
 
     const spawned = await run(
@@ -333,7 +345,8 @@ describe("MemOverseerService.spawnSession", () => {
     expect(spawned.threadId).toBe("thread-spawned");
     expect(harness.spawned).toStrictEqual(["project-1:Fix the parser"]);
     const record = harness.store.get("thread-spawned");
-    expect(record?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD);
+    expect(record?.spentUsd).toBe(0);
+    expect(record?.pendingCharge).toBe(true);
     // The prompt is already in the thread, so the loop must not send it again.
     expect(record?.deliveredInstruction).toBe("Fix the parser");
     expect(record?.task.lastInstruction).toBeNull();
@@ -445,9 +458,11 @@ describe("MemOverseerService.setLifecycle", () => {
 
 describe("MemOverseerService request budget", () => {
   it("refuses a chat review once the cap is spent", async () => {
+    const nowMs = await run(Clock.currentTimeMillis);
     const harness = makeHarness({
       mem: { spendingCapUsd: 0.2 },
-      store: new Map([["thread-1", { ...claimedRecord(REJECTED_INSTRUCTION), spentUsd: 0.2 }]]),
+      spend: [{ atMs: nowMs, usd: 0.2, threadId: "thread-1" }],
+      store: new Map([["thread-1", claimedRecord(REJECTED_INSTRUCTION)]]),
     });
 
     const error = refusal(await runEither(harness.service.reviewThreadNow("thread-1")));

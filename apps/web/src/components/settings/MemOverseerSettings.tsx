@@ -167,7 +167,7 @@ export function MemOverseerSettingsSection() {
         serverScoped
         settingKeys={["mem"]}
         {...searchableSetting("mem-spending-cap")}
-        description="Reaching this cap parks every task Mem has claimed and stops it. Mem never overshoots it."
+        description="How much Mem may spend in any rolling 24 hours. Reaching it parks every task Mem has claimed until older spend ages out."
         resetAction={
           mem.spendingCapUsd !== DEFAULT_MEM_OVERSEER_SETTINGS.spendingCapUsd ? (
             <SettingResetButton label="spending cap" onClick={() => reset("spendingCapUsd")} />
@@ -185,7 +185,7 @@ export function MemOverseerSettingsSection() {
               value={String(mem.spendingCapUsd)}
               onCommit={(next) => commitWholeNumber("spendingCapUsd", next)}
               placeholder={mixed ? "Mixed" : "0"}
-              aria-label="Spending cap in US dollars"
+              aria-label="Mem spending cap in US dollars per day"
             />
           </div>
         }

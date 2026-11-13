@@ -1,10 +1,18 @@
 /**
- * Spending-cap arithmetic for the Mem overseer, kept pure so it can be tested without I/O.
- *
- * The cap is absolute: Mem never starts a turn that would reach it, and reaching it parks every
- * task Mem has claimed. Every amount is carried in integer cents so float drift cannot walk the
- * total past the line, and a bad provider report can never hand budget back.
+ * Spending-cap arithmetic for the Mem overseer, kept pure so it can be tested without I/O. The cap
+ * is a rolling day in integer cents, so float drift cannot walk the total past the line and a bad
+ * provider report can never hand budget back.
  */
+
+/** How far back the cap counts spend. Older entries stop holding budget but stay in the file. */
+export const MEM_SPEND_WINDOW_MS = 24 * 60 * 60_000;
+
+/** One thing Mem paid for. Append-only; the ledger never rewrites an amount it has recorded. */
+export interface MemSpendEntry {
+  readonly atMs: number;
+  readonly usd: number;
+  readonly threadId: string;
+}
 
 export type SpendDecision =
   | { readonly allowed: true; readonly remainingCents: number }
@@ -24,6 +32,34 @@ export const toCents = (usd: number): number => {
   if (!Number.isFinite(usd)) return 0;
   // Binary floats put 1.005 at 100.49999999999999; stabilise before the integer step.
   return Math.round(Number((usd * 100).toFixed(6)));
+};
+
+const withinWindow = (entry: MemSpendEntry, cutoffMs: number): boolean =>
+  Number.isFinite(entry.atMs) && entry.atMs > cutoffMs;
+
+/** Spend inside the rolling window, summed in whole cents so the cap and the ledger agree. */
+export const sumSpendInWindow = (input: {
+  readonly entries: ReadonlyArray<MemSpendEntry>;
+  readonly nowMs: number;
+  readonly windowMs?: number;
+}): number => {
+  const cutoffMs = input.nowMs - (input.windowMs ?? MEM_SPEND_WINDOW_MS);
+  let cents = 0;
+  for (const entry of input.entries) {
+    if (!withinWindow(entry, cutoffMs)) continue;
+    cents += Math.max(0, toCents(entry.usd));
+  }
+  return cents / 100;
+};
+
+/** Keeps only what the cap still counts, so the persisted ledger cannot grow without a ceiling. */
+export const pruneSpendEntries = (input: {
+  readonly entries: ReadonlyArray<MemSpendEntry>;
+  readonly nowMs: number;
+  readonly windowMs?: number;
+}): ReadonlyArray<MemSpendEntry> => {
+  const cutoffMs = input.nowMs - (input.windowMs ?? MEM_SPEND_WINDOW_MS);
+  return input.entries.filter((entry) => withinWindow(entry, cutoffMs));
 };
 
 export const decideSpend = (input: {

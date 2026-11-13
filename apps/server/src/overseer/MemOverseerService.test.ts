@@ -7,6 +7,7 @@ import {
   type ModelSelection,
 } from "@t3tools/contracts";
 import * as NodeServices from "@effect/platform-node/NodeServices";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -31,6 +32,7 @@ import {
   type MemReviewPlan,
 } from "./MemOverseerService.ts";
 import { newTaskRecord, type MemOverseerTaskRecord } from "./MemOverseerTaskStore.ts";
+import { sumSpendInWindow, type MemSpendEntry } from "./MemSpendingCap.ts";
 import type { QualityGateResult } from "./MemQualityGate.ts";
 
 const modelSelection: ModelSelection = {
@@ -77,6 +79,7 @@ const thread = (overrides: Partial<MemOverseerThread> = {}): MemOverseerThread =
   root: "/repo",
   files: [{ path: "parser.ts", additions: 4, deletions: 2 }],
   evidence: "vitest: 6 passed",
+  lastTurn: null,
   ...overrides,
 });
 
@@ -97,6 +100,8 @@ interface HarnessOptions {
   readonly failBatch?: number;
   readonly plan?: MemReviewPlan;
   readonly store?: Map<string, MemOverseerTaskRecord>;
+  /** Ledger entries already spent, so a test can start near the cap. */
+  readonly spend?: ReadonlyArray<MemSpendEntry>;
   readonly modelSelection?: ModelSelection | null;
 }
 
@@ -106,6 +111,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
   const reviews: MemOverseerReviewRequest[] = [];
   const plans: MemOverseerThread[] = [];
   const store = options.store ?? new Map<string, MemOverseerTaskRecord>();
+  const spend = [...(options.spend ?? [])];
   let listCalls = 0;
 
   const ports: MemOverseerPorts = {
@@ -169,7 +175,13 @@ const makeHarness = (options: HarnessOptions = {}) => {
           store.set(record.task.threadId, record);
         }),
       totalSpentUsd: () =>
-        Effect.sync(() => [...store.values()].reduce((sum, record) => sum + record.spentUsd, 0)),
+        Clock.currentTimeMillis.pipe(
+          Effect.map((nowMs) => sumSpendInWindow({ entries: spend, nowMs })),
+        ),
+      recordSpend: (entry) =>
+        Effect.sync(() => {
+          spend.push(entry);
+        }),
       approvals: () =>
         Effect.sync(() =>
           [...store.values()]
@@ -190,6 +202,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     completed,
     reviews,
     store,
+    spend,
     listCalls: () => listCalls,
   };
 };
@@ -256,7 +269,9 @@ describe("MemOverseerService.tick", () => {
     expect(record?.task.lastInstruction).toBe(REJECTED_INSTRUCTION);
     expect(record?.deliveredInstruction).toBe(REJECTED_INSTRUCTION);
     expect(record?.lastGuideSource).toBe("owner");
-    expect(record?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD + MEM_ESTIMATED_REVIEW_USD);
+    // The review is charged now; the turn is booked when its provider turn ends.
+    expect(record?.spentUsd).toBe(MEM_ESTIMATED_REVIEW_USD);
+    expect(record?.pendingCharge).toBe(true);
   });
 
   it("blocks a destructive instruction instead of sending it", async () => {
@@ -301,7 +316,9 @@ describe("MemOverseerService.tick", () => {
     expect(record?.pendingApproval).toBeNull();
     expect(record?.deliveredInstruction).toBe(DESTRUCTIVE_INSTRUCTION);
     expect(record?.lastGuideSource).toBe("owner");
-    expect(record?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD);
+    // Sending holds the turn as pending; nothing is charged until that turn ends.
+    expect(record?.spentUsd).toBe(0);
+    expect(record?.pendingCharge).toBe(true);
 
     // A following tick must not send the approved instruction a second time.
     await run(harness.tick());
@@ -461,7 +478,9 @@ describe("MemOverseerService legacy approval timeout", () => {
     expect(record?.pendingApproval).toBeNull();
     expect(record?.deliveredInstruction).toBe(REJECTED_INSTRUCTION);
     expect(record?.lastGuideSource).toBe("auto");
-    expect(record?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD);
+    // Delivery alone charges nothing; the next tick books the finished turn.
+    expect(record?.spentUsd).toBe(0);
+    expect(record?.pendingCharge).toBe(true);
   });
 
   it("sends once across three ticks after the approval expired", async () => {
@@ -480,12 +499,12 @@ describe("MemOverseerService legacy approval timeout", () => {
   });
 
   it("parks instead of sending when the cap cannot fund an expired approval", async () => {
+    const nowMs = await run(Clock.currentTimeMillis);
     const harness = makeHarness({
       away: false,
       mem: { spendingCapUsd: 0.1 },
-      store: new Map([
-        ["thread-1", { ...pendingRecord(REJECTED_INSTRUCTION, 1, false), spentUsd: 0.5 }],
-      ]),
+      spend: [{ atMs: nowMs, usd: 0.5, threadId: "thread-1" }],
+      store: new Map([["thread-1", pendingRecord(REJECTED_INSTRUCTION, 1, false)]]),
     });
 
     await run(harness.tick());
@@ -537,6 +556,57 @@ describe("MemOverseerService spending cap", () => {
     expect(harness.sent).toStrictEqual([]);
     expect(harness.store.get("thread-1")?.pendingApproval).toBeNull();
     expect(harness.store.get("thread-1")?.task.phase).toBe("parked");
+  });
+
+  it("charges the reported turn cost instead of the estimate when the turn ends", async () => {
+    const first = makeHarness();
+    await run(first.tick());
+    const deliveredAtMs = first.store.get("thread-1")?.deliveredAtMs ?? 0;
+
+    const restarted = makeHarness({
+      store: first.store,
+      spend: first.spend,
+      threads: [
+        thread({
+          evidence: "vitest: 7 passed",
+          lastTurn: { completedAtMs: deliveredAtMs + 1, costUsd: 0.12 },
+        }),
+      ],
+    });
+    await run(restarted.tick());
+
+    const record = restarted.store.get("thread-1");
+    expect(record?.pendingCharge).toBe(false);
+    expect(record?.spentUsd).toBe(0.22);
+    expect(
+      sumSpendInWindow({
+        entries: restarted.spend,
+        nowMs: await run(Clock.currentTimeMillis),
+      }),
+    ).toBe(0.22);
+  });
+
+  it("charges the estimate when the provider reports no turn cost", async () => {
+    const first = makeHarness();
+    await run(first.tick());
+    const deliveredAtMs = first.store.get("thread-1")?.deliveredAtMs ?? 0;
+
+    const restarted = makeHarness({
+      store: first.store,
+      spend: first.spend,
+      threads: [
+        thread({
+          evidence: "vitest: 7 passed",
+          // A subscription reports zero, so the estimate is what keeps the cap limiting activity.
+          lastTurn: { completedAtMs: deliveredAtMs + 1, costUsd: 0 },
+        }),
+      ],
+    });
+    await run(restarted.tick());
+
+    expect(restarted.store.get("thread-1")?.spentUsd).toBe(
+      MEM_ESTIMATED_TURN_USD + 2 * MEM_ESTIMATED_REVIEW_USD,
+    );
   });
 
   it("escalates without sending when the reviewer fails", async () => {
