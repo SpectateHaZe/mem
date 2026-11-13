@@ -28,6 +28,13 @@ T3 Code can use your installed Codex and its existing login. Run `codex login`
 on the environment's machine to sign in. [Provider setup](./install.md#providers)
 covers installation and custom configuration.
 
+On Windows, T3 Code also finds the CLI bundled with the Codex desktop app when
+`codex` is not on `PATH`. The app keeps it in
+`%LOCALAPPDATA%\OpenAI\Codex\bin`, so installing the desktop app is enough even
+though it does not add `codex` to `PATH`. A broken npm global install that still
+has a `codex` shim also falls back to that copy. To use a different executable,
+set **Binary path** in provider settings.
+
 Running `codex login` does not change a managed ChatGPT connection. In
 **Settings > Providers**, add a Codex instance, choose **Configure manually**,
 and complete the wizard. Then select that instance from the thread's model

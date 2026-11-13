@@ -36,6 +36,7 @@ import {
 } from "@t3tools/shared/model";
 import { resolveSpawnCommand } from "@t3tools/shared/shell";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "./codexLaunchArgs.ts";
+import { resolveCodexBinaryPath } from "./codexBinaryPath.ts";
 import {
   buildServerProvider,
   COMPACT_SLASH_COMMAND,
@@ -754,6 +755,10 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   ChildProcessSpawner.ChildProcessSpawner | FileSystem.FileSystem | Path.Path
 > {
   const resolvedEnvironment = environment ?? process.env;
+  const binaryPath = yield* resolveCodexBinaryPath({
+    binaryPath: codexSettings.binaryPath,
+    environment: resolvedEnvironment,
+  });
   const checkedAt = DateTime.formatIso(yield* DateTime.now);
   const emptyModels = emptyCodexModelsFromSettings(codexSettings);
 
@@ -775,7 +780,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
   }
 
   const probeResult = yield* probe({
-    binaryPath: codexSettings.binaryPath,
+    binaryPath,
     homePath: codexSettings.homePath,
     launchArgs: resolveCodexLaunchArgs(codexSettings.launchArgs, resolvedEnvironment),
     cwd: process.cwd(),
@@ -793,7 +798,7 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
     const installed = !isCodexAppServerSpawnError(error);
     const version = installed
       ? yield* probeCodexCliVersion({
-          binaryPath: codexSettings.binaryPath,
+          binaryPath,
           homePath: codexSettings.homePath,
           cwd: process.cwd(),
           environment: resolvedEnvironment,
@@ -812,9 +817,9 @@ export const checkCodexProviderStatus = Effect.fn("checkCodexProviderStatus")(fu
         auth: { status: "unknown" },
         message: installed
           ? `Codex app-server provider probe failed: ${error.message}.`
-          : `Could not start Codex CLI (\`${codexSettings.binaryPath}\`). Check Settings → Providers → Codex → Binary path on the server.` +
-            (codexSettings.binaryPath === "codex"
-              ? " Installing ChatGPT or Codex desktop may not add codex to PATH."
+          : `Could not start Codex CLI (\`${binaryPath}\`). Check Settings → Providers → Codex → Binary path on the server.` +
+            (codexSettings.binaryPath === "codex" && binaryPath === "codex"
+              ? " Installing the ChatGPT or Codex desktop app on Windows may not add codex to PATH; T3 Code searches the app's bundled CLI automatically."
               : " Make sure the configured executable exists and can be run."),
       },
     });

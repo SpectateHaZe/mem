@@ -29,6 +29,7 @@ import {
   withCodexAppServerClient,
 } from "../CodexProvider.ts";
 import { resolveCodexLaunchArgs } from "../codexLaunchArgs.ts";
+import { resolveCodexBinaryPath } from "../codexBinaryPath.ts";
 import { makeManagedServerProvider } from "@t3tools/provider-core/server/managedProvider";
 import * as ModelCatalog from "@t3tools/provider-core/server/ModelCatalog";
 import { applyCodexModelCatalog } from "../codexModelCatalog.ts";
@@ -187,7 +188,10 @@ export const CodexDriver: ProviderDriver<
     const effectiveConfig = {
       ...config,
       enabled,
-      binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+      binaryPath: yield* resolveCodexBinaryPath({
+        binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+        environment: processEnv,
+      }),
       homePath: homeLayout.effectiveHomePath ?? "",
     } satisfies CodexSettings;
     const resolveMaintenance = yield* makeCachedProviderMaintenanceResolution(
