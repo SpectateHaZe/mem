@@ -101,6 +101,7 @@ import {
   type TerminalMetadataStreamEvent,
   type PullRequestRef,
   ClaudeSettingsWriteError,
+  DEFAULT_SERVER_SETTINGS,
   WS_METHODS,
   WsRpcGroup,
 } from "@t3tools/contracts";
@@ -179,6 +180,7 @@ import {
 } from "./orchestration-v2/UserFacingErrors.ts";
 import * as ProviderRegistry from "./provider/ProviderRegistry.ts";
 import * as ProviderInstanceRegistry from "./provider/ProviderInstanceRegistry.ts";
+import { deriveProviderInstanceConfigMap } from "./provider/ProviderInstanceRegistryHydration.ts";
 import * as AcpRegistrySupport from "@t3tools/provider-acp-registry/server/AcpRegistrySupport";
 import * as AcpRegistryRuntimeCoordinator from "@t3tools/provider-acp-registry/server/AcpRegistryRuntimeCoordinator";
 import * as ProviderMaintenanceRunner from "./provider/providerMaintenanceRunner.ts";
@@ -252,6 +254,7 @@ import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
 import * as MemOverseerService from "./overseer/MemOverseerService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import {
+  claudeSettingsConfigForInstances,
   readClaudeSettingsSnapshot,
   writeClaudeSettingsScope,
 } from "./provider/Drivers/ClaudeSettingsFiles.ts";
@@ -2066,6 +2069,14 @@ export const layerWsRpc = (
         return yield* mutateProjectWithClone(projectService, projectCloneTracker, mutation);
       });
 
+      // The settings editor edits the home the default enabled Claude instance runs with.
+      const claudeSettingsConfig = Effect.fnUntraced(function* () {
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+        );
+        return claudeSettingsConfigForInstances(deriveProviderInstanceConfigMap(settings));
+      });
+
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
           Effect.annotateCurrentSpan({
@@ -2762,30 +2773,36 @@ export const layerWsRpc = (
         [WS_METHODS.serverGetUsageSummary]: (input) => usage.readSummary(input),
         [WS_METHODS.serverRefreshUsageRates]: (_input) => usage.refreshRates,
         [WS_METHODS.claudeSettingsRead]: (input) =>
-          readClaudeSettingsSnapshot({ homePath: "" }, input.cwd),
+          claudeSettingsConfig().pipe(
+            Effect.flatMap((config) => readClaudeSettingsSnapshot(config, input.cwd)),
+          ),
         [WS_METHODS.claudeSettingsWrite]: (input) =>
-          writeClaudeSettingsScope({
-            config: { homePath: "" },
-            cwd: input.cwd,
-            scope: input.scope,
-            contents: input.contents,
-          }).pipe(
-            Effect.mapError(
-              (error) =>
-                new ClaudeSettingsWriteError({
-                  reason:
-                    error._tag === "ScopeNotWritable"
-                      ? "scopeNotWritable"
-                      : error._tag === "InvalidJson"
-                        ? "invalidJson"
-                        : "writeFailed",
-                  detail:
-                    error._tag === "ScopeNotWritable"
-                      ? `${error.scope} settings are not writable from Mem.`
-                      : error.message,
-                }),
+          claudeSettingsConfig().pipe(
+            Effect.flatMap((config) =>
+              writeClaudeSettingsScope({
+                config,
+                cwd: input.cwd,
+                scope: input.scope,
+                contents: input.contents,
+              }).pipe(
+                Effect.mapError(
+                  (error) =>
+                    new ClaudeSettingsWriteError({
+                      reason:
+                        error._tag === "ScopeNotWritable"
+                          ? "scopeNotWritable"
+                          : error._tag === "InvalidJson"
+                            ? "invalidJson"
+                            : "writeFailed",
+                      detail:
+                        error._tag === "ScopeNotWritable"
+                          ? `${error.scope} settings are not writable from Mem.`
+                          : error.message,
+                    }),
+                ),
+                Effect.andThen(readClaudeSettingsSnapshot(config, input.cwd)),
+              ),
             ),
-            Effect.andThen(readClaudeSettingsSnapshot({ homePath: "" }, input.cwd)),
           ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),

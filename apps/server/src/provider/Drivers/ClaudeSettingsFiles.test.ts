@@ -1,14 +1,25 @@
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { describe, expect, it } from "@effect/vitest";
+import {
+  ProviderDriverKind,
+  ProviderInstanceId,
+  type ProviderInstanceConfigMap,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Path from "effect/Path";
 
 import {
+  claudeSettingsConfigForInstances,
   readClaudeSettingsSnapshot,
   resolveClaudeSettingsScopePaths,
   writeClaudeSettingsScope,
 } from "./ClaudeSettingsFiles.ts";
+
+const claudeInstance = (homePath: string) => ({
+  driver: ProviderDriverKind.make("claudeAgent"),
+  config: { homePath },
+});
 
 const makeWorkspace = Effect.gen(function* () {
   const fileSystem = yield* FileSystem.FileSystem;
@@ -22,6 +33,40 @@ const makeWorkspace = Effect.gen(function* () {
 });
 
 it.layer(NodeServices.layer)("ClaudeSettingsFiles", (it) => {
+  describe("settings editor target", () => {
+    it.effect("uses the default enabled Claude instance's home", () =>
+      Effect.sync(() => {
+        expect(
+          claudeSettingsConfigForInstances({
+            [ProviderInstanceId.make("claudeAgent")]: claudeInstance("~/.claude-main"),
+            [ProviderInstanceId.make("claude_work")]: claudeInstance("~/.claude-work"),
+          }),
+        ).toEqual({ homePath: "~/.claude-main" });
+      }),
+    );
+
+    it.effect("falls back to the first enabled Claude instance when the default is disabled", () =>
+      Effect.sync(() => {
+        expect(
+          claudeSettingsConfigForInstances({
+            [ProviderInstanceId.make("claudeAgent")]: {
+              ...claudeInstance("~/.claude-main"),
+              enabled: false,
+            },
+            [ProviderInstanceId.make("claude_work")]: claudeInstance("~/.claude-work"),
+          }),
+        ).toEqual({ homePath: "~/.claude-work" });
+      }),
+    );
+
+    it.effect("leaves the home unset when no Claude instance is configured", () =>
+      Effect.sync(() => {
+        const instances: ProviderInstanceConfigMap = {};
+        expect(claudeSettingsConfigForInstances(instances)).toEqual({ homePath: "" });
+      }),
+    );
+  });
+
   describe("scope resolution", () => {
     it.effect("lists user, project and local settings before managed settings", () =>
       Effect.gen(function* () {
