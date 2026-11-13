@@ -337,7 +337,7 @@ function flattenOpenCodeModels(
       entries.push({
         model: {
           slug: `${provider.id}/${model.id}`,
-          name,
+          name: openCodeModelLabel(name, provider.id),
           ...(subProvider ? { subProvider } : {}),
           isCustom: false,
           capabilities: openCodeCapabilitiesForModel({
@@ -467,6 +467,17 @@ function subProviderLabelFor(input: {
   return label.toLowerCase() === OPENCODE_PRESENTATION.displayName.toLowerCase()
     ? undefined
     : label;
+}
+
+/**
+ * Go, Zen, and API-key catalogs often share a display name, so the picker needs the
+ * source in the label itself.
+ */
+function openCodeModelLabel(name: string, providerID: string): string {
+  const normalized = providerID.trim().toLowerCase();
+  return `${name}${
+    normalized === "opencode-go" ? " · Go" : normalized === "opencode" ? " · Zen" : " · API key"
+  }`;
 }
 
 const catalogFingerprint = (models: ReadonlyArray<OpenCode2Model>) =>
@@ -653,7 +664,7 @@ const checkOpenCode2 = Effect.fn("checkOpenCode2")(function* (
         return {
           model: {
             slug: `${model.providerID}/${model.id}`,
-            name: model.name,
+            name: openCodeModelLabel(model.name, model.providerID),
             ...(subProvider ? { subProvider } : {}),
             isCustom: false,
             capabilities: openCode2ModelCapabilities(model),
