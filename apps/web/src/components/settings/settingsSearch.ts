@@ -562,6 +562,20 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["discord rich presence project name privacy share status"],
   },
   {
+    id: "discord-github-button",
+    title: "Mem on GitHub button",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc button link github repository mem"],
+  },
+  {
+    id: "discord-custom-button",
+    title: "Custom button",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc button second link url label custom"],
+  },
+  {
     id: "daily-spend-cap",
     title: "Daily spending cap",
     to: "/settings/threads",

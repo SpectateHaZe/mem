@@ -1,5 +1,6 @@
 import {
   DEFAULT_DISCORD_PRESENCE_SETTINGS,
+  resolveDiscordActivityButtons,
   resolveDiscordPresenceShowProjectName,
   type DiscordPresenceSettings,
 } from "@t3tools/contracts";
@@ -71,6 +72,24 @@ function ImageTile({
   );
 }
 
+/** Discord draws these under the activity body, and only for people viewing the profile. */
+function DiscordCardButtons({ presence }: { presence: DiscordPresenceSettings }) {
+  const buttons = resolveDiscordActivityButtons(presence);
+  if (buttons.length === 0) return null;
+  return (
+    <div className="mt-2 space-y-1">
+      {buttons.map((button) => (
+        <div
+          className="truncate rounded-md bg-muted px-2 py-1 text-center text-xs font-medium"
+          key={`${button.label}:${button.url}`}
+        >
+          {button.label}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Approximates Discord's profile card, which renders asset keys as uploaded images. */
 function DiscordCardPreview({
   presence,
@@ -119,6 +138,7 @@ function DiscordCardPreview({
           )}
         </div>
       </div>
+      <DiscordCardButtons presence={presence} />
       <div className="mt-3 flex items-center gap-2 border-t border-border pt-2">
         <span className="flex size-4 items-center justify-center rounded-full bg-muted text-4xs">
           M
@@ -363,6 +383,60 @@ export function DiscordRpcSettingsPanel() {
             />
           }
         />
+      </SettingsSection>
+
+      <SettingsSection id="discord-buttons" title="Buttons">
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("discord-github-button")}
+          description="Adds a “Mem on GitHub” button linking to the repository, on by default. Discord only shows activity buttons to people viewing your profile, so your own card stays without them."
+          settingKeys={["discordPresence"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["discordPresence"]}
+              checked={presence.showGithubButton}
+              onCheckedChange={(checked) => update({ showGithubButton: Boolean(checked) })}
+              aria-label="Show Mem on GitHub button"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
+          {...searchableSetting("discord-custom-button")}
+          description="Optional second button. It needs a label of 1–32 characters and an https link; until both are valid the button stays off the card."
+          settingKeys={["discordPresence"]}
+          resetAction={
+            (presence.customButtonLabel !== DEFAULTS.customButtonLabel ||
+              presence.customButtonUrl !== DEFAULTS.customButtonUrl) &&
+            !mixed ? (
+              <SettingResetButton
+                label="custom button"
+                onClick={() => update({ customButtonLabel: "", customButtonUrl: "" })}
+              />
+            ) : null
+          }
+        >
+          <div className="grid max-w-2xl gap-2 pb-3.5 sm:grid-cols-2">
+            <DraftInput
+              size="sm"
+              key={`custom-label:${mixed}:${presence.customButtonLabel}`}
+              value={presence.customButtonLabel}
+              onCommit={(next) => update({ customButtonLabel: next })}
+              placeholder={mixed ? "Mixed" : "Button label"}
+              aria-label="Custom button label"
+            />
+            <DraftInput
+              size="sm"
+              key={`custom-url:${mixed}:${presence.customButtonUrl}`}
+              value={presence.customButtonUrl}
+              onCommit={(next) => update({ customButtonUrl: next.trim() })}
+              placeholder={mixed ? "Mixed" : "https://example.com"}
+              inputMode="url"
+              spellCheck={false}
+              aria-label="Custom button link"
+            />
+          </div>
+        </SettingsRow>
       </SettingsSection>
 
       <SettingsSection id="discord-preview" title="Preview">
