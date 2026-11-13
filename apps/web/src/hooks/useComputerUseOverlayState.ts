@@ -25,6 +25,13 @@ const IN_FLIGHT: ReadonlySet<OrchestrationV2TurnItemStatus> = new Set([
 const ACTING_TOOL = "computer_act";
 const OBSERVING_TOOL = "computer_screenshot";
 
+// Providers report MCP tools with a server prefix: `mcp__t3-code__computer_act` (Claude),
+// `t3-code_computer_act` (OpenCode). The computer tools are not in the shared T3 tool registry.
+const isTool = (toolName: string | null | undefined, tool: string): boolean =>
+  toolName === tool ||
+  toolName?.endsWith(`__${tool}`) === true ||
+  toolName?.endsWith(`_${tool}`) === true;
+
 /**
  * `driving` while a computer-use action is in flight, `inspecting` while only a
  * screenshot is, `hidden` once the run settles or the thread has no live tool.
@@ -38,8 +45,8 @@ export function computerUseOverlayState(input: {
   for (const { item } of input.rows) {
     if (item.runId !== input.runId || item.type !== "dynamic_tool") continue;
     if (!IN_FLIGHT.has(item.status)) continue;
-    if (item.toolName === ACTING_TOOL) return "driving";
-    if (item.toolName === OBSERVING_TOOL) observing = true;
+    if (isTool(item.toolName, ACTING_TOOL)) return "driving";
+    if (isTool(item.toolName, OBSERVING_TOOL)) observing = true;
   }
   return observing ? "inspecting" : "hidden";
 }

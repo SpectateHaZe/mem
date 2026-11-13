@@ -32,6 +32,15 @@ describe("computerUseOverlayState", () => {
 
   it("drives while an action is in flight", () => {
     expect(computerUseOverlayState({ rows: [toolRow("computer_act")], runId })).toBe("driving");
+    expect(computerUseOverlayState({ rows: [toolRow("mcp__t3-code__computer_act")], runId })).toBe(
+      "driving",
+    );
+    expect(computerUseOverlayState({ rows: [toolRow("t3-code_computer_act")], runId })).toBe(
+      "driving",
+    );
+    expect(
+      computerUseOverlayState({ rows: [toolRow("mcp__t3-code__computer_screenshot")], runId }),
+    ).toBe("inspecting");
   });
 
   it("inspects while only a screenshot is in flight", () => {
