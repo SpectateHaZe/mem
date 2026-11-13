@@ -411,6 +411,16 @@ it.effect(
         assert.ok(shell);
         assert.equal(shell.autoSettleDisabledAt == null, enabled);
       }
+      yield* orchestrator.dispatch({
+        type: "thread.lifecycle.set",
+        commandId: CommandId.make("lifecycle-control"),
+        threadId,
+        lifecycle: "in_progress",
+      });
+      assert.equal(
+        (yield* projections.getThreadProjection(threadId)).thread.lifecycle,
+        "in_progress",
+      );
       yield* sql`INSERT INTO orchestration_v2_projection_messages
       (message_id, thread_id, run_id, node_id, role, streaming, created_at, updated_at, payload_json)
       VALUES ('obsolete', ${threadId}, NULL, NULL, 'assistant', 0, ${DateTime.formatIso(now)}, ${DateTime.formatIso(now)}, '{"obsolete":true}')`;
