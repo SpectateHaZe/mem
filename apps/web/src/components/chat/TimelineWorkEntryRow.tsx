@@ -35,7 +35,10 @@ import { ChatMarkdownAssetImage } from "./ChatMarkdownMedia";
 import { ChevronRightIcon, CircleAlertIcon, XIcon, RotateCcwIcon } from "lucide-react";
 import { Button, InlineButton } from "../ui/button";
 import { useAssetUrls } from "../../assets/assetUrls";
+import { useOpenLink } from "../../browser/useOpenLink";
 import { useThreadShell } from "../../state/entities";
+import { splitHttpsLinks } from "./linkifyHttps";
+import { reportMarkdownActionFailure } from "./markdownActionFailure";
 import {
   threadReadLabelPrefix,
   threadReadTargetId,
@@ -115,6 +118,39 @@ const toolCallExpandedBodyClassName =
   "max-h-64 cursor-text overflow-auto whitespace-pre-wrap break-words font-mono text-secondary-label text-(length:--font-size-code,var(--text-2xs)) leading-relaxed select-text";
 
 const stopRowToggle = (e: { stopPropagation: () => void }) => e.stopPropagation();
+
+function LinkedText({ text }: { text: string }) {
+  const ctx = use(TimelineRowCtx);
+  const openLink = useOpenLink(ctx.threadRef);
+  return (
+    <>
+      {splitHttpsLinks(text).map((part) => {
+        const href = part.href;
+        return href === null ? (
+          part.text
+        ) : (
+          <a
+            key={part.offset}
+            href={href}
+            className="break-words underline underline-offset-2 hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              void openLink(href, { event }).catch((cause) =>
+                reportMarkdownActionFailure(
+                  { operation: "open-link-external", target: href },
+                  cause,
+                ),
+              );
+            }}
+          >
+            {part.text}
+          </a>
+        );
+      })}
+    </>
+  );
+}
 
 export function ReasoningTraceContent({ entries }: { entries: ReadonlyArray<TimelineWorkEntry> }) {
   const ctx = use(TimelineRowCtx);
@@ -251,7 +287,7 @@ function WorkEntryLogRow(props: WorkEntryRowProps) {
       >
         {!warning ? (
           <p className="ms-7 whitespace-pre-wrap break-words py-1 text-sm leading-relaxed text-foreground/80">
-            {failureItem.failure.message}
+            <LinkedText text={failureItem.failure.message} />
           </p>
         ) : null}
         {retryRunId !== null && onRetryWorkspacePreparation ? (
