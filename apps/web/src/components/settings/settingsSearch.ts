@@ -593,10 +593,12 @@ export const SETTINGS_SEARCH_ITEMS = [
   },
   {
     id: "mem-spending-cap",
-    title: "Spending cap",
+    title: "Spending cap per day",
     to: "/settings/threads",
     scope: "environment-defaults",
-    searchTerms: ["budget cost money dollars limit spend cap overseer parks tasks"],
+    searchTerms: [
+      "budget cost money dollars limit spend cap daily per day rolling 24 hours overseer parks tasks",
+    ],
   },
   {
     id: "mem-spawn-directory",

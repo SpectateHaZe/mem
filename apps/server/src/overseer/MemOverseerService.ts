@@ -30,6 +30,7 @@ import {
 import { elapsedShare } from "@t3tools/shared/usageLimits";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
+import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
@@ -57,7 +58,13 @@ import {
   type MemTaskState,
 } from "./MemOverseerLoop.ts";
 import { MemReviewer } from "./MemReviewer.ts";
-import { accrueSpend, decideSpend, describeCap, type SpendDecision } from "./MemSpendingCap.ts";
+import {
+  accrueSpend,
+  decideSpend,
+  describeCap,
+  toCents,
+  type MemSpendEntry,
+} from "./MemSpendingCap.ts";
 import {
   MemOverseerTaskStore,
   newTaskRecord,
@@ -109,6 +116,14 @@ export interface MemOverseerThread {
   /** Every file the thread touched, so the review reads code instead of a digest of it. */
   readonly files: ReadonlyArray<MemChangedFile>;
   readonly evidence: string;
+  /** The newest completed provider turn, for the cost its provider actually reported. */
+  readonly lastTurn: MemOverseerLastTurn | null;
+}
+
+export interface MemOverseerLastTurn {
+  readonly completedAtMs: number;
+  /** Null when the provider reported nothing; a subscription's zero is reported as zero. */
+  readonly costUsd: number | null;
 }
 
 export interface MemOverseerSettingsSnapshot {
@@ -129,6 +144,12 @@ export interface MemOverseerReviewRequest {
   readonly modelSelection: ModelSelection;
 }
 
+/**
+ * A verdict plus what the provider said the call cost, when it says anything. Text generation
+ * reports no cost today, so the estimate is the fallback the cap uses.
+ */
+export type MemOverseerReviewResult = QualityGateResult & { readonly costUsd?: number };
+
 /** The change set split into review passes, plus the measured deletions the gate reads. */
 export interface MemReviewPlan {
   readonly batches: ReadonlyArray<string>;
@@ -141,6 +162,8 @@ export interface MemOverseerStateStore {
   readonly all: () => Effect.Effect<ReadonlyArray<MemOverseerTaskRecord>>;
   readonly get: (threadId: string) => Effect.Effect<MemOverseerTaskRecord | undefined>;
   readonly put: (record: MemOverseerTaskRecord) => Effect.Effect<void>;
+  /** Appends a real or estimated charge; the cap sums only the rolling day of them. */
+  readonly recordSpend: (entry: MemSpendEntry) => Effect.Effect<void>;
   readonly totalSpentUsd: () => Effect.Effect<number>;
   readonly approvals: () => Effect.Effect<ReadonlyArray<MemPendingApprovalRecord>>;
 }
@@ -188,7 +211,7 @@ export interface MemOverseerPorts {
   ) => Effect.Effect<MemReviewPlan, MemOverseerFailure>;
   readonly review: (
     input: MemOverseerReviewRequest,
-  ) => Effect.Effect<QualityGateResult, MemOverseerFailure>;
+  ) => Effect.Effect<MemOverseerReviewResult, MemOverseerFailure>;
   readonly guide: (
     target: MemOverseerGuideTarget,
     instruction: string,
@@ -274,6 +297,7 @@ const sameRecord = (
   left.task.rejections === right.task.rejections &&
   left.task.lastInstruction === right.task.lastInstruction &&
   left.spentUsd === right.spentUsd &&
+  left.pendingCharge === right.pendingCharge &&
   left.deliveredInstruction === right.deliveredInstruction &&
   left.deliveredAtMs === right.deliveredAtMs &&
   left.deliveredEvidenceFingerprint === right.deliveredEvidenceFingerprint &&
@@ -294,19 +318,42 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       ),
     );
 
-  const accrueTurn = (record: MemOverseerTaskRecord): MemOverseerTaskRecord => ({
-    ...record,
-    spentUsd: accrueSpend({ spentUsd: record.spentUsd, actualUsd: MEM_ESTIMATED_TURN_USD })
-      .spentUsd,
+  /** Books what Mem paid for: the ledger keeps the cap honest, the record keeps the display. */
+  const charge = Effect.fn("MemOverseerService.charge")(function* (
+    record: MemOverseerTaskRecord,
+    usd: number,
+  ) {
+    if (!Number.isFinite(usd) || toCents(usd) <= 0) return record;
+    const atMs = yield* Clock.currentTimeMillis;
+    yield* ports.store.recordSpend({ atMs, usd, threadId: record.task.threadId });
+    return {
+      ...record,
+      spentUsd: accrueSpend({ spentUsd: record.spentUsd, actualUsd: usd }).spentUsd,
+    };
   });
 
-  const charge = (record: MemOverseerTaskRecord, usd: number): MemOverseerTaskRecord =>
-    usd <= 0
-      ? record
-      : {
-          ...record,
-          spentUsd: accrueSpend({ spentUsd: record.spentUsd, actualUsd: usd }).spentUsd,
-        };
+  /**
+   * A guided turn is charged once its provider turn has ended. The provider's reported cost is the
+   * real number; a subscription reports zero (or nothing), so the estimate is what keeps the cap
+   * limiting activity there. Only the latest turn at or after delivery can be the one Mem started.
+   */
+  const settleTurnCharge = Effect.fn("MemOverseerService.settleTurnCharge")(function* (
+    record: MemOverseerTaskRecord,
+    thread: MemOverseerThread,
+  ) {
+    const deliveredAtMs = record.deliveredAtMs;
+    const turn = thread.lastTurn;
+    const reportedUsd =
+      turn !== null && (deliveredAtMs === null || turn.completedAtMs >= deliveredAtMs)
+        ? turn.costUsd
+        : null;
+    const usd = reportedUsd !== null && reportedUsd > 0 ? reportedUsd : MEM_ESTIMATED_TURN_USD;
+    const settled = yield* charge({ ...record, pendingCharge: false }, usd);
+    // Persisted here because several branches below return without another write, and a charge
+    // that landed in the ledger must not be charged again on the next tick.
+    yield* ports.store.put(settled);
+    return settled;
+  });
 
   /**
    * One permit for every action that moves a task or spends money, so a chat-driven request and a
@@ -374,9 +421,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             }).pipe(Effect.as(null)),
           ),
         );
-      // The call was made, so it is charged whether or not it answered.
-      spentUsd = accrueSpend({ spentUsd, actualUsd: MEM_ESTIMATED_REVIEW_USD }).spentUsd;
-      costUsd = accrueSpend({ spentUsd: costUsd, actualUsd: MEM_ESTIMATED_REVIEW_USD }).spentUsd;
+      // The call was made, so it is charged whether or not it answered. A provider that reports a
+      // cost is charged that; text generation reports none, so the estimate stands in.
+      const batchUsd = result?.costUsd ?? MEM_ESTIMATED_REVIEW_USD;
+      spentUsd = accrueSpend({ spentUsd, actualUsd: batchUsd }).spentUsd;
+      costUsd = accrueSpend({ spentUsd: costUsd, actualUsd: batchUsd }).spentUsd;
 
       if (result === null || !result.usable) {
         return {
@@ -424,7 +473,6 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
   const runThread = Effect.fn("MemOverseerService.runThread")(function* (
     thread: MemOverseerThread,
     mem: MemOverseerSettings,
-    spend: SpendDecision,
     pace: MemPaceDecision,
     ownerAway: boolean,
   ) {
@@ -444,6 +492,14 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       if (existing === undefined) yield* ports.store.put({ ...record, updatedAtMs: nowMs });
       return;
     }
+
+    // The guided turn is over once the thread is idle, so its real cost can finally be booked.
+    if (record.pendingCharge) {
+      record = yield* settleTurnCharge(record, thread);
+    }
+
+    // Read after settling, so the just-booked turn counts against this thread's own decision.
+    const { spend } = yield* spendForTurn(mem);
 
     // An escalated task is finished with Mem: a denial or an unusable review must not be re-asked.
     if (record.task.phase === "escalated") {
@@ -533,7 +589,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           });
         } else {
           const outcome = yield* reviewBatches(thread, plan, mem, pace.selection);
-          record = charge(record, outcome.costUsd);
+          record = yield* charge(record, outcome.costUsd);
           if (outcome.type === "parked") {
             state = reduceTask(state, { type: "capReached" });
             if (record.settledPhase !== "parked") {
@@ -605,14 +661,15 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         // Presence no longer gates work: Mem acts either way and only the summary says who was there.
         const delivered = yield* deliver(thread, action.instruction);
         if (delivered) {
-          record = accrueTurn({
+          record = {
             ...record,
+            pendingCharge: true,
             pendingApproval: null,
             deliveredInstruction: action.instruction,
             deliveredAtMs: nowMs,
             deliveredEvidenceFingerprint: fingerprint,
             lastGuideSource: ownerAway ? "auto" : "owner",
-          });
+          };
           yield* Effect.logInfo("Mem guided a thread (sent).", {
             threadId: thread.threadId,
             ownerAway,
@@ -745,18 +802,18 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       // A failed send keeps the approval queued for the next tick; the thread is still skipped.
       if (!delivered) continue;
 
+      // Reservation for the next decision in this loop; the ledger is charged when the turn ends.
       spentUsd = accrueSpend({ spentUsd, actualUsd: MEM_ESTIMATED_TURN_USD }).spentUsd;
-      yield* ports.store.put(
-        accrueTurn({
-          ...record,
-          pendingApproval: null,
-          deliveredInstruction: approval.instruction,
-          deliveredAtMs: nowMs,
-          deliveredEvidenceFingerprint: approval.evidenceFingerprint,
-          lastGuideSource: "auto",
-          updatedAtMs: nowMs,
-        }),
-      );
+      yield* ports.store.put({
+        ...record,
+        pendingCharge: true,
+        pendingApproval: null,
+        deliveredInstruction: approval.instruction,
+        deliveredAtMs: nowMs,
+        deliveredEvidenceFingerprint: approval.evidenceFingerprint,
+        lastGuideSource: "auto",
+        updatedAtMs: nowMs,
+      });
       yield* Effect.logInfo("Mem guided a thread (proceeded after no answer).", {
         threadId: approval.threadId,
       });
@@ -828,17 +885,16 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     );
     if (!delivered) return { outcome: "failed" as const };
 
-    yield* ports.store.put(
-      accrueTurn({
-        ...record,
-        pendingApproval: null,
-        deliveredInstruction: pending.instruction,
-        deliveredAtMs: nowMs,
-        deliveredEvidenceFingerprint: pending.evidenceFingerprint,
-        lastGuideSource: "owner",
-        updatedAtMs: nowMs,
-      }),
-    );
+    yield* ports.store.put({
+      ...record,
+      pendingCharge: true,
+      pendingApproval: null,
+      deliveredInstruction: pending.instruction,
+      deliveredAtMs: nowMs,
+      deliveredEvidenceFingerprint: pending.evidenceFingerprint,
+      lastGuideSource: "owner",
+      updatedAtMs: nowMs,
+    });
     yield* Effect.logInfo("Mem guided a thread (approved by owner).", {
       threadId: input.threadId,
     });
@@ -971,7 +1027,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           const existing = yield* ports.store
             .get(threadId)
             .pipe(Effect.orElseSucceed(() => undefined as MemOverseerTaskRecord | undefined));
-          const record = charge(existing ?? newTaskRecord(threadId, nowMs), outcome.costUsd);
+          const record = yield* charge(existing ?? newTaskRecord(threadId, nowMs), outcome.costUsd);
 
           if (outcome.type === "parked") {
             yield* ports.store.put({
@@ -1109,20 +1165,19 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           );
           if (!delivered) return { sent: false } satisfies MemSendInstructionResult;
 
-          yield* ports.store.put(
-            accrueTurn({
-              ...record,
-              task: { ...record.task, phase: "claimed", lastInstruction: instruction },
-              // An owner who steers a settled thread reopens it for review.
-              settledPhase: null,
-              pendingApproval: null,
-              deliveredInstruction: instruction,
-              deliveredAtMs: nowMs,
-              deliveredEvidenceFingerprint: fingerprintEvidence(thread.evidence),
-              lastGuideSource: "owner",
-              updatedAtMs: nowMs,
-            }),
-          );
+          yield* ports.store.put({
+            ...record,
+            task: { ...record.task, phase: "claimed", lastInstruction: instruction },
+            // An owner who steers a settled thread reopens it for review.
+            settledPhase: null,
+            pendingCharge: true,
+            pendingApproval: null,
+            deliveredInstruction: instruction,
+            deliveredAtMs: nowMs,
+            deliveredEvidenceFingerprint: fingerprintEvidence(thread.evidence),
+            lastGuideSource: "owner",
+            updatedAtMs: nowMs,
+          });
           yield* Effect.logInfo("Mem sent a chat instruction.", { threadId });
           return { sent: true } satisfies MemSendInstructionResult;
         }),
@@ -1239,17 +1294,16 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             );
 
           const nowMs = yield* Clock.currentTimeMillis;
-          yield* ports.store.put(
-            accrueTurn({
-              ...newTaskRecord(spawned.threadId, nowMs),
-              // The prompt is already in the new thread, so the loop must never send it again.
-              deliveredInstruction: input.prompt,
-              deliveredAtMs: nowMs,
-              deliveredEvidenceFingerprint: null,
-              lastGuideSource: "owner",
-              updatedAtMs: nowMs,
-            }),
-          );
+          yield* ports.store.put({
+            ...newTaskRecord(spawned.threadId, nowMs),
+            // The prompt is already in the new thread, so the loop must never send it again.
+            pendingCharge: true,
+            deliveredInstruction: input.prompt,
+            deliveredAtMs: nowMs,
+            deliveredEvidenceFingerprint: null,
+            lastGuideSource: "owner",
+            updatedAtMs: nowMs,
+          });
           yield* Effect.logInfo("Mem spawned a session.", { threadId: spawned.threadId });
           return { threadId: spawned.threadId };
         }),
@@ -1298,19 +1352,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       );
     if (threads.length === 0) return;
 
-    const spentUsd = yield* ports.store.totalSpentUsd().pipe(Effect.orElseSucceed(() => 0));
-    const spend = decideSpend({
-      capUsd: settings.mem.spendingCapUsd,
-      spentUsd,
-      estimatedNextTurnUsd: MEM_ESTIMATED_TURN_USD,
-    });
-
-    // Sequential on purpose: one action per thread, and the spend total feeds the next decision.
+    // Sequential on purpose: one action per thread, and each thread re-reads spend, so anything
+    // booked while this tick ran is already counted.
     // Each thread is one actor action, so a chat request can take the lock between threads only.
     yield* Effect.forEach(
       threads.filter((thread) => !settledThreads.has(thread.threadId)),
       (thread) =>
-        actorLock.withPermit(runThread(thread, settings.mem, spend, settings.pace, ownerAway)).pipe(
+        actorLock.withPermit(runThread(thread, settings.mem, settings.pace, ownerAway)).pipe(
           Effect.catchCause((cause) =>
             Effect.logWarning("Mem skipped a thread after an unexpected failure.", {
               threadId: thread.threadId,
@@ -1458,10 +1506,34 @@ const readRecentActivity = Effect.fn("MemOverseerService.readRecentActivity")(fu
   return activity;
 });
 
+/**
+ * The newest completed provider turn, reduced to the two things the cap needs. The provider turn
+ * is where a real per-turn cost lives; a provider that reports none leaves `costUsd` null.
+ */
+const readLastTurn = Effect.fn("MemOverseerService.readLastTurn")(function* (
+  projections: ProjectionStore.ProjectionStoreV2["Service"],
+  threadId: ThreadId,
+): Effect.fn.Return<MemOverseerLastTurn | null> {
+  const records = yield* projections
+    .getThreadRecords(threadId, ["providerTurns"])
+    .pipe(Effect.option);
+  if (Option.isNone(records)) return null;
+
+  let last: MemOverseerLastTurn | null = null;
+  for (const turn of records.value.providerTurns) {
+    if (turn.status !== "completed" || turn.completedAt === null) continue;
+    const completedAtMs = DateTime.toEpochMillis(turn.completedAt);
+    if (last !== null && completedAtMs <= last.completedAtMs) continue;
+    last = { completedAtMs, costUsd: turn.turnTokenUsage?.costUsd ?? null };
+  }
+  return last;
+});
+
 const toThread = (
   shell: OrchestrationV2ThreadShell,
   activity: RecentActivity,
   root: string | null,
+  lastTurn: MemOverseerLastTurn | null,
 ): MemOverseerThread => ({
   threadId: shell.id,
   projectId: shell.projectId,
@@ -1477,6 +1549,7 @@ const toThread = (
   root,
   files: [...activity.files.values()],
   evidence: activity.lastAssistantText,
+  lastTurn,
 });
 
 const make = Effect.gen(function* () {
@@ -1524,8 +1597,12 @@ const make = Effect.gen(function* () {
 
   const threadForShell = (shell: OrchestrationV2ThreadShell, roots: Map<string, string | null>) =>
     Effect.map(
-      Effect.all([readRecentActivity(projections, shell.id), rootForShell(shell, roots)]),
-      ([activity, root]) => toThread(shell, activity, root),
+      Effect.all([
+        readRecentActivity(projections, shell.id),
+        rootForShell(shell, roots),
+        readLastTurn(projections, shell.id),
+      ]),
+      ([activity, root, lastTurn]) => toThread(shell, activity, root, lastTurn),
     );
 
   /** The same directory comparison the project store makes: resolved absolute paths. */

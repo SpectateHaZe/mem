@@ -7,6 +7,7 @@
  */
 
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
+import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
@@ -19,6 +20,7 @@ import * as Semaphore from "effect/Semaphore";
 
 import * as ServerConfig from "../config.ts";
 import { startTask, type MemTaskPhase, type MemTaskState } from "./MemOverseerLoop.ts";
+import { pruneSpendEntries, sumSpendInWindow, type MemSpendEntry } from "./MemSpendingCap.ts";
 
 const MEM_TASKS_FILE_NAME = "mem-overseer-tasks.json";
 
@@ -46,8 +48,10 @@ export interface MemPendingApprovalRecord {
 
 export interface MemOverseerTaskRecord {
   readonly task: MemTaskState;
-  /** Estimated turn spend in USD, carried next to the state so a restart keeps the budget spent. */
+  /** Estimate of what this task spent, for display only: the cap reads the spend ledger. */
   readonly spentUsd: number;
+  /** A delivered turn whose cost has not been booked yet; cleared when its provider turn ends. */
+  readonly pendingCharge: boolean;
   /** The last usable verdict Mem reached, so a client can show it without paying for a review. */
   readonly lastReview: MemReviewSummary | null;
   /** The last instruction actually handed to the session; a restart must never resend it. */
@@ -71,6 +75,7 @@ export interface MemReviewSummary {
 export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskRecord => ({
   task: startTask(threadId),
   spentUsd: 0,
+  pendingCharge: false,
   lastReview: null,
   deliveredInstruction: null,
   deliveredAtMs: null,
@@ -110,6 +115,8 @@ const PersistedTaskRecord = Schema.Struct({
   deliveredInstruction: Schema.NullOr(Schema.String),
   deliveredAtMs: Schema.NullOr(Schema.Int),
   deliveredEvidenceFingerprint: Schema.NullOr(Schema.String),
+  // Optional so a file written before turn charging was deferred still decodes.
+  pendingCharge: Schema.optionalKey(Schema.Boolean),
   settledPhase: Schema.NullOr(
     Schema.Literals(["claimed", "awaitingReview", "accepted", "escalated", "parked"]),
   ),
@@ -119,9 +126,17 @@ const PersistedTaskRecord = Schema.Struct({
   updatedAtMs: Schema.Int,
 });
 
+const PersistedSpendEntry = Schema.Struct({
+  atMs: Schema.Int,
+  usd: Schema.Finite,
+  threadId: Schema.String,
+});
+
 const PersistedMemTasks = Schema.Struct({
+  // Still 1: everything added since is optional, so a file written before it still decodes.
   version: Schema.Literal(1),
   tasks: Schema.Array(PersistedTaskRecord),
+  spend: Schema.optionalKey(Schema.Array(PersistedSpendEntry)),
 });
 
 const decodePersistedMemTasks = Schema.decodeUnknownOption(
@@ -138,6 +153,7 @@ const toPersisted = (record: MemOverseerTaskRecord) => ({
   deliveredInstruction: record.deliveredInstruction,
   deliveredAtMs: record.deliveredAtMs,
   deliveredEvidenceFingerprint: record.deliveredEvidenceFingerprint,
+  pendingCharge: record.pendingCharge,
   settledPhase: record.settledPhase,
   pendingApproval: record.pendingApproval,
   lastGuideSource: record.lastGuideSource,
@@ -152,6 +168,7 @@ const fromPersisted = (persisted: typeof PersistedTaskRecord.Type): MemOverseerT
     lastInstruction: persisted.lastInstruction,
   },
   spentUsd: persisted.spentUsd,
+  pendingCharge: persisted.pendingCharge ?? false,
   lastReview: persisted.lastReview ?? null,
   deliveredInstruction: persisted.deliveredInstruction,
   deliveredAtMs: persisted.deliveredAtMs,
@@ -179,6 +196,9 @@ export class MemOverseerTaskStore extends Context.Service<
     readonly all: () => Effect.Effect<ReadonlyArray<MemOverseerTaskRecord>>;
     readonly get: (threadId: string) => Effect.Effect<MemOverseerTaskRecord | undefined>;
     readonly put: (record: MemOverseerTaskRecord) => Effect.Effect<void>;
+    /** Appends what Mem paid for. Kept apart from task records so pruning cannot refund budget. */
+    readonly recordSpend: (entry: MemSpendEntry) => Effect.Effect<void>;
+    /** Everything spent inside the rolling day, read from the ledger. */
     readonly totalSpentUsd: () => Effect.Effect<number>;
     /** Every unanswered question, oldest first. Bounded by the same record ceiling. */
     readonly approvals: () => Effect.Effect<ReadonlyArray<MemPendingApprovalRecord>>;
@@ -193,22 +213,34 @@ const make = Effect.gen(function* () {
 
   const load = Effect.gen(function* () {
     const raw = yield* fileSystem.readFileString(statePath).pipe(Effect.orElseSucceed(() => ""));
+    const nowMs = yield* Clock.currentTimeMillis;
     const decoded = decodePersistedMemTasks(raw.trim());
     return Option.match(decoded, {
-      onNone: () => new Map<string, MemOverseerTaskRecord>(),
-      onSome: (persisted) =>
-        new Map(persisted.tasks.map((task) => [task.threadId, fromPersisted(task)] as const)),
+      onNone: () => ({ records: new Map<string, MemOverseerTaskRecord>(), spend: [] }),
+      onSome: (persisted) => ({
+        records: new Map(
+          persisted.tasks.map((task) => [task.threadId, fromPersisted(task)] as const),
+        ),
+        spend: pruneSpendEntries({ entries: persisted.spend ?? [], nowMs }),
+      }),
     });
   });
 
-  const records = yield* Ref.make(yield* load);
+  const state = yield* Ref.make(yield* load);
   // One permit covers the snapshot and the write, so an older write cannot land last.
   const writeLock = yield* Semaphore.make(1);
 
-  const persist = (snapshot: ReadonlyArray<MemOverseerTaskRecord>) =>
+  const persist = (snapshot: {
+    readonly records: ReadonlyMap<string, MemOverseerTaskRecord>;
+    readonly spend: ReadonlyArray<MemSpendEntry>;
+  }) =>
     writeFileStringAtomically({
       filePath: statePath,
-      contents: `${JSON.stringify({ version: 1, tasks: snapshot.map(toPersisted) })}\n`,
+      contents: `${JSON.stringify({
+        version: 1,
+        tasks: prune([...snapshot.records.values()]).map(toPersisted),
+        spend: snapshot.spend,
+      })}\n`,
     }).pipe(
       Effect.provideService(FileSystem.FileSystem, fileSystem),
       Effect.provideService(Path.Path, path),
@@ -219,44 +251,58 @@ const make = Effect.gen(function* () {
     );
 
   const all = Effect.fn("MemOverseerTaskStore.all")(function* () {
-    return [...(yield* Ref.get(records)).values()];
+    return [...(yield* Ref.get(state)).records.values()];
   });
 
   const get = Effect.fn("MemOverseerTaskStore.get")(function* (threadId: string) {
-    return (yield* Ref.get(records)).get(threadId);
+    return (yield* Ref.get(state)).records.get(threadId);
   });
 
   const put = Effect.fn("MemOverseerTaskStore.put")(function* (record: MemOverseerTaskRecord) {
     yield* writeLock.withPermit(
       Effect.gen(function* () {
-        const next = yield* Ref.modify(records, (current) => {
-          const updated = new Map(current);
+        const next = yield* Ref.modify(state, (current) => {
+          const updated = new Map(current.records);
           updated.set(record.task.threadId, record);
           const bounded = prune([...updated.values()]);
-          return [bounded, new Map(bounded.map((entry) => [entry.task.threadId, entry] as const))];
+          const records = new Map(bounded.map((entry) => [entry.task.threadId, entry] as const));
+          const next = { records, spend: current.spend };
+          return [next, next];
         });
         yield* persist(next);
       }),
     );
   });
 
+  const recordSpend = Effect.fn("MemOverseerTaskStore.recordSpend")(function* (
+    entry: MemSpendEntry,
+  ) {
+    const nowMs = yield* Clock.currentTimeMillis;
+    yield* writeLock.withPermit(
+      Effect.gen(function* () {
+        const next = yield* Ref.updateAndGet(state, (current) => ({
+          records: current.records,
+          spend: pruneSpendEntries({ entries: [...current.spend, entry], nowMs }),
+        }));
+        yield* persist(next);
+      }),
+    );
+  });
+
   const totalSpentUsd = Effect.fn("MemOverseerTaskStore.totalSpentUsd")(function* () {
-    const current = yield* Ref.get(records);
-    let total = 0;
-    for (const record of current.values()) {
-      if (Number.isFinite(record.spentUsd)) total += record.spentUsd;
-    }
-    return total;
+    const nowMs = yield* Clock.currentTimeMillis;
+    const current = yield* Ref.get(state);
+    return sumSpendInWindow({ entries: current.spend, nowMs });
   });
 
   const approvals = Effect.fn("MemOverseerTaskStore.approvals")(function* () {
-    const current = yield* Ref.get(records);
+    const current = (yield* Ref.get(state)).records;
     return [...current.values()]
       .flatMap((record) => (record.pendingApproval === null ? [] : [record.pendingApproval]))
       .sort((left, right) => left.createdAtMs - right.createdAtMs);
   });
 
-  return { all, get, put, totalSpentUsd, approvals } as const;
+  return { all, get, put, recordSpend, totalSpentUsd, approvals } as const;
 });
 
 export const layer = Layer.effect(MemOverseerTaskStore, make);

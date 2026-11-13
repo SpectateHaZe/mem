@@ -4,7 +4,10 @@ import {
   accrueSpend,
   decideSpend,
   describeCap,
+  MEM_SPEND_WINDOW_MS,
   parkAtCap,
+  pruneSpendEntries,
+  sumSpendInWindow,
   toCents,
   type SpendDecision,
 } from "./MemSpendingCap.ts";
@@ -156,6 +159,49 @@ describe("parkAtCap", () => {
     expect(parkAtCap({ capUsd: 5, spentUsd: 5, claimedTaskIds: first.parkedTaskIds })).toEqual(
       first,
     );
+  });
+});
+
+describe("sumSpendInWindow", () => {
+  const nowMs = 1_700_000_000_000;
+
+  it("sums only the entries inside the rolling day", () => {
+    expect(
+      sumSpendInWindow({
+        entries: [
+          { atMs: nowMs - MEM_SPEND_WINDOW_MS - 1, usd: 4, threadId: "old" },
+          { atMs: nowMs - MEM_SPEND_WINDOW_MS, usd: 2, threadId: "boundary" },
+          { atMs: nowMs - 60_000, usd: 0.25, threadId: "fresh" },
+          { atMs: nowMs, usd: 0.05, threadId: "now" },
+        ],
+        nowMs,
+      }),
+    ).toBe(0.3);
+  });
+
+  it("carries the sum in whole cents and drops nonsense entries", () => {
+    expect(
+      sumSpendInWindow({
+        entries: [
+          { atMs: nowMs, usd: 0.1, threadId: "a" },
+          { atMs: nowMs, usd: 0.2, threadId: "b" },
+          { atMs: nowMs, usd: -5, threadId: "bad-negative" },
+          { atMs: nowMs, usd: Number.NaN, threadId: "bad-nan" },
+          { atMs: Number.NaN, usd: 9, threadId: "bad-time" },
+        ],
+        nowMs,
+      }),
+    ).toBe(0.3);
+  });
+
+  it("prunes to exactly the entries the cap still counts", () => {
+    const fresh = { atMs: nowMs - 1, usd: 0.1, threadId: "fresh" };
+    expect(
+      pruneSpendEntries({
+        entries: [{ atMs: nowMs - MEM_SPEND_WINDOW_MS - 1, usd: 1, threadId: "old" }, fresh],
+        nowMs,
+      }),
+    ).toStrictEqual([fresh]);
   });
 });
 

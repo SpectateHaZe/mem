@@ -62,7 +62,7 @@ NEXT INSTRUCTION:
 export const MemOverseerSettings = Schema.Struct({
   /** Mem only acts while this is on. The switch exists so a long lunch cannot hand over the repo. */
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
-  /** Hard stop for money. Reaching it parks every claimed task and summarises; it never overshoots. */
+  /** Rolling 24-hour stop for money. Reaching it parks every claimed task until spend ages out. */
   spendingCapUsd: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(5))),
   /** Folder Mem creates new project checkouts in when no existing session fits the task. */
   spawnDirectory: TrimmedString.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
