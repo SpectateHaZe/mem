@@ -11,6 +11,8 @@ import type * as EffectAcpSchema from "effect-acp/compat";
 import type * as AcpSessionRuntime from "@t3tools/provider-acp/server/AcpSessionRuntime";
 import type { AcpToolCallState } from "@t3tools/provider-acp/server/runtimeModel";
 
+import { GROK_COST_USD_TICKS_PER_DOLLAR } from "./usage.ts";
+
 export const xAiRateLimitedErrorCode = -32003;
 const completedXAiPromptIdLimit = 128;
 
@@ -36,6 +38,7 @@ const XAiSessionUpdateNotification = Schema.Struct({
     status: Schema.optional(Schema.String),
     output: Schema.optional(Schema.NullOr(Schema.String)),
     error: Schema.optional(Schema.NullOr(Schema.String)),
+    usage: Schema.optional(Schema.Unknown),
   }),
   _meta: Schema.optional(Schema.Unknown),
 });
@@ -79,6 +82,45 @@ export function isXAiTaskCompletedWakeNotification(
 ): boolean {
   const promptId = notification._meta?.promptId;
   return typeof promptId === "string" && promptId.startsWith(XAI_TASK_COMPLETED_PROMPT_ID_PREFIX);
+}
+
+/** A completed turn's billed cost sample from `_x.ai/session_notification`'s `turn_completed`. */
+export interface XAiTurnCostSample {
+  readonly sessionId: string;
+  readonly promptId?: string;
+  readonly costUsd: number;
+}
+
+const grokCostTicksToUsd = (ticks: unknown): number | undefined =>
+  // Grok reports zero ticks when it cannot price a turn; treat it as unknown.
+  typeof ticks === "number" && Number.isFinite(ticks) && ticks > 0
+    ? ticks / GROK_COST_USD_TICKS_PER_DOLLAR
+    : undefined;
+
+/**
+ * Grok reports its billed cost ticks per prompt on `turn_completed`; a restart replays those
+ * notifications, so consumers deduplicate by prompt id. Wake completions under a task-completed-*
+ * prompt id belong to background work the adapter tracks separately.
+ */
+export function xAiTurnCostSample(
+  notification: XAiSessionUpdateNotification,
+): XAiTurnCostSample | null {
+  const update = notification.update;
+  if (update.sessionUpdate !== "turn_completed") return null;
+  const promptId = nonEmptyString(update.prompt_id) ?? nonEmptyString(update.promptId);
+  if (promptId !== undefined && promptId.startsWith(XAI_TASK_COMPLETED_PROMPT_ID_PREFIX)) {
+    return null;
+  }
+  const usageRecord = (update.usage ?? undefined) as Record<string, unknown> | undefined;
+  if (typeof usageRecord !== "object" || usageRecord === null) return null;
+  if (usageRecord["usageIsIncomplete"] === true) return null;
+  const costUsd = grokCostTicksToUsd(usageRecord["costUsdTicks"]);
+  if (costUsd === undefined) return null;
+  return {
+    sessionId: notification.sessionId,
+    ...(promptId === undefined ? {} : { promptId }),
+    costUsd,
+  };
 }
 
 interface PendingXAiPromptCompletion {
@@ -505,17 +547,24 @@ export function xAiSubagentFinishedNotice(
   };
 }
 
+/** Track subagent completions and per-turn cost samples on one shared session-notification slot. */
 export const registerXAiSubagentFinished = (
   runtime: Pick<AcpSessionRuntime.AcpSessionRuntime["Service"], "handleExtNotification">,
   finish: (notice: XAiSubagentFinishedNotice) => Effect.Effect<void>,
+  reportTurnCost?: (sample: XAiTurnCostSample) => Effect.Effect<void>,
 ): Effect.Effect<void> =>
   Effect.forEach(
     xAiSessionNotificationMethods,
     (method) =>
-      runtime.handleExtNotification(method, XAiSessionUpdateNotification, (notification) => {
-        const notice = xAiSubagentFinishedNotice(notification);
-        return notice === null ? Effect.void : finish(notice);
-      }),
+      runtime.handleExtNotification(method, XAiSessionUpdateNotification, (notification) =>
+        Effect.gen(function* () {
+          const notice = xAiSubagentFinishedNotice(notification);
+          if (notice !== null) yield* finish(notice);
+          if (reportTurnCost === undefined) return;
+          const sample = xAiTurnCostSample(notification);
+          if (sample !== null) yield* reportTurnCost(sample);
+        }),
+      ),
     { discard: true },
   );
 

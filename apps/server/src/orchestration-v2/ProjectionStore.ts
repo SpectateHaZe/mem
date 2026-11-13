@@ -750,6 +750,24 @@ function upsertById<T extends { readonly id: string }>(items: ReadonlyArray<T>, 
   return updated;
 }
 
+/** A run's rebuild may carry an older thread snapshot; the billed cost ledger only grows, so the
+ * newest amount wins and null inherits the stored amount. */
+function upsertProviderThread(
+  threads: ReadonlyArray<OrchestrationV2ProviderThread>,
+  next: OrchestrationV2ProviderThread,
+): Array<OrchestrationV2ProviderThread> {
+  const current = threads.find((thread) => thread.id === next.id);
+  const currentCost = current?.sessionCost;
+  if (currentCost === undefined || currentCost === null) return upsertById(threads, next);
+  if (next.sessionCost === undefined || next.sessionCost === null) {
+    return upsertById(threads, { ...next, sessionCost: currentCost });
+  }
+  return upsertById(
+    threads,
+    next.sessionCost.amount >= currentCost.amount ? next : { ...next, sessionCost: currentCost },
+  );
+}
+
 function upsertProviderTurn(
   turns: ReadonlyArray<OrchestrationV2ProviderTurn>,
   next: OrchestrationV2ProviderTurn,
@@ -950,7 +968,7 @@ export function applyToProjection(
                 activeProviderThreadId: event.payload.id,
               }
             : base.thread,
-        providerThreads: upsertById(base.providerThreads, event.payload),
+        providerThreads: upsertProviderThread(base.providerThreads, event.payload),
       };
     case "provider-turn.updated":
       return {
@@ -2382,8 +2400,33 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
               break;
             }
             case "provider-thread.updated": {
-              const payloadJson = yield* encodeProviderThreadPayload(event.payload);
-              const payload = parseEncodedPayload(payloadJson);
+              // A run's rebuild may carry an older thread snapshot; the billed cost ledger only
+              // grows, so the newest amount wins while nulls inherit the stored amount.
+              let payload = event.payload;
+              if (event.payload.appThreadId !== null) {
+                const priorRows = yield* sql<PayloadRow>`
+                SELECT payload_json
+                FROM orchestration_v2_projection_provider_threads
+                WHERE provider_thread_id = ${event.payload.id}
+                LIMIT 1
+              `;
+                const prior = priorRows[0];
+                if (prior !== undefined) {
+                  const priorCost = (yield* decodeProviderThreadPayload(prior.payload_json))
+                    .sessionCost;
+                  if (
+                    priorCost !== undefined &&
+                    priorCost !== null &&
+                    (payload.sessionCost === undefined ||
+                      payload.sessionCost === null ||
+                      payload.sessionCost.amount < priorCost.amount)
+                  ) {
+                    payload = { ...payload, sessionCost: priorCost };
+                  }
+                }
+              }
+              const payloadJson = yield* encodeProviderThreadPayload(payload);
+              const parsed = parseEncodedPayload(payloadJson);
               yield* sql`
               INSERT INTO orchestration_v2_projection_provider_threads (
                 provider_thread_id,
@@ -2410,7 +2453,7 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
                 ${event.payload.status},
                 ${event.payload.firstRunOrdinal},
                 ${event.payload.lastRunOrdinal},
-                ${stringField(payload, "updatedAt")},
+                ${stringField(parsed, "updatedAt")},
                 ${payloadJson}
               )
               ON CONFLICT(provider_thread_id)

@@ -64,6 +64,10 @@ const TurnTokenUsageCommonFields = {
   models: Schema.optional(Schema.Array(TrimmedNonEmptyStringSchema)),
   // The provider ran a local command; its counters describe that result, not model work.
   localCommand: Schema.optional(Schema.Boolean),
+  // Provider-reported USD cost of exactly this turn; absent means the provider said nothing.
+  costUsd: Schema.optional(
+    Schema.Number.check(Schema.isFinite(), Schema.isGreaterThanOrEqualTo(0)),
+  ),
   // Provider-ledger counts beyond the main agent, such as native subagents and compaction.
   otherUsage: Schema.optional(
     Schema.Struct({ inputTokens: NonNegativeInt, outputTokens: NonNegativeInt }),

@@ -1115,6 +1115,15 @@ export const OrchestrationV2ProviderThread = Schema.Struct({
   contextUsage: Schema.optional(Schema.NullOr(ThreadTokenUsageSnapshot)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),
+  /** Provider-billed cost of this session in USD, from the provider's own turn samples. Absent unknown. */
+  sessionCost: Schema.optional(
+    Schema.NullOr(
+      Schema.Struct({
+        amount: Schema.Number.check(Schema.isFinite()),
+        currency: TrimmedNonEmptyString.check(Schema.isMaxLength(32)),
+      }),
+    ),
+  ).pipe(Schema.withDecodingDefault(Effect.succeed(null))),
   nativeMetadata: Schema.optional(Schema.NullOr(OrchestrationV2ProviderThreadNativeMetadata)).pipe(
     Schema.withDecodingDefault(Effect.succeed(null)),
   ),

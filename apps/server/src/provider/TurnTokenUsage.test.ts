@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vite-plus/test";
 import {
+  claudeCostDelta,
   claudeLedgerDelta,
   claudeModelLedger,
+  claudeTotalCostUsd,
   normalizeClaudeTurnTokenUsage,
 } from "./ClaudeTurnTokenUsage.ts";
 import {
@@ -220,6 +222,47 @@ describe("billable native turn usage", () => {
     expect(claudeLedgerDelta(ledger(25), ledger(10))).toBeUndefined();
     expect(claudeLedgerDelta(undefined, ledger(10))).toBeUndefined();
     expect(claudeModelLedger({})).toBeUndefined();
+  });
+
+  it("attributes Claude's cumulative total_cost_usd per process with deltas from the previous result", () => {
+    // The CLI's first result counts its whole session cost; a later result grows on top.
+    expect(claudeCostDelta(undefined, 0.0117)).toBe(0.0117);
+    expect(claudeCostDelta(0.0117, 0.0154)).toBeCloseTo(0.0037, 6);
+    // A repeated result is zero extra; a result below the baseline is unattributable.
+    expect(claudeCostDelta(0.0154, 0.0154)).toBe(0);
+    expect(claudeCostDelta(0.0154, 0.0049)).toBeUndefined();
+    expect(claudeCostDelta(undefined, undefined)).toBeUndefined();
+    expect(claudeTotalCostUsd({})).toBeUndefined();
+    expect(claudeTotalCostUsd({ total_cost_usd: -1 })).toBeUndefined();
+    expect(claudeTotalCostUsd({ total_cost_usd: 0.0049 })).toBe(0.0049);
+  });
+
+  it("bills a Claude local-command turn's cost growth without token counts", () => {
+    // /compact's result carries no model work, but its result still grew the cost ledger.
+    expect(
+      normalizeClaudeTurnTokenUsage(
+        {
+          subtype: "success",
+          local_command: "compact",
+          usage: { input_tokens: 0, output_tokens: 0 },
+        },
+        false,
+        "completed",
+        [],
+        { costUsd: 0.0293 },
+      ).costUsd,
+    ).toBe(0.0293);
+  });
+
+  it("keeps unavailable Claude usage when neither tokens nor cost measured a turn", () => {
+    const usage = normalizeClaudeTurnTokenUsage(undefined, false, "failed", [], {
+      costUsd: undefined,
+    });
+    expect(usage).toEqual({
+      usageStatus: "unavailable",
+      usageScope: "main_agent",
+      hasSubagents: false,
+    });
   });
 
   it("adds Claude steering segments to the final measured result once", () => {

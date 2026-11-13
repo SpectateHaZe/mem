@@ -651,6 +651,7 @@ describe("OpenCodeAdapterV2", () => {
                 cacheCreationTokens: 8,
                 outputTokens: 14,
                 reasoningTokens: 4,
+                costUsd: 0.02,
                 hasSubagents: false,
               },
         );

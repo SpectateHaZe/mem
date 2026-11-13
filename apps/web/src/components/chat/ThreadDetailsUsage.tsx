@@ -90,8 +90,10 @@ export function ThreadDetailsUsage({
 
 /** Pay-per-use tokens and spend for the whole session. Hidden when nothing was billed. */
 export function ThreadDetailsSessionUsage({ usage }: { readonly usage: SessionUsage }) {
-  const tokens = formatTokens(usage.totalTokens);
+  const tokens = usage.totalTokens > 0 ? formatTokens(usage.totalTokens) : null;
   const cost = usage.costUsd === null ? null : formatUsd(usage.costUsd);
+  // A billed cost alone still shows; the provider simply reported no token counts.
+  const value: string = cost === null ? (tokens ?? "") : tokens ? `${tokens} · ${cost}` : cost;
   return (
     <ThreadDetailsSection
       headingId="thread-details-session-usage-heading"
@@ -103,12 +105,14 @@ export function ThreadDetailsSessionUsage({ usage }: { readonly usage: SessionUs
           label="Tokens"
           fill={null}
           tone={null}
-          value={cost === null ? tokens : `${tokens} · ${cost}`}
-          ariaValue={cost === null ? tokens : `${tokens}, ${cost}`}
+          value={value}
+          ariaValue={value}
           tooltip={
             <>
               <span className="text-foreground">
-                {usage.totalTokens.toLocaleString("en-US")} tokens used
+                {usage.totalTokens > 0
+                  ? `${usage.totalTokens.toLocaleString("en-US")} tokens used`
+                  : "Provider reported no token counts"}
               </span>
               {cost !== null ? <span className="text-muted-foreground">{cost} spent</span> : null}
             </>

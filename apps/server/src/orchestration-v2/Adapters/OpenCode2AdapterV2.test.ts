@@ -3313,8 +3313,13 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           model: { id: "big-pickle", providerID: "opencode", variant: "default" },
           started: 1,
         }),
-        event("session.step.ended", { ...step("msg_seen"), finish: "tool-calls", cost: 0, tokens }),
-        event("session.step.ended", { ...step("msg_unseen"), finish: "stop", cost: 0, tokens }),
+        event("session.step.ended", {
+          ...step("msg_seen"),
+          finish: "tool-calls",
+          cost: 0.25,
+          tokens,
+        }),
+        event("session.step.ended", { ...step("msg_unseen"), finish: "stop", cost: 0.5, tokens }),
         event("session.execution.succeeded", { sessionID: SESSION }),
       ]);
       const turn = yield* runtime.events.pipe(
@@ -3329,7 +3334,12 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
       const settled = Option.getOrUndefined(yield* Fiber.join(turn));
       const usage =
         settled?.type === "provider_turn.updated" ? settled.providerTurn.turnTokenUsage : undefined;
-      assert.deepInclude(usage, { usageStatus: "complete", inputTokens: 20, outputTokens: 2 });
+      assert.deepInclude(usage, {
+        usageStatus: "complete",
+        inputTokens: 20,
+        outputTokens: 2,
+        costUsd: 0.75,
+      });
       assert.notProperty(usage, "models");
     }).pipe(Effect.scoped),
   );

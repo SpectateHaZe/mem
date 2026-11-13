@@ -208,6 +208,7 @@ interface ActiveTurn {
     cacheWrite: number;
     output: number;
     reasoning: number;
+    costUsd: number;
   };
   // Steps OpenCode started; a step that ends without tokens leaves the total partial.
   startedSteps: number;
@@ -660,6 +661,7 @@ const turnTokenUsage = (turn: ActiveTurn, status: OrchestrationV2ProviderTurn["s
         cacheCreationTokens: turn.usage.cacheWrite,
         outputTokens: turn.usage.output,
         reasoningTokens: turn.usage.reasoning,
+        ...(turn.usage.costUsd > 0 ? { costUsd: turn.usage.costUsd } : {}),
         hasSubagents: turn.usedSubagents,
       };
 };
@@ -1147,7 +1149,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
       startedAt: new Map(),
       ordinals: new Map(),
       nextOrdinal: providerTurn.ordinal * 100 + 1,
-      usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0 },
+      usage: { input: 0, cached: 0, cacheWrite: 0, output: 0, reasoning: 0, costUsd: 0 },
       startedSteps: 0,
       missedEvents: false,
       steps: 0,
@@ -2151,6 +2153,7 @@ export const make = Effect.fn("OpenCode2Adapter.make")(function* (instanceId: Pr
           turn.usage.cacheWrite += tokens.cache.write;
           turn.usage.output += tokens.output + tokens.reasoning;
           turn.usage.reasoning += tokens.reasoning;
+          turn.usage.costUsd += event.data.cost ?? 0;
           return;
         }
         case "session.retry.scheduled":

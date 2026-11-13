@@ -20,6 +20,7 @@ export {
 } from "./server/status.ts";
 export { makeGrokTextGeneration } from "./server/textGeneration.ts";
 export { grokUsageResponseToLimits, readGrokAccount } from "./server/usageLimits.ts";
+export { GROK_COST_USD_TICKS_PER_DOLLAR } from "./server/usage.ts";
 export {
   extractXAiAcpSubagentUpdate,
   makeXAiPromptCompletionRuntime,

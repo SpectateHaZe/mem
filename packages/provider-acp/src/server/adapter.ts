@@ -206,6 +206,13 @@ export interface AcpAdapterV2ExtensionContext {
     readonly sessionId: string;
     readonly failure: OrchestrationV2ProviderFailure;
   }) => Effect.Effect<void>;
+  /** A per-turn billed cost the agent reported outside the prompt response, one sample per turn.
+   * Samples for other sessions are dropped; the flavor scopes them to the session it owns. */
+  readonly reportTurnSample: (input: {
+    readonly sessionId: string;
+    readonly promptId?: string;
+    readonly costUsd: number;
+  }) => Effect.Effect<void>;
   readonly finishSubagent: (notice: {
     readonly sessionId: string;
     readonly childSessionId: string;
@@ -530,6 +537,8 @@ export interface AcpAdapterV2Flavor {
    * leaves usage semantics open, so this stays unset until proven live.
    */
   readonly reportsPerTurnPromptUsage?: boolean;
+  /** A flavor that reports per-turn samples through `reportTurnSample` instead of the prompt response. */
+  readonly acceptsExtensionTurnSamples?: boolean;
   /** Gemini-style usage: inputTokens leaves out cachedReadTokens, outputTokens leaves out thoughtTokens. */
   readonly geminiPromptUsage?: boolean;
   /**
@@ -1879,6 +1888,14 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
           input.runtimePolicy;
         const events = yield* Queue.unbounded<ProviderAdapter.ProviderAdapterV2Event>();
         const activeTurn = yield* Ref.make<ActiveAcpTurn | null>(null);
+        // Provider-billed cost accumulated from per-turn samples, keyed by the native session they
+        // belong to; the newest completes beyond the turn snapshot, so it writes to the thread.
+        const turnSampleBySessionId = yield* Ref.make(
+          new Map<
+            string,
+            { readonly costUsd: number; readonly seenPromptIds: ReadonlyArray<string> }
+          >(),
+        );
         // Keyed by the agent's steer id; an injection can arrive before its send returns.
         const steerInjections = new Map<string, Deferred.Deferred<void>>();
         const steerInjection = (steerId: string) => {
@@ -4969,6 +4986,46 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                   ),
             );
 
+        const recordSessionTurnCost = Effect.fnUntraced(function* (input: {
+          readonly sessionId: string;
+          readonly promptId?: string;
+          readonly costUsd: number;
+        }) {
+          // The agent emits one sample per prompt; repeating the same prompt id adds nothing.
+          if (input.costUsd <= 0 || !Number.isFinite(input.costUsd)) return;
+          yield* Ref.update(turnSampleBySessionId, (current) => {
+            const seen = current.get(input.sessionId);
+            if (seen?.seenPromptIds.includes(input.promptId ?? "")) return current;
+            return new Map(current).set(input.sessionId, {
+              costUsd: (seen?.costUsd ?? 0) + input.costUsd,
+              seenPromptIds:
+                input.promptId === undefined
+                  ? (seen?.seenPromptIds ?? [])
+                  : [...(seen?.seenPromptIds ?? []), input.promptId].slice(-64),
+            });
+          });
+          const accumulated = (yield* Ref.get(turnSampleBySessionId)).get(input.sessionId);
+          if (accumulated === undefined) return;
+          const knownProviderThread = (yield* Ref.get(providerThreadByNativeSessionId)).get(
+            input.sessionId,
+          );
+          if (knownProviderThread === undefined) return;
+          const now = yield* DateTime.now;
+          const providerThread: OrchestrationV2ProviderThread = {
+            ...knownProviderThread,
+            sessionCost: { amount: accumulated.costUsd, currency: "USD" },
+            updatedAt: now,
+          };
+          yield* Ref.update(providerThreadByNativeSessionId, (current) =>
+            new Map(current).set(input.sessionId, providerThread),
+          );
+          yield* emitProviderEvent({
+            type: "provider_thread.updated",
+            driver,
+            providerThread,
+          });
+        });
+
         const handleSessionUpdate = Effect.fnUntraced(function* (
           notification: EffectAcpSchema.SessionNotification,
         ) {
@@ -6794,6 +6851,20 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
                 runRuntimeCallbackAtGeneration(handlerGeneration, reportProviderRetry(notice)).pipe(
                   Effect.asVoid,
                 ),
+              reportTurnSample: (sample) =>
+                runRuntimeCallbackAtGeneration(
+                  handlerGeneration,
+                  Effect.gen(function* () {
+                    if (flavor.acceptsExtensionTurnSamples !== true) return;
+                    if (yield* Ref.get(stoppedRunQuarantine)) return;
+                    if ((yield* Ref.get(activeSessionId)) !== sample.sessionId) return;
+                    yield* recordSessionTurnCost({
+                      sessionId: sample.sessionId,
+                      ...(sample.promptId === undefined ? {} : { promptId: sample.promptId }),
+                      costUsd: sample.costUsd,
+                    });
+                  }),
+                ).pipe(Effect.asVoid),
               requestUserInput,
               captureProposedPlan,
               lastProposedPlanMarkdown,
@@ -8217,6 +8288,8 @@ export const makeAcpAdapterV2 = Effect.fn("makeAcpAdapterV2")(function* (
               lastProgressAt: 0,
               inactivityWatchdog: undefined,
             };
+            // A turn_completed notification may have landed before the turn's setup ran; nothing
+            // to consume, per-turn samples settle into the thread-level session cost instead.
             const carryover = yield* Ref.getAndSet(carryoverSubagents, null);
             let rehydratedCarryoverSubagents: ReadonlyArray<ActiveAcpSubagent> = [];
             if (carryover !== null && carryover.sessionId === requestedSessionId) {

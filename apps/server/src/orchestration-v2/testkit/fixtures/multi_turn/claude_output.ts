@@ -50,4 +50,18 @@ export function assertMultiTurnClaudeOutput(
   } else {
     assert.lengthOf(queryOpenFrames, 1);
   }
+
+  // The CLI's cumulative total_cost_usd is distilled into per-result process deltas; both turns bill.
+  const costs = projection.providerTurns.flatMap((turn) =>
+    turn.turnTokenUsage?.costUsd === undefined ? [] : [turn.turnTokenUsage.costUsd],
+  );
+  assert.lengthOf(costs, 2);
+  const expectedCosts =
+    transcript.scenario === "multi_turn_restart"
+      ? // A restarted process restarts its cumulative cost, so each turn reports its own cost.
+        [0.0036516, 0.0036573]
+      : // One process accumulates: the second result bills only its own growth.
+        ([0.01171425, 0.0154371 - 0.01171425] as const);
+  assert.closeTo(costs[0] ?? NaN, expectedCosts[0] ?? NaN, 1e-9);
+  assert.closeTo(costs[1] ?? NaN, expectedCosts[1] ?? NaN, 1e-9);
 }
