@@ -801,6 +801,18 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
             name: "Space Bunny Free",
             variants: [{ id: "low" }, { id: "medium" }, { id: "high" }],
           },
+          {
+            providerID: "opencode-go",
+            id: "deepseek-flash",
+            name: "DeepSeek V4.1 Flash",
+            variants: [],
+          },
+          {
+            providerID: "deepseek",
+            id: "deepseek-flash",
+            name: "DeepSeek V4.1 Flash",
+            variants: [],
+          },
         ]),
       );
 
@@ -820,7 +832,21 @@ it.layer(layerTest)("checkOpenCodeProviderStatus", (it) => {
       );
       NodeAssert.deepEqual(
         snapshot.models.map((model) => model.slug),
-        ["opencode/big-pickle", "opencode/space-bunny-free"],
+        [
+          "opencode/big-pickle",
+          "deepseek/deepseek-flash",
+          "opencode-go/deepseek-flash",
+          "opencode/space-bunny-free",
+        ],
+      );
+      NodeAssert.deepEqual(
+        snapshot.models.map((model) => model.name),
+        [
+          "Big Pickle · Zen",
+          "DeepSeek V4.1 Flash · API key",
+          "DeepSeek V4.1 Flash · Go",
+          "Space Bunny Free · Zen",
+        ],
       );
       const variant = snapshot.models.find((model) => model.slug === "opencode/space-bunny-free")
         ?.capabilities?.optionDescriptors?.[0];
