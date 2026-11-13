@@ -2,6 +2,7 @@ import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { Outlet, createFileRoute, redirect, useMatches } from "@tanstack/react-router";
 import { useState } from "react";
 
+import { APP_VERSION } from "../branding";
 import { ComputerUseOverlayBridge } from "../components/ComputerUseOverlayBridge";
 import { QueueNotifications } from "../components/rooms/QueueNotifications";
 import { ThreadRouteView } from "../components/ThreadRouteView";
@@ -34,6 +35,12 @@ function ChatRouteLayout() {
     <>
       <QueueNotifications />
       <ComputerUseOverlayBridge />
+      <span
+        aria-hidden
+        className="pointer-events-none fixed right-1.5 bottom-0.5 z-50 select-none text-3xs text-muted-foreground/50 tabular-nums"
+      >
+        v{APP_VERSION}
+      </span>
       {shownTarget?.kind === "server" && !modalOpen ? (
         <ThreadLinkPrompt threadRef={shownTarget.threadRef} />
       ) : null}

@@ -414,6 +414,49 @@ const discoverPluginSkillRoots = Effect.fn("discoverPluginSkillRoots")(function*
   return roots;
 });
 
+const SyncedPluginsManifest = Schema.fromJsonString(
+  Schema.Struct({
+    plugins: Schema.Array(Schema.Struct({ name: Schema.NonEmptyString })),
+  }),
+);
+
+/** Plugins synced from a claude.ai account, which Claude Code loads without an install record. */
+const discoverSyncedPluginSkillRoots = Effect.fn("discoverSyncedPluginSkillRoots")(function* (
+  configDirPath: string,
+) {
+  const fileSystem = yield* FileSystem.FileSystem;
+  const path = yield* Path.Path;
+  const syncedPath = path.join(configDirPath, "plugins", "synced");
+  const accounts = yield* fileSystem
+    .readDirectory(syncedPath)
+    .pipe(Effect.orElseSucceed((): ReadonlyArray<string> => []));
+  const roots: Array<ClaudeSkillRoot> = [];
+  for (const account of accounts.toSorted()) {
+    const accountPath = path.join(syncedPath, account);
+    const manifest = yield* fileSystem.readFileString(path.join(accountPath, "manifest.json")).pipe(
+      Effect.flatMap(Schema.decodeUnknownEffect(SyncedPluginsManifest)),
+      Effect.orElseSucceed(() => undefined),
+    );
+    for (const plugin of manifest?.plugins ?? []) {
+      const installPath = path.join(accountPath, plugin.name);
+      if (!isInsideDirectory(path, accountPath, installPath)) continue;
+      const pluginManifest = yield* fileSystem
+        .readFileString(path.join(installPath, ".claude-plugin", "plugin.json"))
+        .pipe(
+          Effect.flatMap(Schema.decodeUnknownEffect(PluginManifest)),
+          Effect.orElseSucceed(() => undefined),
+        );
+      if (pluginManifest?.name === undefined) continue;
+      roots.push({
+        directory: path.join(installPath, "skills"),
+        scope: "user",
+        prefix: pluginManifest.name,
+      });
+    }
+  }
+  return roots;
+});
+
 const resolveClaudeConfigDirPath = Effect.fn("resolveClaudeConfigDirPath")(function* (
   config: Pick<ClaudeSettings, "homePath">,
   environment: NodeJS.ProcessEnv,
@@ -522,6 +565,7 @@ export const discoverClaudeSkills = Effect.fn("discoverClaudeSkills")(function* 
       enabledPlugins,
       environment ?? process.env,
     )),
+    ...(yield* discoverSyncedPluginSkillRoots(configDirPath)),
   ];
 
   const skillsByName = new Map<string, ServerProviderSkill>();

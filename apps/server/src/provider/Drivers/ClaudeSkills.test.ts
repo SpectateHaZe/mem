@@ -76,6 +76,38 @@ it.layer(NodeServices.layer)("discoverClaudeSkills", (it) => {
     }),
   );
 
+  it.effect("discovers plugins synced from a claude.ai account", () =>
+    Effect.gen(function* () {
+      const fs = yield* FileSystem.FileSystem;
+      const path = yield* Path.Path;
+      const tempDir = yield* fs.makeTempDirectoryScoped({ prefix: "t3-claude-skills-" });
+      const configDir = path.join(tempDir, "claude-home");
+      const account = path.join(configDir, "plugins", "synced", "org_user");
+      const plugin = path.join(account, "abc-123");
+      yield* writeSkill(path.join(plugin, "skills"), "frontend-design", "# Frontend");
+      yield* writeSkill(path.join(account, "unnamed", "skills"), "hidden", "# Hidden");
+      yield* fs.makeDirectory(path.join(plugin, ".claude-plugin"), { recursive: true });
+      yield* fs.writeFileString(
+        path.join(plugin, ".claude-plugin", "plugin.json"),
+        '{"name":"frontend-design"}',
+      );
+      yield* fs.writeFileString(
+        path.join(account, "manifest.json"),
+        JSON.stringify({ plugins: [{ name: "abc-123" }, { name: "unnamed" }, { name: "../x" }] }),
+      );
+
+      const skills = yield* discoverClaudeSkills({ homePath: configDir });
+      assert.deepEqual(skills, [
+        {
+          name: "frontend-design:frontend-design",
+          path: path.join(plugin, "skills", "frontend-design", "SKILL.md"),
+          enabled: true,
+          scope: "user",
+        },
+      ]);
+    }),
+  );
+
   it.effect("merges plugin enablement and selects installs in native registry order", () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
