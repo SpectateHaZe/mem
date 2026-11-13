@@ -410,6 +410,9 @@ export const ClientSettingsSchema = Schema.Struct({
   completionChimeCustomSoundName: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed("")),
   ),
+  stickerWorkingName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  stickerNeedsYouName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
+  stickerFinishedName: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   diffColorScheme: DiffColorScheme.pipe(
     Schema.withDecodingDefault(Effect.succeed("red-green" as const)),
   ),
@@ -1952,6 +1955,9 @@ export const ClientSettingsPatch = Schema.Struct({
   completionChimeEnabled: Schema.optionalKey(Schema.Boolean),
   completionChimeVolume: Schema.optionalKey(CompletionChimeVolume),
   completionChimeCustomSoundName: Schema.optionalKey(Schema.String),
+  stickerWorkingName: Schema.optionalKey(Schema.String),
+  stickerNeedsYouName: Schema.optionalKey(Schema.String),
+  stickerFinishedName: Schema.optionalKey(Schema.String),
   diffColorScheme: Schema.optionalKey(DiffColorScheme),
   chatWidth: Schema.optionalKey(ChatWidth),
   effortDisplay: Schema.optionalKey(EffortDisplay),

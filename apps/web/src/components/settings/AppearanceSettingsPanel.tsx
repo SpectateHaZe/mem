@@ -34,6 +34,7 @@ import {
 import { searchableSetting } from "./settingsSearch";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { PanelAnimationsPreview } from "./PanelAnimationsPreview";
+import { StickerSettingsSection } from "./StickerSettings";
 import { TypographySection } from "./TypographySettings";
 import { ThreadDetailsItemsRow } from "./ThreadDetailsItemsRow";
 
@@ -161,6 +162,8 @@ export function AppearanceSettingsPanel() {
           />
         </div>
       </SettingsSection>
+
+      <StickerSettingsSection />
 
       <SettingsSection id="appearance-interface" title="Interface">
         <SettingsRow

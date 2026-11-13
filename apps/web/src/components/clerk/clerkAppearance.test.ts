@@ -5,6 +5,7 @@ import {
   GROVE_THEME,
   IRIS_THEME,
   OCEAN_THEME,
+  PINK_THEME,
   T3_CHAT_THEME,
   themeColorToHex,
   type ThemeColors,
@@ -46,6 +47,7 @@ const builtInThemeModes = [
   OCEAN_THEME,
   EMBER_THEME,
   IRIS_THEME,
+  PINK_THEME,
 ].flatMap((theme) =>
   [theme.colors, theme.variants?.dark].filter((colors): colors is ThemeColors => !!colors),
 );

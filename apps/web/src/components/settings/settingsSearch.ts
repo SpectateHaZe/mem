@@ -313,6 +313,29 @@ export const SETTINGS_SEARCH_ITEMS = [
     targetId: "appearance",
   },
   {
+    id: "sticker-working",
+    title: "Working sticker",
+    to: "/settings/appearance",
+    searchTerms: ["sticker image working running agent busy upload custom decoration appearance"],
+    targetId: "appearance-stickers",
+  },
+  {
+    id: "sticker-needs-you",
+    title: "Needs-you sticker",
+    to: "/settings/appearance",
+    searchTerms: [
+      "sticker image waiting approval question attention needs you upload custom decoration appearance",
+    ],
+    targetId: "appearance-stickers",
+  },
+  {
+    id: "sticker-finished",
+    title: "Finished sticker",
+    to: "/settings/appearance",
+    searchTerms: ["sticker image finished completed turn done upload custom decoration appearance"],
+    targetId: "appearance-stickers",
+  },
+  {
     // Prefixed because the slider control already owns the `appearance-contrast` id.
     id: "setting-appearance-contrast",
     title: "Contrast",

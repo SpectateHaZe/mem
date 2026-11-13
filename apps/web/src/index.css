@@ -882,7 +882,32 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     }
   }
 
-  :is(html[data-theme-id="t3-chat"], html[data-theme-id="ocean"], html[data-theme-id="iris"]) {
+  html[data-theme-id="pink"] {
+    --stage-art-top: oklch(0.790712 0.131432 351.649);
+    --stage-art-mid: oklch(0.630171 0.166456 357.302);
+    --stage-art-bottom: oklch(0.411532 0.121114 355.575);
+    --stage-art-highlight: oklch(0.962469 0.02774 353);
+    --stage-art-secondary: oklch(0.815735 0.11904 352.1);
+    --stage-art-tertiary: oklch(0.69361 0.159346 346);
+    --stage-art-line: oklch(0.970313 0.02052 350);
+
+    @variant dark {
+      --stage-art-top: oklch(0.597533 0.120694 350.5);
+      --stage-art-mid: oklch(0.437763 0.101287 353.135);
+      --stage-art-bottom: oklch(0.291327 0.094 357.5);
+      --stage-art-highlight: oklch(0.929214 0.042638 351.2);
+      --stage-art-secondary: oklch(0.705592 0.137369 352.3);
+      --stage-art-tertiary: oklch(0.629583 0.158322 348);
+      --stage-art-line: oklch(0.945058 0.033906 350.1);
+    }
+  }
+
+  :is(
+    html[data-theme-id="t3-chat"],
+    html[data-theme-id="ocean"],
+    html[data-theme-id="iris"],
+    html[data-theme-id="pink"]
+  ) {
     --stage-night-top: color-mix(in oklch, var(--stage-art-top) 38%, var(--stage-night-base-top));
     --stage-night-mid: color-mix(in oklch, var(--stage-art-mid) 38%, var(--stage-night-base-mid));
     --stage-night-bottom: color-mix(
@@ -909,7 +934,8 @@ html[data-mobile-composer-route-transition="true"]::view-transition-old(t3-mobil
     html[data-theme-id="grove"],
     html[data-theme-id="ocean"],
     html[data-theme-id="ember"],
-    html[data-theme-id="iris"]
+    html[data-theme-id="iris"],
+    html[data-theme-id="pink"]
   ) {
     --stage-art-celeste-highlight: var(--stage-art-highlight);
     --stage-art-celeste-secondary: var(--stage-art-secondary);
