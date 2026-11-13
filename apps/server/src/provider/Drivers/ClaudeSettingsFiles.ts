@@ -1,6 +1,11 @@
-import type { ClaudeSettings } from "@t3tools/contracts";
+import {
+  ClaudeSettings,
+  resolveProviderInstanceEnabled,
+  type ProviderInstanceConfigMap,
+} from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
 
@@ -50,6 +55,31 @@ const SCOPES: ReadonlyArray<{
 const JsonObject = Schema.Record(Schema.String, Schema.Unknown);
 const decodeLenientObject = Schema.decodeUnknownEffect(fromLenientJson(JsonObject));
 const decodeSubmittedJson = Schema.decodeUnknownEffect(Schema.fromJsonString(Schema.Unknown));
+const decodeClaudeSettingsConfig = Schema.decodeUnknownOption(ClaudeSettings);
+
+/**
+ * The settings editor edits the home the default enabled Claude instance runs with, so it shows
+ * the same files a thread on that instance reads and writes.
+ */
+export const claudeSettingsConfigForInstances = (
+  instances: ProviderInstanceConfigMap,
+): Pick<ClaudeSettings, "homePath"> => {
+  const claudeInstances = Object.entries(instances).filter(
+    ([, instance]) => instance.driver === "claudeAgent",
+  );
+  const chosen =
+    claudeInstances.find(
+      ([instanceId, instance]) =>
+        instanceId === "claudeAgent" && resolveProviderInstanceEnabled(instance),
+    ) ??
+    claudeInstances.find(([, instance]) => resolveProviderInstanceEnabled(instance)) ??
+    claudeInstances[0];
+  const config =
+    chosen === undefined
+      ? undefined
+      : Option.getOrUndefined(decodeClaudeSettingsConfig(chosen[1].config ?? {}));
+  return { homePath: config?.homePath ?? "" };
+};
 
 const managedSettingsPath = (
   path: Path.Path,
