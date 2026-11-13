@@ -24,7 +24,7 @@ import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAda
 import type { ProviderTextGeneration } from "@t3tools/provider-core/server/textGeneration";
 import { ProviderDriverError } from "@t3tools/provider-core/server/errors";
 import { openCodeUsageReader, type OpenCodeUsageReaderEnv } from "./usage.ts";
-import { readOpenCodeGoUsageLimits } from "./usageLimits.ts";
+import { readOpenCodeGoUsageLimits, readStoredApiKey } from "./usageLimits.ts";
 import { loadOpenCode2Catalog } from "./openCode2Catalog.ts";
 import {
   checkOpenCodeProviderStatus,
@@ -207,6 +207,7 @@ export const OpenCodeDriver: ProviderDriver<
     const digest = yield* Digest.Digest;
     const host = yield* ProviderHost.ProviderHost;
     // Own data folder: a standalone OpenCode database must not block Mem, or be changed by it.
+    const homeDirectory = yield* HostProcess.HomeDirectory;
     const hasDataHome =
       configuredEnvironment?.some((variable) => variable.name === "XDG_DATA_HOME") ||
       (yield* HostProcess.Environment)["XDG_DATA_HOME"];
@@ -216,11 +217,28 @@ export const OpenCodeDriver: ProviderDriver<
           ...(configuredEnvironment ?? []),
           {
             name: "XDG_DATA_HOME",
-            value: pathService.join(yield* HostProcess.HomeDirectory, ".mem", "opencode-data"),
+            value: pathService.join(homeDirectory, ".mem", "opencode-data"),
             sensitive: false,
           },
         ];
-    const processEnv = yield* mergeProviderInstanceEnvironment(environment);
+    const mergedEnvironment = yield* mergeProviderInstanceEnvironment(environment);
+    // Mem's empty data folder cannot see an OpenCode Go connection stored in the user's own database.
+    const storedGoKey =
+      hasDataHome || mergedEnvironment.OPENCODE_API_KEY
+        ? undefined
+        : yield* readStoredApiKey(
+            pathService.join(
+              homeDirectory,
+              ".local",
+              "share",
+              "opencode",
+              mergedEnvironment.OPENCODE_DB ?? "opencode.db",
+            ),
+            "opencode-go",
+          );
+    const processEnv = storedGoKey
+      ? { ...mergedEnvironment, OPENCODE_API_KEY: storedGoKey }
+      : mergedEnvironment;
     const continuationIdentity = defaultProviderContinuationIdentity({
       driverKind: DRIVER_KIND,
       instanceId,
