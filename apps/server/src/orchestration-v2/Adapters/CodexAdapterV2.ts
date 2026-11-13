@@ -123,6 +123,7 @@ import {
 } from "../../provider/EventNdjsonLogger.ts";
 import * as ProviderEventLoggers from "@t3tools/provider-core/server/ProviderEventLoggers";
 import { codexAppServerArgs, resolveCodexLaunchArgs } from "../../provider/codexLaunchArgs.ts";
+import { resolveCodexBinaryPath } from "../../provider/codexBinaryPath.ts";
 import { mergeProviderInstanceEnvironment } from "@t3tools/provider-core/server/instanceEnvironment";
 import * as McpProviderSession from "@t3tools/provider-core/server/mcpSession";
 import * as McpProviderSessions from "@t3tools/provider-core/server/McpProviderSessions";
@@ -1688,17 +1689,21 @@ export const createCodexAdapterV2 = Effect.fn("CodexAdapterV2.createCodexAdapter
     ),
   );
 
+  const mergedEnvironment = yield* mergeProviderInstanceEnvironment(environment, hostEnvironment);
   const settings = {
     ...config,
     enabled,
-    binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+    binaryPath: yield* resolveCodexBinaryPath({
+      binaryPath: expandHomePath(config.binaryPath, yield* HostProcess.HomeDirectory),
+      environment: mergedEnvironment,
+    }),
     homePath: homeLayout.effectiveHomePath ?? "",
   } satisfies CodexSettings;
 
   return yield* makeCodexAdapterV2({
     instanceId,
     settings,
-    environment: yield* mergeProviderInstanceEnvironment(environment, hostEnvironment),
+    environment: mergedEnvironment,
     clientFactory,
     digest,
     fileSystem,
