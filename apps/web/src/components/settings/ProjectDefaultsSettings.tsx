@@ -102,6 +102,17 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     fallbackSelection?.instanceId,
     fallbackSelection?.model,
   );
+  const mixedSubagentFallback = useScopedSettingsMixed(["subagentFallbackModelSelection"]);
+  const subagentFallbackSelection = settings.subagentFallbackModelSelection;
+  const subagentFallbackEntry = entries.find(
+    (entry) => entry.instanceId === subagentFallbackSelection?.instanceId,
+  );
+  const subagentFallbackModelOptions = getCustomModelOptionsByInstance(
+    settings,
+    providers,
+    subagentFallbackSelection?.instanceId,
+    subagentFallbackSelection?.model,
+  );
   const mixedPermissions = useScopedSettingsMixed(["defaultRuntimeMode"]);
   const PermissionIcon = runtimeModeConfig[settings.defaultRuntimeMode].icon;
   const mixedWorkspace = useScopedSettingsMixed(["defaultThreadEnvMode"]);
@@ -249,6 +260,87 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
     />
   );
 
+  const subagentFallbackRow = !isProjectScope ? (
+    <SettingsRow
+      serverScoped
+      settingKeys={["subagentFallbackModelSelection"]}
+      mixed={mixedSubagentFallback}
+      {...searchableSetting("subagent-fallback-model")}
+      description="When a delegated subagent fails because its provider is out of credit, retry it once on this model. Empty leaves the failure as is."
+      resetAction={
+        mixedSubagentFallback || settings.subagentFallbackModelSelection !== null ? (
+          <SettingResetButton
+            label="delegated task fallback"
+            onClick={() => updateSettings({ subagentFallbackModelSelection: null })}
+          />
+        ) : null
+      }
+      control={
+        entries.length > 0 ? (
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1.5">
+            <ProviderModelPicker
+              environmentId={representative?.environmentId ?? null}
+              activeInstanceId={
+                subagentFallbackSelection?.instanceId ??
+                selection?.instanceId ??
+                entries[0]!.instanceId
+              }
+              model={subagentFallbackSelection?.model ?? ""}
+              lockedProvider={null}
+              instanceEntries={entries}
+              modelOptionsByInstance={subagentFallbackModelOptions}
+              triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+              triggerAriaLabel="Delegated task fallback model"
+              {...(mixedSubagentFallback
+                ? { triggerLabel: "Mixed" }
+                : settings.subagentFallbackModelSelection === null
+                  ? { triggerLabel: "None" }
+                  : {})}
+              getModelDisabledReason={modelDisabledReason}
+              onInstanceModelChange={(instanceId, model) => {
+                const reason = modelDisabledReason(instanceId, model);
+                if (reason) {
+                  toastManager.add({
+                    type: "error",
+                    title: "Fallback model not saved",
+                    description: reason,
+                  });
+                  return;
+                }
+                updateSettings({
+                  subagentFallbackModelSelection: createModelSelection(instanceId, model),
+                });
+              }}
+            />
+            {subagentFallbackSelection !== null &&
+            subagentFallbackEntry &&
+            !mixedSubagentFallback ? (
+              <TraitsPicker
+                provider={subagentFallbackEntry.driverKind}
+                models={subagentFallbackEntry.models}
+                model={subagentFallbackSelection.model}
+                modelOptions={subagentFallbackSelection.options ?? []}
+                allowPromptInjectedEffort={false}
+                triggerClassName={SETTINGS_PICKER_TRIGGER_CLASSNAME}
+                onModelOptionsChange={(options) =>
+                  updateSettings({
+                    subagentFallbackModelSelection: createModelSelection(
+                      subagentFallbackSelection.instanceId,
+                      subagentFallbackSelection.model,
+                      options,
+                    ),
+                  })
+                }
+              />
+            ) : null}
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">No providers available</span>
+        )
+      }
+    />
+  ) : null;
+
   const fallbackRow = !isProjectScope ? (
     <SettingsRow
       serverScoped
@@ -331,12 +423,14 @@ export function ProjectDefaultsSettings({ category }: { category: ProjectSetting
         <>
           {modelRow}
           {fallbackRow}
+          {subagentFallbackRow}
           {workspaceRow}
         </>
       ) : category === "general" ? (
         <>
           {modelRow}
           {fallbackRow}
+          {subagentFallbackRow}
           <SettingsRow
             serverScoped
             settingKeys={["defaultRuntimeMode"]}

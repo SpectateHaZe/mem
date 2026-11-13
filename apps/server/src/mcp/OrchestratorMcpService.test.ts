@@ -1238,6 +1238,278 @@ describe("OrchestratorMcpService provider resolution", () => {
   } as unknown as OrchestrationV2ThreadProjection;
 
   it.effect.each([
+    {
+      name: "a successful fallback retry",
+      retryStatus: "completed" as const,
+      fallbackSameAsFailedTarget: false,
+      wakeAlways: false,
+    },
+    {
+      name: "a fallback retry that also fails with no credit",
+      retryStatus: "failed" as const,
+      fallbackSameAsFailedTarget: false,
+      wakeAlways: false,
+    },
+    {
+      name: "a failed target that is already the fallback",
+      retryStatus: "completed" as const,
+      fallbackSameAsFailedTarget: true,
+      wakeAlways: false,
+    },
+    {
+      name: "a fire-and-forget target the server-side reactor owns",
+      retryStatus: "failed" as const,
+      fallbackSameAsFailedTarget: false,
+      wakeAlways: true,
+    },
+  ])("retries an out-of-credit delegated task once: $name", (testCase) =>
+    Effect.gen(function* () {
+      const primaryModel = "gpt-5.4";
+      const fallbackInstanceId = ProviderInstanceId.make("codex-fallback");
+      const fallbackModel = "gpt-5.4-fallback";
+      const creditFailure = "Insufficient Balance (request_id: req_123)";
+      type LaunchedTask = {
+        readonly taskId: NodeId;
+        readonly childThreadId: ThreadId;
+        readonly childRunId: RunId;
+        readonly modelSelection: {
+          readonly instanceId: ProviderInstanceId;
+          readonly model: string;
+        };
+      };
+      const dispatched = yield* Ref.make<
+        ReadonlyArray<{
+          readonly type: string;
+          readonly task?: string;
+          readonly modelSelection?: {
+            readonly instanceId: ProviderInstanceId;
+            readonly model: string;
+          };
+        }>
+      >([]);
+      const launched: Array<LaunchedTask> = [];
+      const parentThread = {
+        id: parentThreadId,
+        projectId,
+        title: "Fallback parent",
+        createdBy: "user",
+        creationSource: "web",
+        modelSelection: { instanceId: codexInstanceId, model: primaryModel },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      };
+      const parentWithTasks = () =>
+        ({
+          thread: parentThread,
+          runs: [
+            {
+              id: parentRunId,
+              ordinal: 1,
+              status: "running",
+              rootNodeId: parentNodeId,
+              providerInstanceId: codexInstanceId,
+              modelSelection: { instanceId: codexInstanceId, model: primaryModel },
+              startedAt: DateTime.makeUnsafe(0),
+            },
+          ],
+          contextTransfers: [],
+          subagents: launched.map((task) => ({
+            id: task.taskId,
+            threadId: parentThreadId,
+            runId: parentRunId,
+            parentNodeId,
+            origin: "app_owned",
+            driver: "codex",
+            providerInstanceId: task.modelSelection.instanceId,
+            childThreadId: task.childThreadId,
+            model: task.modelSelection.model,
+            modelSelection: task.modelSelection,
+            status: "running",
+            result: null,
+            ...(launched.indexOf(task) === 0 && testCase.wakeAlways
+              ? { completionWake: "always" as const }
+              : {}),
+            completionDelivery: { state: "acknowledged", observedByRunId: null },
+          })),
+          messages: [],
+          turnItems: [],
+          providerThreads: [],
+          runtimeRequests: [],
+          nodes: [],
+        }) as unknown as OrchestrationV2ThreadProjection;
+      const childFor = (task: LaunchedTask) => {
+        const retried = launched.indexOf(task) > 0;
+        const status = retried ? testCase.retryStatus : "failed";
+        const text =
+          !retried || testCase.retryStatus === "failed"
+            ? creditFailure
+            : `Finished on ${task.modelSelection.model}.`;
+        const message = {
+          id: MessageId.make(`message:${task.taskId}`),
+          threadId: task.childThreadId,
+          runId: task.childRunId,
+          role: "assistant",
+          text,
+          createdAt: DateTime.makeUnsafe(1),
+          updatedAt: DateTime.makeUnsafe(1),
+        };
+        const errorItem = {
+          id: `item:${task.taskId}`,
+          runId: task.childRunId,
+          ordinal: 1,
+          type: "error",
+          status: "failed",
+          failure: { class: "provider_error", message: text, code: null, retryable: false },
+        };
+        return {
+          thread: {
+            id: task.childThreadId,
+            projectId,
+            title: "Child",
+            modelSelection: task.modelSelection,
+            providerInstanceId: task.modelSelection.instanceId,
+          },
+          runs: [
+            {
+              id: task.childRunId,
+              threadId: task.childThreadId,
+              ordinal: 1,
+              delegatedTaskId: task.taskId,
+              providerInstanceId: task.modelSelection.instanceId,
+              modelSelection: task.modelSelection,
+              status,
+              startedAt: DateTime.makeUnsafe(0),
+              completedAt: DateTime.makeUnsafe(1),
+            },
+          ],
+          contextTransfers: [],
+          messages: status === "completed" ? [message] : [],
+          turnItems: status === "failed" ? [errorItem] : [],
+          subagents: [],
+          providerThreads: [],
+          runtimeRequests: [],
+          nodes: [{ id: task.taskId, runId: task.childRunId }],
+        } as unknown as OrchestrationV2ThreadProjection;
+      };
+      const layerDependencies = Layer.mergeAll(
+        NodeServices.layer,
+        NodeCrypto.layer,
+        Layer.mock(ThreadManagementService.ThreadManagementService)({
+          hasReceipt: () => Effect.succeed(false),
+          getThreadRecords: (threadId) =>
+            Effect.sync(() => {
+              if (threadId === parentThreadId) return parentWithTasks();
+              const task = launched.find((candidate) => candidate.childThreadId === threadId);
+              return task === undefined ? childProjection : childFor(task);
+            }),
+          getThreadEventSequence: () => Effect.succeed(0),
+          delegatedTaskResultPending: () => Effect.succeed(false),
+          dispatch: (command) =>
+            command.type === "delegated_task.request"
+              ? Ref.update(dispatched, (commands) => [...commands, command]).pipe(
+                  Effect.map(() => {
+                    const index = launched.length + 1;
+                    const taskId = NodeId.make(`node:fallback-task-${index}`);
+                    const childThreadId = ThreadId.make(`thread:fallback-child-${index}`);
+                    const task = {
+                      id: taskId,
+                      threadId: parentThreadId,
+                      runId: parentRunId,
+                      parentNodeId,
+                      origin: "app_owned",
+                      driver: "codex",
+                      providerInstanceId: command.modelSelection.instanceId,
+                      childThreadId,
+                      model: command.modelSelection.model,
+                      modelSelection: command.modelSelection,
+                      status: "running",
+                      result: null,
+                      completionDelivery: { state: "acknowledged", observedByRunId: null },
+                    };
+                    launched.push({
+                      taskId,
+                      childThreadId,
+                      childRunId: RunId.make(`run:fallback-child-${index}`),
+                      modelSelection: command.modelSelection,
+                    });
+                    return {
+                      sequence: index,
+                      storedEvents: [
+                        {
+                          sequence: index,
+                          commandId: command.commandId,
+                          event: { type: "subagent.updated", payload: task },
+                        },
+                      ],
+                    } as never;
+                  }),
+                )
+              : Effect.succeed({ sequence: 0, storedEvents: [] } as never),
+        }),
+        ServerSettings.layerTest({
+          subagentFallbackModelSelection: testCase.fallbackSameAsFailedTarget
+            ? { instanceId: codexInstanceId, model: primaryModel }
+            : { instanceId: fallbackInstanceId, model: fallbackModel },
+        }),
+        providerRegistryLayer([
+          providerSnapshot({
+            instanceId: codexInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: primaryModel,
+          }),
+          providerSnapshot({
+            instanceId: fallbackInstanceId,
+            driver: ProviderDriverKind.make("codex"),
+            model: fallbackModel,
+          }),
+        ]),
+        adapterRegistryLayer([codexInstanceId, fallbackInstanceId]),
+        Layer.mock(ProjectService.ProjectService)({}),
+        Layer.mock(SecretRequests.SecretRequests)({}),
+        Layer.mock(RemoteDelegation.RemoteDelegation)({}),
+        Layer.mock(ScheduledTaskService.ScheduledTaskService)({}),
+      );
+
+      yield* Effect.gen(function* () {
+        const service = yield* OrchestratorMcpService.OrchestratorMcpService;
+        const result = yield* service.delegateTask(scope, {
+          task: "Review the change.",
+          mode: "wait",
+        });
+        const commands = yield* Ref.get(dispatched);
+        if (testCase.wakeAlways) {
+          assert.equal(commands.length, 1);
+          assert.equal(result.status, "failed");
+          assert.equal(result.summary, creditFailure);
+          return;
+        }
+        if (testCase.fallbackSameAsFailedTarget) {
+          assert.equal(commands.length, 1);
+          assert.equal(result.status, "failed");
+          assert.equal(result.summary, creditFailure);
+          return;
+        }
+        assert.equal(commands.length, 2);
+        assert.deepEqual(commands[1]?.modelSelection, {
+          instanceId: fallbackInstanceId,
+          model: fallbackModel,
+        });
+        assert.include(commands[1]?.task ?? "", "Inspect the existing uncommitted changes");
+        assert.include(
+          result.summary ?? "",
+          `Retried on ${fallbackInstanceId}/${fallbackModel} after ${codexInstanceId}/${primaryModel} ran out of credit.`,
+        );
+        assert.equal(result.status, testCase.retryStatus);
+        if (testCase.retryStatus === "completed") {
+          assert.include(result.summary ?? "", `Finished on ${fallbackModel}.`);
+        } else {
+          assert.include(result.summary ?? "", creditFailure);
+        }
+      }).pipe(Effect.provide(layerOrchestratorService.pipe(Layer.provide(layerDependencies))));
+    }),
+  );
+
+  it.effect.each([
     "parent completion",
     "nested child completion",
     "child run completion",

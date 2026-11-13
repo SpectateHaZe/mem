@@ -290,6 +290,16 @@ export const SETTINGS_SEARCH_ITEMS = [
     environmentOnly: true,
   },
   {
+    id: "subagent-fallback-model",
+    title: "Delegated task fallback",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [
+      "subagent fallback model out of credit insufficient balance billing quota exhausted retry",
+    ],
+    environmentOnly: true,
+  },
+  {
     id: "default-permissions",
     title: "Permissions",
     to: "/settings/threads",
