@@ -3,7 +3,9 @@ import * as NodeNet from "node:net";
 
 import {
   DEFAULT_DISCORD_PRESENCE_SETTINGS,
+  resolveDiscordActivityButtons,
   resolveDiscordPresenceShowProjectName,
+  type DiscordActivityButton,
   type DiscordPresenceSettings,
 } from "@t3tools/contracts/settings";
 import * as HostProcess from "@t3tools/shared/HostProcess";
@@ -109,6 +111,7 @@ export interface DiscordActivity {
     readonly small_image?: string;
     readonly small_text?: string;
   };
+  readonly buttons?: ReadonlyArray<DiscordActivityButton>;
 }
 
 // Discord rejects presence fields shorter than 2 or longer than 128 characters.
@@ -205,7 +208,10 @@ export const presenceActivity = (
     ...(Object.keys(assets).length === 0 ? {} : { assets }),
   };
   // Discord's SET_ACTIVITY with an empty object clears the card anyway, so report it as no presence.
-  return Object.keys(activity).length === 0 ? null : activity;
+  if (Object.keys(activity).length === 0) return null;
+  // Buttons hang off a card, so they never keep an otherwise empty one alive.
+  const buttons = resolveDiscordActivityButtons(presence);
+  return buttons.length === 0 ? activity : { ...activity, buttons };
 };
 
 export interface DiscordTemplateValues {

@@ -1,5 +1,8 @@
 import { assert, it } from "@effect/vitest";
-import { DEFAULT_DISCORD_PRESENCE_SETTINGS } from "@t3tools/contracts/settings";
+import {
+  DEFAULT_DISCORD_PRESENCE_SETTINGS,
+  DISCORD_GITHUB_BUTTON,
+} from "@t3tools/contracts/settings";
 
 import {
   decodeDiscordFrames,
@@ -214,8 +217,9 @@ it("builds a public activity with a stable start time", () => {
   assert.deepEqual(activity, {
     details: "2 agents working",
     timestamps: { start: startedAt },
+    buttons: [DISCORD_GITHUB_BUTTON],
   });
-  assert.deepEqual(Object.keys(activity!).sort(), ["details", "timestamps"]);
+  assert.deepEqual(Object.keys(activity!).sort(), ["buttons", "details", "timestamps"]);
 });
 
 it("only adds an image when one is configured", () => {
@@ -227,6 +231,7 @@ it("only adds an image when one is configured", () => {
     {
       details: "2 agents working",
       timestamps: { start: 5 },
+      buttons: [DISCORD_GITHUB_BUTTON],
       assets: { large_image: "mem", large_text: "Mem" },
     },
   );
@@ -260,7 +265,67 @@ it("drops a line the owner emptied and hides the timer when asked", () => {
   assert.isNull(presenceActivity(2, 5, { presence }));
   assert.deepEqual(presenceActivity(2, 5, { presence: { ...presence, detailsTemplate: "Busy" } }), {
     details: "Busy",
+    buttons: [DISCORD_GITHUB_BUTTON],
   });
+});
+
+it("links to the Mem repository by default and stops when the owner hides it", () => {
+  assert.deepEqual(presenceActivity(1, 5)?.buttons, [
+    { label: "Mem on GitHub", url: "https://github.com/SpectateHaZe/mem" },
+  ]);
+  assert.notProperty(
+    presenceActivity(1, 5, {
+      presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, showGithubButton: false },
+    })!,
+    "buttons",
+  );
+});
+
+it("adds a custom button beside the GitHub one once its label and https URL are valid", () => {
+  const base = {
+    ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+    customButtonUrl: "https://mem.example/docs",
+  };
+  assert.deepEqual(
+    presenceActivity(1, 5, {
+      presence: { ...base, customButtonLabel: "  Docs  " },
+    })?.buttons,
+    [DISCORD_GITHUB_BUTTON, { label: "Docs", url: "https://mem.example/docs" }],
+  );
+  // 32 characters is Discord's ceiling for a label, not one past it.
+  const longest = "l".repeat(32);
+  assert.deepEqual(
+    presenceActivity(1, 5, {
+      presence: { ...base, customButtonLabel: longest },
+    })?.buttons,
+    [DISCORD_GITHUB_BUTTON, { label: longest, url: "https://mem.example/docs" }],
+  );
+  // The custom button stands alone when the GitHub one is hidden.
+  assert.deepEqual(
+    presenceActivity(1, 5, {
+      presence: { ...base, customButtonLabel: "Docs", showGithubButton: false },
+    })?.buttons,
+    [{ label: "Docs", url: "https://mem.example/docs" }],
+  );
+});
+
+it("drops an invalid custom button instead of the whole card", () => {
+  const base = {
+    ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+    customButtonLabel: "Docs",
+    customButtonUrl: "https://mem.example",
+  };
+  for (const customButtonUrl of ["", "http://mem.example", "mem.example", "javascript:alert(1)"]) {
+    const activity = presenceActivity(1, 5, { presence: { ...base, customButtonUrl } });
+    assert.deepEqual(activity?.buttons, [DISCORD_GITHUB_BUTTON]);
+    assert.equal(activity?.details, "1 agent working");
+  }
+  for (const customButtonLabel of ["", "   ", "l".repeat(33)]) {
+    assert.deepEqual(
+      presenceActivity(1, 5, { presence: { ...base, customButtonLabel } })?.buttons,
+      [DISCORD_GITHUB_BUTTON],
+    );
+  }
 });
 
 it("clears the card when the owner turns presence off", () => {

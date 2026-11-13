@@ -585,6 +585,9 @@ describe("Discord presence settings", () => {
     smallImageText: "",
     showElapsedTimer: true,
     idleText: "mem in control",
+    showGithubButton: true,
+    customButtonLabel: "",
+    customButtonUrl: "",
   };
 
   it("decodes the card defaults with no stored presence settings", () => {
