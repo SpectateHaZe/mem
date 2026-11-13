@@ -1729,7 +1729,7 @@ const make = Effect.gen(function* () {
           text: instruction,
           attachments: [],
           mode: "auto",
-          createdBy: "user",
+          createdBy: "agent", // Shows as "Sent by Mem" instead of as the owner's own words.
           creationSource: "server",
         })
         .pipe(
@@ -1854,7 +1854,7 @@ const make = Effect.gen(function* () {
           text: input.prompt,
           attachments: [],
           mode: "auto",
-          createdBy: "user",
+          createdBy: "agent",
           creationSource: "server",
         })
         .pipe(
