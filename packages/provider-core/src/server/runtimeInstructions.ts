@@ -1,3 +1,5 @@
+import { DateTime } from "effect";
+
 /** Session-invariant; harnesses with a native system-prompt append can carry it once per session. */
 export const PULL_REQUEST_LINKING_INSTRUCTIONS = `<pull_request_linking>
 Link each PR you create, take over, or push to: link_pull_request, or link_pull_requests for several, full URL, every stack layer, as your next call. Host tools do not link for you. If linking fails, say so. Skip PRs you only read or review, and PRs named only as background. Call watch_pull_request when asked to monitor or babysit, or when work you were asked to do, such as a merge, still waits on checks or reviews, even after an earlier unwatch. Finish any needed branch update and push first, then watch and end your turn. Otherwise act now or hand back. Delegated children never watch, even if the brief says babysit. After PR work, a child's last line is: PR <full URL>, head <SHA>, checks and reviews <state>. Links and watches persist across pushes. For PR waits, no sleep, loops, gh --watch, Monitor or ScheduleWakeup. Before handback, call unwatch_pull_request on any PR you watch.
@@ -20,7 +22,8 @@ export function buildRuntimeInstructions(runtime: {
     modelName && modelName !== model ? `${modelName} (model slug: ${model})` : model;
   const modelInfo = model && model !== "auto" && model !== "default" ? `, as ${modelLabel}` : "";
   const effortInfo = effort ? ` with ${effort} reasoning effort` : "";
-  const runtimeInfo = `<runtime_info>In case you're asked: you are running in Mem through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio in your response using Markdown image syntax with absolute file paths. Link any other file you produce using its absolute path so the user can open it in Mem's files viewer.</runtime_info>`;
+  const timeZone = toSingleLine(Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+  const runtimeInfo = `<runtime_info>In case you're asked: you are running in Mem through the ${harness} harness${modelInfo}${effortInfo}. No need to mention this otherwise. You can embed images, video, and audio in your response using Markdown image syntax with absolute file paths. Link any other file you produce using its absolute path so the user can open it in Mem's files viewer. The server machine's local time zone is ${timeZoneLabel(timeZone, DateTime.nowUnsafe())}; tool timestamps are UTC ISO-8601, so convert them to this zone before you report a clock time to the user.</runtime_info>`;
   return runtime.pullRequestLinking === false
     ? runtimeInfo
     : `${runtimeInfo}\n\n${PULL_REQUEST_LINKING_INSTRUCTIONS}`;
@@ -28,4 +31,10 @@ export function buildRuntimeInstructions(runtime: {
 
 function toSingleLine(value: string): string {
   return value.replaceAll(/\s+/g, " ").trim();
+}
+
+/** The offset is the zone's own offset at `at`, so a label built at time of use stays right across DST changes. */
+export function timeZoneLabel(zone: string, at: DateTime.DateTime): string {
+  const offset = DateTime.zonedOffsetIso(DateTime.makeZonedUnsafe(at, { timeZone: zone }));
+  return `${zone} (UTC${offset})`;
 }
