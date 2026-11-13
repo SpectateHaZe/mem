@@ -7,11 +7,13 @@ import {
 } from "@t3tools/contracts";
 import { Tool, Toolkit } from "effect/ai";
 
+import * as ComputerUseActivity from "../../../computer/ComputerUseActivity.ts";
 import * as McpInvocationContext from "../../McpInvocationContext.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as ThreadManagementService from "../../../orchestration-v2/ThreadManagementService.ts";
 
 const dependencies = [
+  ComputerUseActivity.ComputerUseActivity,
   McpInvocationContext.McpInvocationContext,
   ThreadManagementService.ThreadManagementService,
   ServerSettings.ServerSettingsService,

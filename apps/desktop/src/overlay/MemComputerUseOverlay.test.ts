@@ -29,10 +29,21 @@ const mocks = vi.hoisted(() => ({
   displays: [] as Array<FakeDisplay>,
   listeners: new Map<string, Set<() => void>>(),
   windows: [] as Array<FakeWindow>,
+  shortcuts: new Map<string, () => void>(),
+  appWindowMessages: [] as Array<string>,
 }));
 
 vi.mock("electron", () => {
   class BrowserWindow {
+    static getAllWindows() {
+      return [
+        {
+          isDestroyed: () => false,
+          webContents: { send: (channel: string) => mocks.appWindowMessages.push(channel) },
+        },
+      ];
+    }
+
     readonly record: FakeWindow;
 
     constructor(options: Electron.BrowserWindowConstructorOptions) {
@@ -95,6 +106,8 @@ vi.mock("electron", () => {
 
   const screen = {
     getAllDisplays: () => mocks.displays,
+    getPrimaryDisplay: () =>
+      mocks.displays.find((display) => display.bounds.x === 0) ?? mocks.displays[0],
     on: (event: string, listener: () => void) => {
       const listeners = mocks.listeners.get(event) ?? new Set<() => void>();
       listeners.add(listener);
@@ -108,7 +121,17 @@ vi.mock("electron", () => {
     },
   };
 
-  return { BrowserWindow, screen };
+  const globalShortcut = {
+    register: (accelerator: string, callback: () => void) => {
+      mocks.shortcuts.set(accelerator, callback);
+      return true;
+    },
+    unregister: (accelerator: string) => {
+      mocks.shortcuts.delete(accelerator);
+    },
+  };
+
+  return { BrowserWindow, globalShortcut, screen };
 });
 
 import { MemComputerUseOverlay } from "./MemComputerUseOverlay.ts";
@@ -128,6 +151,8 @@ beforeEach(() => {
   mocks.displays.push({ ...firstDisplay }, { ...secondDisplay });
   mocks.listeners.clear();
   mocks.windows.length = 0;
+  mocks.shortcuts.clear();
+  mocks.appWindowMessages.length = 0;
 });
 
 describe("MemComputerUseOverlay", () => {
@@ -135,7 +160,7 @@ describe("MemComputerUseOverlay", () => {
     const overlay = new MemComputerUseOverlay();
     expect(mocks.windows).toHaveLength(0);
 
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
 
     expect(mocks.windows).toHaveLength(2);
     const [first, second] = mocks.windows;
@@ -167,7 +192,7 @@ describe("MemComputerUseOverlay", () => {
 
   it("renders a static pill instead of an animation loop", () => {
     const overlay = new MemComputerUseOverlay();
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
 
     const html = documentFor(mocks.windows[0]!);
     expect(html).toContain("Mem is using your PC");
@@ -178,11 +203,11 @@ describe("MemComputerUseOverlay", () => {
 
   it("dims the glow and swaps the pill text while inspecting", () => {
     const overlay = new MemComputerUseOverlay();
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
     const window = mocks.windows[0]!;
     const drivingHtml = documentFor(window);
 
-    overlay.setState("inspecting");
+    overlay.setState({ state: "inspecting", point: null });
 
     expect(mocks.windows).toHaveLength(2);
     expect(mocks.windows[0]).toBe(window);
@@ -195,10 +220,10 @@ describe("MemComputerUseOverlay", () => {
 
   it("destroys every window and stops listening when hidden", () => {
     const overlay = new MemComputerUseOverlay();
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
     expect(mocks.listeners.size).toBe(3);
 
-    overlay.setState("hidden");
+    overlay.setState({ state: "hidden", point: null });
 
     expect(mocks.windows).toHaveLength(2);
     expect(mocks.windows.every((window) => window.destroyed)).toBe(true);
@@ -207,7 +232,7 @@ describe("MemComputerUseOverlay", () => {
 
   it("rebuilds while a state is active when displays change", () => {
     const overlay = new MemComputerUseOverlay();
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
     const [first, second] = mocks.windows;
     const loadsBefore = first!.loadedUrls.length;
 
@@ -232,7 +257,7 @@ describe("MemComputerUseOverlay", () => {
 
   it("disposes cleanly when a window was already destroyed", () => {
     const overlay = new MemComputerUseOverlay();
-    overlay.setState("driving");
+    overlay.setState({ state: "driving", point: null });
     mocks.windows[0]!.destroyed = true;
 
     expect(() => overlay.dispose()).not.toThrow();
@@ -240,5 +265,30 @@ describe("MemComputerUseOverlay", () => {
     expect(mocks.listeners.size).toBe(0);
 
     expect(() => overlay.dispose()).not.toThrow();
+  });
+
+  it("marks the agent's click on the display it lands on", () => {
+    const overlay = new MemComputerUseOverlay();
+    // The second display sits at the origin, so it is the primary one the screenshot covers.
+    overlay.setState({ state: "driving", point: { x: 0.5, y: 0.25 } });
+    const [first, second] = mocks.windows;
+    expect(documentFor(first!)).not.toContain('id="marker"');
+    expect(documentFor(second!)).toContain('id="marker" style="left:706px;top:211px"');
+
+    overlay.setState({ state: "driving", point: { x: 0.5, y: 0.25 } });
+    expect(second!.loadedUrls).toHaveLength(1);
+    overlay.dispose();
+  });
+
+  it("holds Esc only while visible and forwards it to the app windows", () => {
+    const overlay = new MemComputerUseOverlay();
+    overlay.setState({ state: "inspecting", point: null });
+    expect(documentFor(mocks.windows[0]!)).toContain("Esc to stop");
+
+    mocks.shortcuts.get("Escape")!();
+    expect(mocks.appWindowMessages).toEqual(["desktop:computer-use-stop-request"]);
+
+    overlay.setState({ state: "hidden", point: null });
+    expect(mocks.shortcuts.has("Escape")).toBe(false);
   });
 });

@@ -249,6 +249,7 @@ import { commandFeatureUsage, featureUsage } from "./telemetry/FeatureUsage.ts";
 import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as RoomService from "./rooms/RoomService.ts";
+import * as ComputerUseActivity from "./computer/ComputerUseActivity.ts";
 import * as SubagentReportService from "./rooms/SubagentReportService.ts";
 import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
 import * as MemOverseerService from "./overseer/MemOverseerService.ts";
@@ -1494,6 +1495,7 @@ export const layerWsRpc = (
       const rooms = yield* RoomService.RoomService;
       const subagentReports = yield* SubagentReportService.SubagentReportService;
       const goalQueue = yield* GoalQueueService.GoalQueueService;
+      const computerUseActivity = yield* ComputerUseActivity.ComputerUseActivity;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -2378,6 +2380,24 @@ export const layerWsRpc = (
           ),
         [ORCHESTRATION_V2_WS_METHODS.subscribePromptSuggestion]: (input) =>
           providerSessionManager.subscribePromptSuggestion(input.threadId),
+        [WS_METHODS.computerUseSubscribe]: (_input) => computerUseActivity.changes,
+        [WS_METHODS.computerUseStop]: Effect.fn("ws.computerUseStop")(function* () {
+          const target = yield* computerUseActivity.stop();
+          if (target === null) return { stopped: false };
+          yield* threadManagement
+            .interruptThread({
+              projectId: target.projectId,
+              threadId: target.threadId,
+              commandId: CommandId.make(`computer-use-stop:${yield* random.uuidV4()}`),
+              reason: "Stopped with Esc while the agent was using the computer.",
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("Could not stop the thread using the computer.", { cause }),
+              ),
+            );
+          return { stopped: true };
+        }),
         [WS_METHODS.roomsSubscribe]: (_input) => rooms.subscribe(),
         [WS_METHODS.roomsCreate]: (input) => rooms.create(input),
         [WS_METHODS.roomsSend]: (input) => rooms.send(input),

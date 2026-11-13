@@ -29,7 +29,7 @@ export const installComputerUseOverlay = Effect.fn("desktop.ipc.installComputerU
     };
 
     const apply = (state: DesktopComputerUseOverlayState): Failure | undefined => {
-      if (state === "hidden" && overlay === undefined) return undefined;
+      if (state.state === "hidden" && overlay === undefined) return undefined;
       const failure = attempt(() => {
         overlay ??= new MemComputerUseOverlay();
         overlay.setState(state);

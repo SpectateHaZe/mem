@@ -123,6 +123,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.memOverseerSendInstruction]: AuthOrchestrationOperateScope,
   [WS_METHODS.memOverseerSetLifecycle]: AuthOrchestrationOperateScope,
   [WS_METHODS.memOverseerSpawnSession]: AuthOrchestrationOperateScope,
+  [WS_METHODS.computerUseSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.roomsSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.queueSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,

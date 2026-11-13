@@ -1339,6 +1339,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:rooms:live",
       tag: WS_METHODS.roomsSubscribe,
     }),
+    computerUseLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:computer-use:live",
+      tag: WS_METHODS.computerUseSubscribe,
+    }),
+    stopComputerUse: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:computer-use:stop",
+      tag: WS_METHODS.computerUseStop,
+    }),
     queueLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:queue:live",
       tag: WS_METHODS.queueSubscribe,

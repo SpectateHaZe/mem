@@ -109,6 +109,7 @@ import {
   AcpRegistrySetProviderResult,
 } from "./acpRegistry.ts";
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
+import { ComputerUseActivity, ComputerUseStopResult } from "./computer.ts";
 import {
   ClaudeSettingsReadInput,
   ClaudeSettingsSnapshot,
@@ -591,6 +592,8 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
   claudeSettingsRead: "claude.readSettings",
   claudeSettingsWrite: "claude.writeSettings",
+  computerUseSubscribe: "computerUse.subscribe",
+  computerUseStop: "computerUse.stop",
 
   roomsSubscribe: "rooms.subscribe",
   roomsCreate: "rooms.create",
@@ -2107,6 +2110,19 @@ const WsQueueRemoveRpc = Rpc.make(WS_METHODS.queueRemove, {
   error: Schema.Union([QueueError, EnvironmentAuthorizationError]),
 });
 
+const WsComputerUseSubscribeRpc = Rpc.make(WS_METHODS.computerUseSubscribe, {
+  payload: Schema.Struct({}),
+  success: ComputerUseActivity,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsComputerUseStopRpc = Rpc.make(WS_METHODS.computerUseStop, {
+  payload: Schema.Struct({}),
+  success: ComputerUseStopResult,
+  error: EnvironmentAuthorizationError,
+});
+
 const WsRoomsSubscribeRpc = Rpc.make(WS_METHODS.roomsSubscribe, {
   payload: Schema.Struct({}),
   success: RoomListResult,
@@ -2298,6 +2314,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsSubagentReportsWatchRpc,
   WsRoomsSetPausedRpc,
   WsRoomsDeleteRpc,
+  WsComputerUseSubscribeRpc,
+  WsComputerUseStopRpc,
   WsQueueSubscribeRpc,
   WsQueueAddRpc,
   WsQueueSetPausedRpc,

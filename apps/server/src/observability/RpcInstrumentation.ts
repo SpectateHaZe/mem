@@ -101,6 +101,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.memOverseerSendInstruction]: "memOverseer",
   [WS_METHODS.memOverseerSetLifecycle]: "memOverseer",
   [WS_METHODS.memOverseerSpawnSession]: "memOverseer",
+  [WS_METHODS.computerUseSubscribe]: "server",
+  [WS_METHODS.computerUseStop]: "server",
   [WS_METHODS.roomsSubscribe]: "rooms",
   [WS_METHODS.roomsCreate]: "rooms",
   [WS_METHODS.roomsSend]: "rooms",

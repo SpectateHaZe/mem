@@ -95,6 +95,7 @@ import * as RepositoryIdentityResolver from "./project/RepositoryIdentityResolve
 import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
+import * as ComputerUseActivity from "./computer/ComputerUseActivity.ts";
 import * as RoomService from "./rooms/RoomService.ts";
 import * as SubagentReportService from "./rooms/SubagentReportService.ts";
 import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
@@ -823,6 +824,7 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(ScheduledTasks.ScheduledTaskService)({}),
   Layer.mock(RoomService.RoomService)({}),
   Layer.mock(GoalQueueService.GoalQueueService)({}),
+  Layer.mock(ComputerUseActivity.ComputerUseActivity)({}),
   Layer.mock(SubagentReportService.SubagentReportService)({}),
   Layer.mock(MemIdleTracker.MemIdleTracker)({}),
   Layer.mock(MemOverseerService.MemOverseerService)({}),

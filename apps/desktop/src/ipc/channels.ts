@@ -11,6 +11,7 @@ export const PROBE_REMOTE_EDITORS_CHANNEL = "desktop:probe-remote-editors";
 export const MENU_ACTION_CHANNEL = "desktop:menu-action";
 export const PASTE_AS_TEXT_CHANNEL = "desktop:paste-as-text";
 export const COMPUTER_USE_OVERLAY_STATE_CHANNEL = "desktop:computer-use-overlay-state";
+export const COMPUTER_USE_STOP_REQUEST_CHANNEL = "desktop:computer-use-stop-request";
 export const REVEAL_WINDOW_CHANNEL = "desktop:reveal-window";
 export const SNAP_SHOT_EVENT_CHANNEL = "desktop:snap-shot-event";
 export const WEB_LINK_OPEN_CHANNEL = "desktop:web-link-open";

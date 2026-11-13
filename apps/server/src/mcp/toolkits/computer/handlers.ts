@@ -13,6 +13,7 @@ import {
   SCREENSHOT_SCRIPT,
 } from "../../../computer/computerScripts.ts";
 import { macAct, macScreenshot, MacComputerError } from "../../../computer/macComputer.ts";
+import * as ComputerUseActivity from "../../../computer/ComputerUseActivity.ts";
 import * as ServerSettings from "../../../serverSettings.ts";
 import * as McpToolAccess from "../../McpToolAccess.ts";
 import { loadCaller } from "../../threadAccess.ts";
@@ -40,10 +41,11 @@ const requireAllowed = Effect.fn("ComputerToolkit.requireAllowed")(function* (ac
   const refusal = computerUseRefusal(computerUseMode, yield* HostProcess.Platform, acting);
   if (refusal !== undefined) return yield* failure(refusal, "capability_denied");
   // These tools skip the provider's approval prompts, so a supervised thread may not use them.
-  const { limits } = yield* loadCaller();
+  const { limits, caller } = yield* loadCaller();
   if (limits.runtimeMode !== "full-access") {
     return yield* failure("Only full-access threads may use the desktop.", "capability_denied");
   }
+  return caller === undefined ? undefined : { threadId: caller.id, projectId: caller.projectId };
 });
 
 const runPowerShell = (script: string, keys?: string) =>
@@ -74,22 +76,25 @@ const runPowerShell = (script: string, keys?: string) =>
 
 const computer_screenshot = McpToolAccess.readsAsCaller(() =>
   Effect.gen(function* () {
-    yield* requireAllowed(false);
-    if ((yield* HostProcess.Platform) === "darwin") {
-      const screenshot = yield* Effect.mapError(macScreenshot, macFailure);
-      return { screenshot: { mimeType: "image/png" as const, ...screenshot } };
-    }
-    const screenshot = parseScreenshot(yield* runPowerShell(SCREENSHOT_SCRIPT));
+    const caller = yield* requireAllowed(false);
+    const activity = yield* ComputerUseActivity.ComputerUseActivity;
+    const screenshot =
+      (yield* HostProcess.Platform) === "darwin"
+        ? yield* Effect.mapError(macScreenshot, macFailure)
+        : parseScreenshot(yield* runPowerShell(SCREENSHOT_SCRIPT));
     if (screenshot === undefined) {
       return yield* failure("Couldn't read the screen.", "orchestration_error");
     }
+    yield* activity.screenshot(caller, screenshot);
     return { screenshot: { mimeType: "image/png" as const, ...screenshot } };
   }),
 );
 
 const computer_act = McpToolAccess.actsAsCaller((input: ComputerActInput) =>
   Effect.gen(function* () {
-    yield* requireAllowed(true);
+    const caller = yield* requireAllowed(true);
+    // Shown before the action runs, so the glow and marker lead the real cursor.
+    yield* (yield* ComputerUseActivity.ComputerUseActivity).act(caller, input);
     if ((yield* HostProcess.Platform) === "darwin") {
       return yield* Effect.mapError(macAct(input), macFailure);
     }

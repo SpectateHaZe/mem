@@ -17,7 +17,7 @@ vi.mock("./MemComputerUseOverlay.ts", () => ({
       if (fake.failConstruction) throw new Error("no display available");
     }
 
-    setState(state: string) {
+    setState({ state }: { state: string }) {
       if (fake.failSetState) throw new Error("window creation failed");
       fake.states.push(state);
     }
@@ -68,18 +68,18 @@ it.effect("creates one overlay on the first visible state and disposes it with t
       Effect.gen(function* () {
         yield* installComputerUseOverlay();
 
-        yield* send(handlers, "hidden");
+        yield* send(handlers, { state: "hidden", point: null });
         expect(fake.constructions).toBe(0);
 
-        yield* send(handlers, "driving");
+        yield* send(handlers, { state: "driving", point: null });
         expect(fake.constructions).toBe(1);
         expect(fake.states).toEqual(["driving"]);
 
-        yield* send(handlers, "inspecting");
+        yield* send(handlers, { state: "inspecting", point: null });
         expect(fake.constructions).toBe(1);
         expect(fake.states).toEqual(["driving", "inspecting"]);
 
-        yield* send(handlers, "hidden");
+        yield* send(handlers, { state: "hidden", point: null });
         expect(fake.states).toEqual(["driving", "inspecting", "hidden"]);
 
         yield* Effect.promise(() =>
@@ -105,22 +105,22 @@ it.effect("keeps the app running when the overlay cannot create or update its wi
         yield* installComputerUseOverlay();
 
         fake.failConstruction = true;
-        yield* send(handlers, "driving");
+        yield* send(handlers, { state: "driving", point: null });
         expect(fake.constructions).toBe(1);
         expect(fake.states).toEqual([]);
         expect(fake.disposals).toBe(0);
 
         fake.failConstruction = false;
-        yield* send(handlers, "driving");
+        yield* send(handlers, { state: "driving", point: null });
         expect(fake.constructions).toBe(2);
         expect(fake.states).toEqual(["driving"]);
 
         fake.failSetState = true;
-        yield* send(handlers, "inspecting");
+        yield* send(handlers, { state: "inspecting", point: null });
         expect(fake.states).toEqual(["driving"]);
         expect(fake.disposals).toBe(1);
 
-        yield* send(handlers, "hidden");
+        yield* send(handlers, { state: "hidden", point: null });
         expect(fake.constructions).toBe(2);
       }).pipe(Effect.provide(layerTest(handlers))),
     );

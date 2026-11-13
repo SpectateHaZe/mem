@@ -95,7 +95,11 @@ export const DesktopThemeSchema = Schema.Literals(["light", "dark", "system"]);
 export const DesktopUpdateChannelSchema = Schema.Literals(["latest", "nightly"]);
 export const DesktopAppStageLabelSchema = Schema.Literals(["Alpha", "Beta", "Dev", "Nightly"]);
 
-export const DesktopComputerUseOverlayState = Schema.Literals(["hidden", "driving", "inspecting"]);
+export const DesktopComputerUseOverlayState = Schema.Struct({
+  state: Schema.Literals(["hidden", "driving", "inspecting"]),
+  /** Last pointer target as a fraction of the primary display. */
+  point: Schema.NullOr(Schema.Struct({ x: Schema.Number, y: Schema.Number })),
+});
 export type DesktopComputerUseOverlayState = typeof DesktopComputerUseOverlayState.Type;
 
 export interface DesktopAppBranding {
@@ -1052,6 +1056,8 @@ export interface DesktopBridge {
   getClientPlatform: () => string;
   setNotificationBadge: (badge: { count: number; image: string | null }) => Promise<void>;
   setComputerUseOverlayState: (state: DesktopComputerUseOverlayState) => Promise<void>;
+  /** Esc while the glow shows; the listener stops the agent that is using the computer. */
+  onComputerUseStopRequest: (listener: () => void) => () => void;
   onNotificationBadgeClear: (listener: () => void) => () => void;
   onTrackpadScrollBegin: (listener: () => void) => () => void;
   onTrackpadScrollEnd: (listener: () => void) => () => void;

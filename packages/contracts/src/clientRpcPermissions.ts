@@ -69,6 +69,7 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.roomsSend]: AuthOrchestrationOperateScope,
   [WS_METHODS.roomsSetPaused]: AuthOrchestrationOperateScope,
   [WS_METHODS.roomsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.subagentReportsWatch]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueSetPaused]: AuthOrchestrationOperateScope,

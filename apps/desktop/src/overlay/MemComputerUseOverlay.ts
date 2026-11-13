@@ -1,20 +1,39 @@
 import * as Electron from "electron";
 
-export type MemComputerUseOverlayState = "hidden" | "driving" | "inspecting";
+import { COMPUTER_USE_STOP_REQUEST_CHANNEL } from "../ipc/channels.ts";
 
-type VisibleOverlayState = Exclude<MemComputerUseOverlayState, "hidden">;
+export type MemComputerUseOverlayMode = "hidden" | "driving" | "inspecting";
+
+export interface MemComputerUseOverlayState {
+  readonly state: MemComputerUseOverlayMode;
+  /** Last pointer target as a fraction of the primary display. */
+  readonly point: { readonly x: number; readonly y: number } | null;
+}
+
+type VisibleOverlayMode = Exclude<MemComputerUseOverlayMode, "hidden">;
 
 const ALWAYS_ON_TOP_LEVEL = "pop-up-menu";
+const STOP_ACCELERATOR = "Escape";
+const MARKER_SIZE = 28;
 
-const PILL_TEXT: Record<VisibleOverlayState, string> = {
-  driving: "Mem is using your PC",
-  inspecting: "Mem is checking the work",
+const PILL_TEXT: Record<VisibleOverlayMode, string> = {
+  driving: "Mem is using your PC · Esc to stop",
+  inspecting: "Mem is checking the work · Esc to stop",
 };
 
-// The glow is static on purpose: a repainting fullscreen gradient on every display
+const HIDDEN: MemComputerUseOverlayState = { state: "hidden", point: null };
+
+// The glow and marker are static on purpose: a repainting fullscreen gradient on every display
 // would burn the GPU of the machine the agent is already driving.
-const overlayHtml = (state: VisibleOverlayState): string => {
-  const inspecting = state === "inspecting";
+const overlayHtml = (
+  mode: VisibleOverlayMode,
+  marker: { readonly x: number; readonly y: number } | null,
+): string => {
+  const inspecting = mode === "inspecting";
+  const markerHtml =
+    marker === null
+      ? ""
+      : `<div id="marker" style="left:${Math.round(marker.x - MARKER_SIZE / 2)}px;top:${Math.round(marker.y - MARKER_SIZE / 2)}px"></div>`;
   return `<!doctype html><html lang="en"><head><meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
 <meta name="color-scheme" content="dark"><title>Mem</title><style>
@@ -43,10 +62,33 @@ html, body { margin: 0; height: 100%; background: transparent; overflow: hidden;
   white-space: nowrap;
   opacity: ${inspecting ? 0.85 : 1};
 }
+#marker {
+  position: fixed;
+  width: ${MARKER_SIZE - 6}px;
+  height: ${MARKER_SIZE - 6}px;
+  border: 3px solid rgba(255, 110, 180, 0.9);
+  border-radius: 50%;
+  background: rgba(255, 110, 180, 0.18);
+  box-shadow: 0 0 0 2px rgba(16, 16, 20, 0.55);
+}
 </style></head><body>
 <div id="glow"></div>
-<div id="pill">${PILL_TEXT[state]}</div>
+<div id="pill">${PILL_TEXT[mode]}</div>
+${markerHtml}
 </body></html>`;
+};
+
+/** The marker in a display's own coordinates, or null when the point falls on another display. */
+const markerOnDisplay = (
+  point: MemComputerUseOverlayState["point"],
+  primary: Electron.Rectangle,
+  display: Electron.Rectangle,
+): { readonly x: number; readonly y: number } | null => {
+  if (point === null) return null;
+  const x = primary.x + point.x * primary.width - display.x;
+  const y = primary.y + point.y * primary.height - display.y;
+  if (x < 0 || y < 0 || x > display.width || y > display.height) return null;
+  return { x, y };
 };
 
 const sameBounds = (a: Electron.Rectangle, b: Electron.Rectangle): boolean =>
@@ -56,28 +98,59 @@ const dataUrl = (html: string): string =>
   `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
 
 export class MemComputerUseOverlay {
-  private state: MemComputerUseOverlayState = "hidden";
+  private current: MemComputerUseOverlayState = HIDDEN;
   private readonly windows = new Map<number, Electron.BrowserWindow>();
+  private readonly renderedUrls = new Map<number, string>();
   private listening = false;
-  private renderedUrl: string | undefined;
+  private shortcutRegistered = false;
 
-  setState(state: MemComputerUseOverlayState): void {
-    if (state === this.state) return;
-    this.state = state;
+  setState(next: MemComputerUseOverlayState): void {
+    if (
+      next.state === this.current.state &&
+      next.point?.x === this.current.point?.x &&
+      next.point?.y === this.current.point?.y
+    ) {
+      return;
+    }
+    this.current = next;
     this.render();
   }
 
   dispose(): void {
-    this.state = "hidden";
-    this.renderedUrl = undefined;
+    this.current = HIDDEN;
     this.closeWindows();
     this.stopListening();
+    this.releaseShortcut();
   }
 
   private readonly onDisplaysChanged = (): void => {
-    if (this.state === "hidden") return;
+    if (this.current.state === "hidden") return;
     this.render();
   };
+
+  // Every app window hears the request; the renderer asks the server to stop the agent.
+  private readonly onStopShortcut = (): void => {
+    const overlays = new Set(this.windows.values());
+    for (const window of Electron.BrowserWindow.getAllWindows()) {
+      if (overlays.has(window) || window.isDestroyed()) continue;
+      window.webContents.send(COMPUTER_USE_STOP_REQUEST_CHANNEL);
+    }
+  };
+
+  private claimShortcut(): void {
+    if (this.shortcutRegistered) return;
+    // Another app may own Esc; the glow still shows and the stop button in Mem still works.
+    this.shortcutRegistered = Electron.globalShortcut.register(
+      STOP_ACCELERATOR,
+      this.onStopShortcut,
+    );
+  }
+
+  private releaseShortcut(): void {
+    if (!this.shortcutRegistered) return;
+    this.shortcutRegistered = false;
+    Electron.globalShortcut.unregister(STOP_ACCELERATOR);
+  }
 
   private listen(): void {
     if (this.listening) return;
@@ -96,24 +169,23 @@ export class MemComputerUseOverlay {
   }
 
   private render(): void {
-    const state = this.state;
+    const { state, point } = this.current;
     if (state === "hidden") {
-      this.renderedUrl = undefined;
       this.closeWindows();
       this.stopListening();
+      this.releaseShortcut();
       return;
     }
     this.listen();
-    const url = dataUrl(overlayHtml(state));
-    const reload = url !== this.renderedUrl;
-    this.renderedUrl = url;
-    const displays = Electron.screen.getAllDisplays();
+    this.claimShortcut();
+    const primary = Electron.screen.getPrimaryDisplay().bounds;
     const live = new Set<number>();
-    for (const display of displays) {
+    for (const display of Electron.screen.getAllDisplays()) {
       live.add(display.id);
+      const url = dataUrl(overlayHtml(state, markerOnDisplay(point, primary, display.bounds)));
       const window = this.windows.get(display.id);
       if (window && !window.isDestroyed() && sameBounds(window.getBounds(), display.bounds)) {
-        if (reload) this.loadWindow(window, url);
+        if (this.renderedUrls.get(display.id) !== url) this.loadWindow(display.id, window, url);
         continue;
       }
       this.closeWindow(display.id);
@@ -153,6 +225,7 @@ export class MemComputerUseOverlay {
     });
     this.windows.set(display.id, window);
     window.setIgnoreMouseEvents(true);
+    // Keeps the glow out of the agent's own screenshots.
     window.setContentProtection(true);
     // oxlint-disable-next-line t3code/no-global-process-runtime -- Plain Electron window helper with no Effect runtime to inject.
     if (process.platform !== "linux") window.setAlwaysOnTop(true, ALWAYS_ON_TOP_LEVEL);
@@ -162,17 +235,19 @@ export class MemComputerUseOverlay {
       } catch {}
     }
     window.showInactive();
-    this.loadWindow(window, url);
+    this.loadWindow(display.id, window, url);
   }
 
-  private loadWindow(window: Electron.BrowserWindow, url: string): void {
+  private loadWindow(id: number, window: Electron.BrowserWindow, url: string): void {
     if (window.isDestroyed()) return;
+    this.renderedUrls.set(id, url);
     void window.loadURL(url).catch(() => undefined);
   }
 
   private closeWindow(id: number): void {
     const window = this.windows.get(id);
     this.windows.delete(id);
+    this.renderedUrls.delete(id);
     if (window && !window.isDestroyed()) window.destroy();
   }
 

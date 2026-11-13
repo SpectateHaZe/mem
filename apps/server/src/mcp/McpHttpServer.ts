@@ -26,6 +26,7 @@ import {
 import packageJson from "../../package.json" with { type: "json" };
 import { parseBearerToken } from "../auth/EnvironmentAuth.ts";
 import * as ServerConfig from "../config.ts";
+import * as ComputerUseActivity from "../computer/ComputerUseActivity.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as DeviceService from "../device/DeviceService.ts";
 import * as HtmlRender from "../htmlRender/HtmlRender.ts";
@@ -812,6 +813,7 @@ const registerDeviceScreenshot = Effect.fn("McpHttpServer.registerDeviceScreensh
 const registerComputerScreenshot = Effect.fn("McpHttpServer.registerComputerScreenshot")(
   function* () {
     const settings = yield* ServerSettings.ServerSettingsService;
+    const computerUseActivity = yield* ComputerUseActivity.ComputerUseActivity;
     const threads = yield* ThreadManagementService.ThreadManagementService;
     const built = yield* decodeAsAdvertised(ComputerScreenshotToolkit);
     yield* registerImageTool(
@@ -823,6 +825,7 @@ const registerComputerScreenshot = Effect.fn("McpHttpServer.registerComputerScre
       (effect) =>
         effect.pipe(
           Effect.provideService(ServerSettings.ServerSettingsService, settings),
+          Effect.provideService(ComputerUseActivity.ComputerUseActivity, computerUseActivity),
           Effect.provideService(ThreadManagementService.ThreadManagementService, threads),
         ),
       "screenshot",
