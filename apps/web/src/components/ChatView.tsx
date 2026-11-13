@@ -73,6 +73,7 @@ import {
   ProviderInteractionMode,
   resolveIdleCompaction,
   RuntimeMode,
+  isMemMasterThread,
 } from "@t3tools/contracts";
 import {
   deriveProviderSubagentStatus,
@@ -360,6 +361,7 @@ import { ChatRightPanel } from "./chat/ChatRightPanel";
 import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
+import { useMemSentMessagesBanner } from "./mem/MemSentMessages";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useTimelineFollow } from "./chat/useTimelineFollow";
@@ -2545,6 +2547,12 @@ export default function ChatView(props: ChatViewProps) {
           },
         })
       : null;
+  const memSentBannerItem = useMemSentMessagesBanner({
+    environmentId,
+    isMemThread: serverThread !== null && isMemMasterThread(serverThread.source),
+    onOpenThread: onOpenRelatedThreadStable,
+  });
+  const memSentItems = memSentBannerItem === null ? [] : [memSentBannerItem];
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =
@@ -2613,6 +2621,7 @@ export default function ChatView(props: ChatViewProps) {
         ...projectCloneItems,
         ...freshSessionItems,
         ...systemComposerBannerItems,
+        ...memSentItems,
       ];
     }
     return [
@@ -2624,6 +2633,7 @@ export default function ChatView(props: ChatViewProps) {
       ...projectCloneItems,
       ...freshSessionItems,
       ...systemComposerBannerItems,
+      ...memSentItems,
       branchMismatchBannerItem({
         mismatchKey: activeBranchMismatchKey,
         mismatch: localCheckoutBranchMismatch,

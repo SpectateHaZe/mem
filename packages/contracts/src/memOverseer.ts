@@ -105,6 +105,9 @@ export const MemWatchedThread = Schema.Struct({
   lastInstruction: Schema.NullOr(Schema.String),
   spendUsd: Schema.Number,
   pendingApproval: Schema.Boolean,
+  /** The last message Mem actually posted in the thread, and when. */
+  sentInstruction: Schema.NullOr(Schema.String),
+  sentAtMs: Schema.NullOr(Schema.Number),
 });
 export type MemWatchedThread = typeof MemWatchedThread.Type;
 

@@ -389,6 +389,8 @@ describe("MemOverseerService.listWatched", () => {
           {
             ...claimedRecord(REJECTED_INSTRUCTION),
             spentUsd: 0.5,
+            deliveredInstruction: REJECTED_INSTRUCTION,
+            deliveredAtMs: 2,
             updatedAtMs: 2,
           },
         ],
@@ -422,6 +424,8 @@ describe("MemOverseerService.listWatched", () => {
         lastInstruction: REJECTED_INSTRUCTION,
         spendUsd: 0.5,
         pendingApproval: false,
+        sentInstruction: REJECTED_INSTRUCTION,
+        sentAtMs: 2,
       },
       {
         threadId: "thread-2",
@@ -430,6 +434,8 @@ describe("MemOverseerService.listWatched", () => {
         lastInstruction: null,
         spendUsd: 0,
         pendingApproval: true,
+        sentInstruction: null,
+        sentAtMs: null,
       },
     ]);
   });

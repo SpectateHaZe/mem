@@ -972,6 +972,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         lastInstruction: record.task.lastInstruction,
         spendUsd: record.spentUsd,
         pendingApproval: record.pendingApproval !== null,
+        sentInstruction: record.deliveredInstruction,
+        sentAtMs: record.deliveredAtMs,
       }));
   });
 

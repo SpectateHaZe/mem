@@ -29,6 +29,15 @@ const memPendingApprovalsQuery = createEnvironmentRpcQueryAtomFamily(connectionA
   staleTimeMs: 15_000,
 });
 
+const memWatchedThreadsQuery = createEnvironmentRpcQueryAtomFamily(connectionAtomRuntime, {
+  label: "environment-data:mem-overseer:watched",
+  tag: WS_METHODS.memOverseerListWatched,
+  staleTimeMs: 15_000,
+});
+
+export const memWatchedThreadsAtom = (environmentId: EnvironmentId | null) =>
+  environmentId === null ? null : memWatchedThreadsQuery({ environmentId, input: {} });
+
 export const memAnswerApproval = createEnvironmentRpcCommand(connectionAtomRuntime, {
   label: "environment-data:mem-overseer:answer-approval",
   tag: WS_METHODS.memOverseerAnswerApproval,
