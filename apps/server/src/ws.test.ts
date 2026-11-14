@@ -96,6 +96,8 @@ import * as ResourceTelemetry from "./resourceTelemetry/ResourceTelemetry.ts";
 import * as ReviewService from "./review/ReviewService.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as ComputerUseActivity from "./computer/ComputerUseActivity.ts";
+import * as HandHelper from "./lendAHand/HandHelper.ts";
+import * as HandHost from "./lendAHand/HandHost.ts";
 import * as RoomService from "./rooms/RoomService.ts";
 import * as SubagentReportService from "./rooms/SubagentReportService.ts";
 import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
@@ -825,6 +827,8 @@ const layerUnusedConfigRpcServices = Layer.mergeAll(
   Layer.mock(RoomService.RoomService)({}),
   Layer.mock(GoalQueueService.GoalQueueService)({}),
   Layer.mock(ComputerUseActivity.ComputerUseActivity)({}),
+  Layer.mock(HandHost.HandHost)({}),
+  Layer.mock(HandHelper.HandHelper)({}),
   Layer.mock(SubagentReportService.SubagentReportService)({}),
   Layer.mock(MemIdleTracker.MemIdleTracker)({}),
   Layer.mock(MemOverseerService.MemOverseerService)({}),

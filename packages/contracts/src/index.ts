@@ -70,6 +70,7 @@ export * from "./usage.ts";
 export * from "./room.ts";
 export * from "./goalQueue.ts";
 export * from "./computer.ts";
+export * from "./lendAHand.ts";
 export * from "./obscura.ts";
 export * from "./scheduledTask.ts";
 export * from "./worktreeMcp.ts";

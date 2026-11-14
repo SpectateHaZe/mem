@@ -250,6 +250,8 @@ import type { TelemetryOwner } from "./telemetry/Identify.ts";
 import * as GoalQueueService from "./rooms/GoalQueueService.ts";
 import * as RoomService from "./rooms/RoomService.ts";
 import * as ComputerUseActivity from "./computer/ComputerUseActivity.ts";
+import * as HandHelper from "./lendAHand/HandHelper.ts";
+import * as HandHost from "./lendAHand/HandHost.ts";
 import * as SubagentReportService from "./rooms/SubagentReportService.ts";
 import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
 import * as MemOverseerService from "./overseer/MemOverseerService.ts";
@@ -1498,6 +1500,8 @@ export const layerWsRpc = (
       const subagentReports = yield* SubagentReportService.SubagentReportService;
       const goalQueue = yield* GoalQueueService.GoalQueueService;
       const computerUseActivity = yield* ComputerUseActivity.ComputerUseActivity;
+      const handHost = yield* HandHost.HandHost;
+      const handHelper = yield* HandHelper.HandHelper;
       const usageLimitSources = yield* UsageLimitSources.UsageLimitSources;
       const worktreeSetupTracker = yield* WorktreeSetupTracker.WorktreeSetupTracker;
       const projectCloneTracker = yield* ProjectCloneTracker.ProjectCloneTracker;
@@ -2392,6 +2396,10 @@ export const layerWsRpc = (
         [WS_METHODS.computerUseStop]: Effect.fn("ws.computerUseStop")(function* () {
           const target = yield* computerUseActivity.stop();
           if (target === null) return { stopped: false };
+          if (target.threadId === HandHost.HAND_CALLER.threadId) {
+            yield* handHost.end("Ended with Esc.");
+            return { stopped: true };
+          }
           yield* threadManagement
             .interruptThread({
               projectId: target.projectId,
@@ -2406,6 +2414,15 @@ export const layerWsRpc = (
             );
           return { stopped: true };
         }),
+        [WS_METHODS.lendAHandHostStart]: (_input) => handHost.start(),
+        [WS_METHODS.lendAHandHostEnd]: (_input) => handHost.end(),
+        [WS_METHODS.lendAHandHostSubscribe]: (_input) => handHost.changes,
+        [WS_METHODS.lendAHandConnect]: (input) =>
+          handHelper
+            .connect(input.threadId, input.code)
+            .pipe(Effect.map((hello) => ({ hostName: hello.hostName }))),
+        [WS_METHODS.lendAHandDisconnect]: (input) => handHelper.disconnect(input.threadId),
+        [WS_METHODS.lendAHandHelperSubscribe]: (_input) => handHelper.changes,
         [WS_METHODS.roomsSubscribe]: (_input) => rooms.subscribe(),
         [WS_METHODS.roomsCreate]: (input) => rooms.create(input),
         [WS_METHODS.roomsSend]: (input) => rooms.send(input),

@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { APP_VERSION } from "../branding";
 import { ComputerUseOverlayBridge } from "../components/ComputerUseOverlayBridge";
+import { LendAHandHostPill } from "../components/lendAHand/LendAHand";
 import { QueueNotifications } from "../components/rooms/QueueNotifications";
 import { ThreadRouteView } from "../components/ThreadRouteView";
 import { isAppModalPage } from "../components/sidebar/mainAppLocation";
@@ -35,6 +36,7 @@ function ChatRouteLayout() {
     <>
       <QueueNotifications />
       <ComputerUseOverlayBridge />
+      <LendAHandHostPill />
       <span
         aria-hidden
         className="pointer-events-none fixed right-1.5 bottom-0.5 z-50 select-none text-3xs text-muted-foreground/50 tabular-nums"

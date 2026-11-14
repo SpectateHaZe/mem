@@ -1,3 +1,4 @@
+import { LendAHandSettings } from "../lendAHand/LendAHand";
 import { SessionPermissions } from "./SessionPermissions";
 import { ChevronRightIcon, EllipsisIcon } from "lucide-react";
 import { useAtomValue } from "@effect/atom-react";
@@ -1260,6 +1261,8 @@ function ConnectionsSettingsContent({
               </details>
             ) : null}
           </SettingsSection>
+
+          {canWriteAccess ? <LendAHandSettings /> : null}
 
           {canReadAccess || canWriteAccess ? (
             <FoldedSettingsSection

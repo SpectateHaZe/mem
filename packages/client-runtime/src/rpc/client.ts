@@ -63,6 +63,8 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.roomsSubscribe
   | typeof WS_METHODS.queueSubscribe
   | typeof WS_METHODS.computerUseSubscribe
+  | typeof WS_METHODS.lendAHandHostSubscribe
+  | typeof WS_METHODS.lendAHandHelperSubscribe
   | typeof WS_METHODS.serverGetStorageCleanupReport
   | typeof WS_METHODS.serverGetDatabaseStorage
   | typeof WS_METHODS.subscribeTerminalMetadata

@@ -73,6 +73,11 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.roomsSetPaused]: AuthOrchestrationOperateScope,
   [WS_METHODS.roomsDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,
+  // Starting hands this PC to someone outside, like a pairing link.
+  [WS_METHODS.lendAHandHostStart]: AuthAccessWriteScope,
+  [WS_METHODS.lendAHandHostEnd]: AuthAccessWriteScope,
+  [WS_METHODS.lendAHandConnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.lendAHandDisconnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.subagentReportsWatch]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueSetPaused]: AuthOrchestrationOperateScope,

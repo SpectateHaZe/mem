@@ -111,6 +111,14 @@ import {
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import { ComputerUseActivity, ComputerUseStopResult } from "./computer.ts";
 import {
+  HandConnectInput,
+  HandConnectResult,
+  HandError,
+  HandHelperState,
+  HandHostState,
+  HandThreadInput,
+} from "./lendAHand.ts";
+import {
   ClaudeSettingsReadInput,
   ClaudeSettingsSnapshot,
   ClaudeSettingsWriteError,
@@ -601,6 +609,12 @@ export const WS_METHODS = {
   claudePluginsRun: "claude.runPluginAction",
   computerUseSubscribe: "computerUse.subscribe",
   computerUseStop: "computerUse.stop",
+  lendAHandHostStart: "lendAHand.hostStart",
+  lendAHandHostEnd: "lendAHand.hostEnd",
+  lendAHandHostSubscribe: "lendAHand.hostSubscribe",
+  lendAHandConnect: "lendAHand.connect",
+  lendAHandDisconnect: "lendAHand.disconnect",
+  lendAHandHelperSubscribe: "lendAHand.helperSubscribe",
 
   roomsSubscribe: "rooms.subscribe",
   roomsCreate: "rooms.create",
@@ -2142,6 +2156,44 @@ const WsComputerUseStopRpc = Rpc.make(WS_METHODS.computerUseStop, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsLendAHandHostStartRpc = Rpc.make(WS_METHODS.lendAHandHostStart, {
+  payload: Schema.Struct({}),
+  success: HandHostState,
+  error: Schema.Union([HandError, EnvironmentAuthorizationError]),
+});
+
+const WsLendAHandHostEndRpc = Rpc.make(WS_METHODS.lendAHandHostEnd, {
+  payload: Schema.Struct({}),
+  success: HandHostState,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsLendAHandHostSubscribeRpc = Rpc.make(WS_METHODS.lendAHandHostSubscribe, {
+  payload: Schema.Struct({}),
+  success: HandHostState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
+const WsLendAHandConnectRpc = Rpc.make(WS_METHODS.lendAHandConnect, {
+  payload: HandConnectInput,
+  success: HandConnectResult,
+  error: Schema.Union([HandError, EnvironmentAuthorizationError]),
+});
+
+const WsLendAHandDisconnectRpc = Rpc.make(WS_METHODS.lendAHandDisconnect, {
+  payload: HandThreadInput,
+  success: HandHelperState,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsLendAHandHelperSubscribeRpc = Rpc.make(WS_METHODS.lendAHandHelperSubscribe, {
+  payload: Schema.Struct({}),
+  success: HandHelperState,
+  error: EnvironmentAuthorizationError,
+  stream: true,
+});
+
 const WsRoomsSubscribeRpc = Rpc.make(WS_METHODS.roomsSubscribe, {
   payload: Schema.Struct({}),
   success: RoomListResult,
@@ -2337,6 +2389,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsRoomsDeleteRpc,
   WsComputerUseSubscribeRpc,
   WsComputerUseStopRpc,
+  WsLendAHandHostStartRpc,
+  WsLendAHandHostEndRpc,
+  WsLendAHandHostSubscribeRpc,
+  WsLendAHandConnectRpc,
+  WsLendAHandDisconnectRpc,
+  WsLendAHandHelperSubscribeRpc,
   WsQueueSubscribeRpc,
   WsQueueAddRpc,
   WsQueueSetPausedRpc,

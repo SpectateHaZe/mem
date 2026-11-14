@@ -1347,6 +1347,30 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:computer-use:stop",
       tag: WS_METHODS.computerUseStop,
     }),
+    handHostLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:lend-a-hand:host",
+      tag: WS_METHODS.lendAHandHostSubscribe,
+    }),
+    startHandHost: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:host-start",
+      tag: WS_METHODS.lendAHandHostStart,
+    }),
+    endHandHost: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:host-end",
+      tag: WS_METHODS.lendAHandHostEnd,
+    }),
+    handHelperLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:lend-a-hand:helper",
+      tag: WS_METHODS.lendAHandHelperSubscribe,
+    }),
+    connectHand: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:connect",
+      tag: WS_METHODS.lendAHandConnect,
+    }),
+    disconnectHand: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:disconnect",
+      tag: WS_METHODS.lendAHandDisconnect,
+    }),
     queueLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:queue:live",
       tag: WS_METHODS.queueSubscribe,
