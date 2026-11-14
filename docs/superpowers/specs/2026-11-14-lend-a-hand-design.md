@@ -33,7 +33,7 @@ environments.
 
 ## Limits
 
-- Commands run as the host's user in PowerShell (Windows) or `/bin/sh` (macOS), 120 s timeout,
+- Commands run as the host's user in PowerShell (Windows) or `/bin/sh` (macOS), 90 s timeout (under Cloudflare's 100 s request limit),
   output capped at 100 KB per stream.
 - Desktop control needs the host on Windows or macOS (same code as computer use).
 - Traffic is encrypted but passes through Cloudflare.

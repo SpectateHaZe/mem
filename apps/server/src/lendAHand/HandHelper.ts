@@ -34,6 +34,8 @@ const HELLO_RETRIES = 7;
 const HELLO_RETRY = Duration.seconds(3);
 const CALL_TIMEOUT_MS = 150_000;
 const INVITE_TTL_MS = 15 * 60_000;
+const PING_RETRIES = 4;
+const PING_RETRY_MS = 2_000;
 const decodeHelloResponse = Schema.decodeUnknownEffect(HandHelloResponseSchema);
 const decodeInviteRequest = Schema.decodeUnknownSync(HandInviteRequest);
 
@@ -160,6 +162,20 @@ const make = Effect.gen(function* () {
     return answer;
   });
 
+  const stillConnected = (endpoint: HandEndpoint) =>
+    Effect.promise(async () => {
+      for (let attempt = 0; attempt < PING_RETRIES; attempt++) {
+        const status = await post(endpoint, "ping", {}).then(
+          (response) => response.status,
+          () => undefined,
+        );
+        if (status === 200) return true;
+        if (status === 404 || status === 410) return false;
+        await new Promise((resolve) => setTimeout(resolve, PING_RETRY_MS));
+      }
+      return false;
+    });
+
   const call = Effect.fn("HandHelper.call")(function* (
     threadId: ThreadId,
     route: "run" | "screenshot" | "act",
@@ -181,11 +197,19 @@ const make = Effect.gen(function* () {
       catch: () =>
         new HandError({ message: "Couldn't reach the other PC. Their Mem may have closed." }),
     });
-    // 502 and 530 are Cloudflare saying the tunnel behind the code is gone.
+    // 502 and 530 mean Cloudflare couldn't reach their Mem: often a moment's hiccup, so ask
+    // whether the session is still there before dropping it.
+    if (outcome.status === 502 || outcome.status === 530) {
+      if (yield* stillConnected(endpoint)) {
+        return yield* new HandError({
+          message: `The request was lost on the way (Cloudflare ${outcome.status}) but the session is still connected. Try again; a command may or may not have run.`,
+        });
+      }
+    }
     if ([404, 410, 502, 530].includes(outcome.status)) {
       yield* forget(threadId);
       return yield* new HandError({
-        message: "The session ended: the other person ended it or closed Mem.",
+        message: `The session ended (${outcome.status}): the other person pressed End or Esc, or closed Mem. Their Lend a hand screen says why.`,
       });
     }
     if (outcome.status !== 200) {

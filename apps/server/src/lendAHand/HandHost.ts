@@ -43,7 +43,8 @@ const MAX_LOG = 200;
 const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_STREAM_CHARS = 100_000;
 const DEFAULT_RUN_SECONDS = 60;
-const MAX_RUN_SECONDS = 120;
+// Under Cloudflare's 100 s limit on a tunneled request, so a long command returns, not a 524.
+const MAX_RUN_SECONDS = 90;
 /** The helper's Mem says hello back before answering, and a fresh tunnel can take a while. */
 const INVITE_POST_TIMEOUT_MS = 90_000;
 const INVITE_RETRIES = 7;
@@ -227,6 +228,9 @@ const make = Effect.gen(function* () {
     if (current === undefined) return reply(410, { error: "The host ended the session." });
     const body = await readBody(request);
     switch (request.url) {
+      // Lets the helper tell a lost request from an ended session.
+      case "/hand/ping":
+        return reply(200, {});
       case "/hand/hello": {
         const { helperName } = decodeHello(body);
         const name = helperName.trim().slice(0, 60) || "Someone";

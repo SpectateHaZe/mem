@@ -66,7 +66,7 @@ export const HandRunInput = Schema.Struct({
   command: Schema.String.annotate({
     description: "PowerShell on Windows hosts, /bin/sh on macOS. Runs as the host's user.",
   }),
-  timeoutSeconds: Schema.optional(Schema.Int.annotate({ description: "Default 60, at most 120." })),
+  timeoutSeconds: Schema.optional(Schema.Int.annotate({ description: "Default 60, at most 90." })),
 });
 export type HandRunInput = typeof HandRunInput.Type;
 
