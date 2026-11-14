@@ -2,12 +2,13 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChartNoAxesColumnIcon,
+  HandIcon,
   ListTodoIcon,
   MessagesSquareIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
-import { memo } from "react";
+import { memo, useState } from "react";
 import { Link, useLocation, useNavigate } from "@tanstack/react-router";
 
 import { useAtomValue } from "@effect/atom-react";
@@ -28,6 +29,7 @@ import {
   SidebarStageBackdrop,
   useEnvironmentStageLabel,
 } from "../SidebarStageBackdrop";
+import { LendAHandDialog } from "../lendAHand/LendAHand";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import {
@@ -234,6 +236,7 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     select: (location) => isSidebarUtilityPage(location.pathname),
   });
   const pullRequestsSupported = usePullRequestsSupported();
+  const [handOpen, setHandOpen] = useState(false);
   const closeMobileSidebar = () => {
     if (isMobile) {
       setOpenMobile(false);
@@ -307,6 +310,15 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Usage"
             onClick={handleUsageClick}
           />
+          <SidebarUtilityItem
+            icon={<HandIcon />}
+            label="Lend a hand"
+            onClick={() => {
+              closeMobileSidebar();
+              setHandOpen(true);
+            }}
+          />
+          <LendAHandDialog open={handOpen} onOpenChange={setHandOpen} />
         </>
       )}
       <SidebarThreadUndoNotice />

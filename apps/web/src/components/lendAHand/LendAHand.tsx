@@ -196,6 +196,32 @@ export function LendAHandSettings() {
   );
 }
 
+/** The same controls as Settings, one click from the sidebar. */
+export function LendAHandDialog({
+  open,
+  onOpenChange,
+}: {
+  readonly open: boolean;
+  readonly onOpenChange: (open: boolean) => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogPopup className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Lend a hand</DialogTitle>
+          <DialogDescription>
+            Get help on this PC from someone else's Mem. To help someone, use the hand icon in a
+            chat's header instead.
+          </DialogDescription>
+        </DialogHeader>
+        <DialogPanel>
+          <LendAHandSettings />
+        </DialogPanel>
+      </DialogPopup>
+    </Dialog>
+  );
+}
+
 /** On every screen while this PC is shared, so the owner always sees it and can end it. */
 export function LendAHandHostPill() {
   const environmentId = usePrimaryEnvironmentId();
