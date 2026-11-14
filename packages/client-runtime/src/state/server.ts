@@ -1434,6 +1434,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:claude-settings-write",
       tag: WS_METHODS.claudeSettingsWrite,
     }),
+    readClaudePlugins: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:claude-plugins",
+      tag: WS_METHODS.claudePluginsRead,
+    }),
+    runClaudePluginAction: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:claude-plugins-run",
+      tag: WS_METHODS.claudePluginsRun,
+    }),
     searchAcpRegistry: createEnvironmentRpcQueryAtomFamily(runtime, {
       label: "environment-data:server:acp-registry:search",
       tag: WS_METHODS.serverSearchAcpRegistry,

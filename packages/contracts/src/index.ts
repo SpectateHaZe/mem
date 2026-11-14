@@ -29,6 +29,7 @@ export * from "./keybindings.ts";
 export * from "./server.ts";
 export * from "./settings.ts";
 export * from "./claudeSettings.ts";
+export * from "./claudePlugins.ts";
 export * from "./memOverseer.ts";
 export * from "./managedPolicy.ts";
 export * from "./git.ts";

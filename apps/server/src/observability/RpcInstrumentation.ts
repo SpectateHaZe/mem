@@ -250,6 +250,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.subscribeAuthAccess]: "auth",
   [WS_METHODS.claudeSettingsRead]: "claude",
   [WS_METHODS.claudeSettingsWrite]: "claude",
+  [WS_METHODS.claudePluginsRead]: "claude",
+  [WS_METHODS.claudePluginsRun]: "claude",
 } as const satisfies Readonly<Record<WsRpcMethod, string>>;
 
 const RPC_SPAN_PREFIX = "ws.rpc";

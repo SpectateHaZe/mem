@@ -70,6 +70,7 @@ import { SettingResetButton, SettingsRow, SettingsSection } from "./settingsLayo
 import { AcpSessionManagementSection } from "./AcpSessionManagementSection";
 import { FoldedSettingsSection } from "./FoldedSettingsSection";
 import { readCodexSetupMode } from "./CodexSetupSection.logic";
+import { ClaudePluginsSection } from "./ClaudePluginsSection";
 import {
   getProviderVersionAdvisoryPresentation,
   PROVIDER_STATUS_STYLES,
@@ -1362,6 +1363,9 @@ export function ProviderInstanceCard({
           />
         </div>
       </SettingsSection>
+      {environmentId !== undefined && liveProvider?.driver === "claudeAgent" ? (
+        <ClaudePluginsSection environmentId={environmentId} readOnly={readOnly} />
+      ) : null}
       {environmentId !== undefined && liveProvider?.driver === "acpRegistry" ? (
         <AcpSessionManagementSection
           environmentId={environmentId}

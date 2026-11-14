@@ -255,10 +255,12 @@ import * as MemIdleTracker from "./overseer/MemIdleTracker.ts";
 import * as MemOverseerService from "./overseer/MemOverseerService.ts";
 import * as UsageService from "./usage/UsageService.ts";
 import {
+  claudeConfigForInstances,
   claudeSettingsConfigForInstances,
   readClaudeSettingsSnapshot,
   writeClaudeSettingsScope,
 } from "./provider/Drivers/ClaudeSettingsFiles.ts";
+import { readClaudePlugins, runClaudePluginAction } from "./provider/Drivers/ClaudePlugins.ts";
 import * as TraceDiagnostics from "./diagnostics/TraceDiagnostics.ts";
 import * as TriageService from "./triage/TriageService.ts";
 import * as PullRequestService from "./pullRequest/PullRequestService.ts";
@@ -2078,6 +2080,12 @@ export const layerWsRpc = (
         );
         return claudeSettingsConfigForInstances(deriveProviderInstanceConfigMap(settings));
       });
+      const claudeConfig = Effect.fnUntraced(function* () {
+        const settings = yield* serverSettings.getSettings.pipe(
+          Effect.orElseSucceed(() => DEFAULT_SERVER_SETTINGS),
+        );
+        return claudeConfigForInstances(deriveProviderInstanceConfigMap(settings));
+      });
 
       const handlers = ServerWsRpcGroup.of({
         [ORCHESTRATION_V2_WS_METHODS.dispatchCommand]: (command) =>
@@ -2823,6 +2831,12 @@ export const layerWsRpc = (
                 Effect.andThen(readClaudeSettingsSnapshot(config, input.cwd)),
               ),
             ),
+          ),
+        [WS_METHODS.claudePluginsRead]: (_input) =>
+          claudeConfig().pipe(Effect.flatMap(readClaudePlugins)),
+        [WS_METHODS.claudePluginsRun]: (input) =>
+          claudeConfig().pipe(
+            Effect.flatMap((config) => runClaudePluginAction(config, input.action, input.target)),
           ),
         [WS_METHODS.serverRetryResourceTelemetry]: (_input) => resourceTelemetry.retry,
         [WS_METHODS.serverCheckOtlpEndpoint]: (input) => otlpEndpointCheck.check(input),

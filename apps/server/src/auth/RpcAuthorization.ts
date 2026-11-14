@@ -229,6 +229,8 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.subscribeAuthAccess]: AuthAccessReadScope,
   [WS_METHODS.claudeSettingsRead]: AuthSettingsWriteScope,
   [WS_METHODS.claudeSettingsWrite]: AuthSettingsWriteScope,
+  [WS_METHODS.claudePluginsRead]: AuthSettingsWriteScope,
+  [WS_METHODS.claudePluginsRun]: AuthSettingsWriteScope,
 } as const satisfies Readonly<Record<WsRpcMethod, AuthEnvironmentScope>>;
 
 export function requiredScopeForRpcMethod(method: string): AuthEnvironmentScope {

@@ -26,6 +26,9 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.claudeSettingsWrite]: AuthSettingsWriteScope,
   // Those files can hold API keys under `env`, so reading them is as sensitive as writing.
   [WS_METHODS.claudeSettingsRead]: AuthSettingsWriteScope,
+  // Installs run plugin code on this machine; the list shows what it has.
+  [WS_METHODS.claudePluginsRun]: AuthSettingsWriteScope,
+  [WS_METHODS.claudePluginsRead]: AuthSettingsWriteScope,
   // Restarts the server, as an update does.
   [WS_METHODS.serverReclaimDatabaseSpace]: AuthEnvironmentMaintainScope,
   [WS_METHODS.serverCheckOtlpEndpoint]: AuthSettingsWriteScope,

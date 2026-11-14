@@ -117,6 +117,11 @@ import {
   ClaudeSettingsWriteInput,
 } from "./claudeSettings.ts";
 import {
+  ClaudePluginsError,
+  ClaudePluginsRunInput,
+  ClaudePluginsSnapshot,
+} from "./claudePlugins.ts";
+import {
   AuthAccessStreamError,
   AuthAccessStreamEvent,
   EnvironmentAuthorizationError,
@@ -592,6 +597,8 @@ export const WS_METHODS = {
   serverRefreshUsageRates: "server.refreshUsageRates",
   claudeSettingsRead: "claude.readSettings",
   claudeSettingsWrite: "claude.writeSettings",
+  claudePluginsRead: "claude.readPlugins",
+  claudePluginsRun: "claude.runPluginAction",
   computerUseSubscribe: "computerUse.subscribe",
   computerUseStop: "computerUse.stop",
 
@@ -1063,6 +1070,18 @@ const WsClaudeSettingsWriteRpc = Rpc.make(WS_METHODS.claudeSettingsWrite, {
   payload: ClaudeSettingsWriteInput,
   success: ClaudeSettingsSnapshot,
   error: Schema.Union([ClaudeSettingsWriteError, EnvironmentAuthorizationError]),
+});
+
+const WsClaudePluginsReadRpc = Rpc.make(WS_METHODS.claudePluginsRead, {
+  payload: Schema.Struct({}),
+  success: ClaudePluginsSnapshot,
+  error: EnvironmentAuthorizationError,
+});
+
+const WsClaudePluginsRunRpc = Rpc.make(WS_METHODS.claudePluginsRun, {
+  payload: ClaudePluginsRunInput,
+  success: ClaudePluginsSnapshot,
+  error: Schema.Union([ClaudePluginsError, EnvironmentAuthorizationError]),
 });
 
 const WsServerSignalProcessRpc = Rpc.make(WS_METHODS.serverSignalProcess, {
@@ -2306,6 +2325,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsServerRefreshUsageRatesRpc,
   WsClaudeSettingsReadRpc,
   WsClaudeSettingsWriteRpc,
+  WsClaudePluginsReadRpc,
+  WsClaudePluginsRunRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
   WsRoomsSubscribeRpc,

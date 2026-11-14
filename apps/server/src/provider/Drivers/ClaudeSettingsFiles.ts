@@ -63,7 +63,12 @@ const decodeClaudeSettingsConfig = Schema.decodeUnknownOption(ClaudeSettings);
  */
 export const claudeSettingsConfigForInstances = (
   instances: ProviderInstanceConfigMap,
-): Pick<ClaudeSettings, "homePath"> => {
+): Pick<ClaudeSettings, "homePath"> => ({
+  homePath: claudeConfigForInstances(instances).homePath,
+});
+
+/** The whole config of that same instance, for running its Claude binary. */
+export const claudeConfigForInstances = (instances: ProviderInstanceConfigMap): ClaudeSettings => {
   const claudeInstances = Object.entries(instances).filter(
     ([, instance]) => instance.driver === "claudeAgent",
   );
@@ -78,7 +83,7 @@ export const claudeSettingsConfigForInstances = (
     chosen === undefined
       ? undefined
       : Option.getOrUndefined(decodeClaudeSettingsConfig(chosen[1].config ?? {}));
-  return { homePath: config?.homePath ?? "" };
+  return config ?? Option.getOrThrow(decodeClaudeSettingsConfig({}));
 };
 
 const managedSettingsPath = (
