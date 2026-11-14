@@ -109,6 +109,8 @@ const RPC_AGGREGATES = {
   [WS_METHODS.lendAHandConnect]: "lend-a-hand",
   [WS_METHODS.lendAHandDisconnect]: "lend-a-hand",
   [WS_METHODS.lendAHandHelperSubscribe]: "lend-a-hand",
+  [WS_METHODS.lendAHandInvite]: "lend-a-hand",
+  [WS_METHODS.lendAHandAccept]: "lend-a-hand",
   [WS_METHODS.roomsSubscribe]: "rooms",
   [WS_METHODS.roomsCreate]: "rooms",
   [WS_METHODS.roomsSend]: "rooms",

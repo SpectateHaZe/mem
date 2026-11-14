@@ -78,6 +78,8 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
   [WS_METHODS.lendAHandHostEnd]: AuthAccessWriteScope,
   [WS_METHODS.lendAHandConnect]: AuthOrchestrationOperateScope,
   [WS_METHODS.lendAHandDisconnect]: AuthOrchestrationOperateScope,
+  [WS_METHODS.lendAHandInvite]: AuthOrchestrationOperateScope,
+  [WS_METHODS.lendAHandAccept]: AuthAccessWriteScope,
   [WS_METHODS.subagentReportsWatch]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueAdd]: AuthOrchestrationOperateScope,
   [WS_METHODS.queueSetPaused]: AuthOrchestrationOperateScope,

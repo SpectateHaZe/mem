@@ -37,3 +37,15 @@ environments.
   output capped at 100 KB per stream.
 - Desktop control needs the host on Windows or macOS (same code as computer use).
 - Traffic is encrypted but passes through Cloudflare.
+
+## Invites (the helper starts it)
+
+The helper can also start from their own chat: the hand icon → **Create an invite**. Their Mem
+opens a second short-lived quick tunnel that serves only `POST /hand/invite` behind a bearer
+secret, and shows a `mem-invite-…` code (same encoding as a hand code, different prefix, so the
+two never pass for each other). The host pastes it in Settings → Connections → **Let them in**;
+their Mem starts sharing as usual and posts the new hand code to the invite tunnel, and the
+helper's Mem connects that chat with it. The invite closes once used, withdrawn, or after 15
+minutes; a failed connect leaves it open for another try. The host still decides, and End or Esc
+still cuts access. Because the helper now runs cloudflared too, an invite needs the helper on
+Windows or an Apple Silicon Mac.

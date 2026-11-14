@@ -1371,6 +1371,14 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:lend-a-hand:disconnect",
       tag: WS_METHODS.lendAHandDisconnect,
     }),
+    inviteHand: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:invite",
+      tag: WS_METHODS.lendAHandInvite,
+    }),
+    acceptHandInvite: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:lend-a-hand:accept",
+      tag: WS_METHODS.lendAHandAccept,
+    }),
     queueLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:queue:live",
       tag: WS_METHODS.queueSubscribe,

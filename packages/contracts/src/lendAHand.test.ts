@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vite-plus/test";
 
-import { decodeHandCode, encodeHandCode } from "./lendAHand.ts";
+import { decodeHandCode, decodeInviteCode, encodeHandCode, encodeInviteCode } from "./lendAHand.ts";
 
 const SECRET = "s".repeat(43);
 
@@ -31,5 +31,16 @@ describe("hand codes", () => {
     ).toBeNull();
     expect(decodeHandCode("mem-hand-%%%")).toBeNull();
     expect(decodeHandCode("hello")).toBeNull();
+  });
+});
+
+describe("invite codes", () => {
+  it("round-trips, and never passes for a hand code or the other way round", () => {
+    const endpoint = { url: "https://calm-river-12.trycloudflare.com", secret: SECRET };
+    const invite = encodeInviteCode(endpoint);
+    expect(invite.startsWith("mem-invite-")).toBe(true);
+    expect(decodeInviteCode(invite)).toEqual(endpoint);
+    expect(decodeHandCode(invite)).toBeNull();
+    expect(decodeInviteCode(encodeHandCode(endpoint))).toBeNull();
   });
 });

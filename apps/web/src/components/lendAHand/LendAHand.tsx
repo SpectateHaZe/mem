@@ -62,7 +62,9 @@ const expiresLabel = (state: HandHostState) =>
 export function LendAHandSettings() {
   const environmentId = usePrimaryEnvironmentId();
   const { state, start, end } = useHandHost(environmentId);
+  const accept = useAtomCommand(serverEnvironment.acceptHandInvite, { reportFailure: false });
   const [busy, setBusy] = useState(false);
+  const [invite, setInvite] = useState("");
   if (environmentId === null) return null;
   const status = state?.status ?? "off";
 
@@ -72,6 +74,20 @@ export function LendAHandSettings() {
     setBusy(false);
     if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
       failureToast("Lend a Hand could not start", failureMessage(result, "Try again."));
+    }
+  };
+
+  const letIn = async () => {
+    if (busy || invite.trim() === "") return;
+    setBusy(true);
+    const result = await accept({ environmentId, input: { code: invite.trim() } });
+    setBusy(false);
+    if (result._tag === "Success") setInvite("");
+    else if (!isAtomCommandInterrupted(result)) {
+      failureToast(
+        "Couldn't let them in",
+        failureMessage(result, "Check the invite and try again."),
+      );
     }
   };
 
@@ -88,6 +104,28 @@ export function LendAHandSettings() {
           }
         >
           {state?.error ? <p className="text-muted-foreground text-xs">{state.error}</p> : null}
+        </SettingsRow>
+      ) : null}
+      {status === "off" ? (
+        <SettingsRow
+          title="Got an invite?"
+          description="Paste the invite someone sent you to let their chat work on this PC."
+          control={
+            <Button size="xs" disabled={busy || invite.trim() === ""} onClick={() => void letIn()}>
+              {busy ? "Connecting…" : "Let them in"}
+            </Button>
+          }
+        >
+          <Input
+            value={invite}
+            onChange={(event) => setInvite(event.target.value)}
+            placeholder="mem-invite-…"
+            disabled={busy}
+            nativeInput
+            spellCheck={false}
+            autoComplete="off"
+            aria-label="Invite code"
+          />
         </SettingsRow>
       ) : status === "starting" ? (
         <SettingsRow
@@ -192,11 +230,13 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
   const disconnect = useAtomCommand(serverEnvironment.disconnectHand, {
     label: "disconnect Lend a Hand",
   });
+  const createInvite = useAtomCommand(serverEnvironment.inviteHand, { reportFailure: false });
   const [open, setOpen] = useState(false);
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const formId = useId();
   const session = data?.sessions.find((candidate) => candidate.threadId === threadId) ?? null;
+  const invite = data?.invites.find((candidate) => candidate.threadId === threadId) ?? null;
 
   if (session !== null) {
     return (
@@ -213,6 +253,16 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
       </div>
     );
   }
+
+  const makeInvite = async () => {
+    if (busy) return;
+    setBusy(true);
+    const result = await createInvite({ environmentId, input: { threadId } });
+    setBusy(false);
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      failureToast("Couldn't create an invite", failureMessage(result, "Try again."));
+    }
+  };
 
   const submit = async () => {
     if (busy || code.trim() === "") return;
@@ -243,7 +293,7 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
       <DialogTrigger
         render={
           <Button size="xs" variant="ghost-muted" title="Lend a hand" aria-label="Lend a hand">
-            <HandIcon className="size-3.5" />
+            <HandIcon className={invite === null ? "size-3.5" : "size-3.5 text-primary"} />
           </Button>
         }
       />
@@ -251,29 +301,68 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
         <DialogHeader>
           <DialogTitle>Lend a hand</DialogTitle>
           <DialogDescription>
-            Paste the hand code someone sent you. This chat's agent can then work on their PC. No
-            other chat can.
+            Send an invite, or paste the hand code someone sent you. This chat's agent can then work
+            on their PC. No other chat can.
           </DialogDescription>
         </DialogHeader>
         <DialogPanel>
-          <form
-            id={formId}
-            autoComplete="off"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void submit();
-            }}
-          >
-            <Input
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-              placeholder="mem-hand-…"
-              disabled={busy}
-              autoFocus
-              nativeInput
-              spellCheck={false}
-            />
-          </form>
+          <div className="flex flex-col gap-3">
+            {invite === null ? (
+              <Button variant="outline" disabled={busy} onClick={() => void makeInvite()}>
+                {busy ? "Opening…" : "Create an invite"}
+              </Button>
+            ) : (
+              <div className="space-y-1.5">
+                <p className="text-muted-foreground text-xs">
+                  Send this to them. They paste it in Settings → Connections → Lend a hand, and this
+                  chat connects. It ends{" "}
+                  {formatRelativeTimeLabel(new Date(invite.expiresAtMs).toISOString())}.
+                </p>
+                <div className="flex items-center gap-2">
+                  <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">
+                    {invite.code}
+                  </code>
+                  <Button
+                    size="xs"
+                    variant="outline"
+                    onClick={() => {
+                      void writeTextToClipboard(invite.code).then(() =>
+                        toastManager.add({ type: "success", title: "Invite copied" }),
+                      );
+                    }}
+                  >
+                    Copy
+                  </Button>
+                  <Button
+                    size="xs"
+                    variant="ghost-muted"
+                    onClick={() => void disconnect({ environmentId, input: { threadId } })}
+                  >
+                    Withdraw
+                  </Button>
+                </div>
+              </div>
+            )}
+            <p className="text-muted-foreground text-xs">Or paste their hand code:</p>
+            <form
+              id={formId}
+              autoComplete="off"
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
+              <Input
+                value={code}
+                onChange={(event) => setCode(event.target.value)}
+                placeholder="mem-hand-…"
+                disabled={busy}
+                autoFocus
+                nativeInput
+                spellCheck={false}
+              />
+            </form>
+          </div>
         </DialogPanel>
         <DialogFooter variant="bare">
           <DialogClose disabled={busy} render={<Button variant="outline" type="button" />}>

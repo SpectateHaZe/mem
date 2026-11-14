@@ -1,15 +1,20 @@
-// @effect-diagnostics nodeBuiltinImport:off globalFetch:off -- HTTP to the host's tunnel, one request per tool call.
+// @effect-diagnostics nodeBuiltinImport:off globalFetch:off globalTimers:off globalTimersInEffect:off -- HTTP to the host's tunnel, and the invite listener the host's Mem posts its code to.
+import * as NodeCrypto from "node:crypto";
+import * as NodeHttp from "node:http";
 import * as NodeOS from "node:os";
 
 import {
   decodeHandCode,
+  encodeInviteCode,
   type HandEndpoint,
   HandError,
   type HandHelloResponse,
   HandHelloResponse as HandHelloResponseSchema,
   type HandHelperState,
+  HandInviteRequest,
   type ThreadId,
 } from "@t3tools/contracts";
+import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as Duration from "effect/Duration";
@@ -20,11 +25,17 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
+import * as ServerConfig from "../config.ts";
+import { ensureCloudflared, openTunnel } from "./cloudflared.ts";
+import { bearerMatches, readBody } from "./HandHost.ts";
+
 /** A fresh quick tunnel can take a few seconds to resolve; retry the first hello that long. */
 const HELLO_RETRIES = 7;
 const HELLO_RETRY = Duration.seconds(3);
 const CALL_TIMEOUT_MS = 150_000;
+const INVITE_TTL_MS = 15 * 60_000;
 const decodeHelloResponse = Schema.decodeUnknownEffect(HandHelloResponseSchema);
+const decodeInviteRequest = Schema.decodeUnknownSync(HandInviteRequest);
 
 export class HandHelper extends Context.Service<
   HandHelper,
@@ -33,7 +44,10 @@ export class HandHelper extends Context.Service<
       threadId: ThreadId,
       code: string,
     ) => Effect.Effect<HandHelloResponse, HandError>;
+    /** Disconnects this chat, or withdraws its invite. */
     readonly disconnect: (threadId: ThreadId) => Effect.Effect<HandHelperState>;
+    /** Opens an invite for this chat: the host pastes its code, and their Mem connects back. */
+    readonly invite: (threadId: ThreadId) => Effect.Effect<HandHelperState, HandError>;
     /** POSTs to the host this thread is connected to; the caller decodes the JSON reply. */
     readonly call: (
       threadId: ThreadId,
@@ -54,13 +68,28 @@ const post = (endpoint: HandEndpoint, route: string, body: unknown) =>
   });
 
 const make = Effect.gen(function* () {
-  const state = yield* SubscriptionRef.make<HandHelperState>({ sessions: [] });
+  const { stateDir } = yield* ServerConfig.ServerConfig;
+  const platform = yield* HostProcess.Platform;
+  const state = yield* SubscriptionRef.make<HandHelperState>({ sessions: [], invites: [] });
+  const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
   // Secrets stay here, never in the state clients read.
   const endpoints = new Map<ThreadId, HandEndpoint>();
+  // Each open invite's listener and tunnel, closed once used, withdrawn or expired.
+  const inviteClosers = new Map<ThreadId, () => void>();
+
+  const closeInvite = (threadId: ThreadId) => {
+    inviteClosers.get(threadId)?.();
+    inviteClosers.delete(threadId);
+    return SubscriptionRef.updateAndGet(state, (current) => ({
+      ...current,
+      invites: current.invites.filter((invite) => invite.threadId !== threadId),
+    }));
+  };
 
   const forget = (threadId: ThreadId) => {
     endpoints.delete(threadId);
     return SubscriptionRef.updateAndGet(state, (current) => ({
+      ...current,
       sessions: current.sessions.filter((session) => session.threadId !== threadId),
     }));
   };
@@ -122,6 +151,7 @@ const make = Effect.gen(function* () {
     const connectedAtMs = yield* Clock.currentTimeMillis;
     endpoints.set(threadId, endpoint);
     yield* SubscriptionRef.update(state, (current) => ({
+      ...current,
       sessions: [
         ...current.sessions.filter((session) => session.threadId !== threadId),
         { threadId, hostName: answer.hostName, platform: answer.platform, connectedAtMs },
@@ -167,11 +197,97 @@ const make = Effect.gen(function* () {
     return outcome.json;
   });
 
+  /** Serves POST /hand/invite: the host's Mem sends its hand code, and this chat connects with it. */
+  const serveInvite =
+    (threadId: ThreadId, secret: string) =>
+    (request: NodeHttp.IncomingMessage, response: NodeHttp.ServerResponse) => {
+      const reply = (status: number, body: unknown) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify(body));
+      };
+      if (
+        request.method !== "POST" ||
+        request.url !== "/hand/invite" ||
+        !bearerMatches(request.headers.authorization, secret)
+      ) {
+        return reply(404, { error: "Not found." });
+      }
+      readBody(request)
+        .then((body) => runPromise(connect(threadId, decodeInviteRequest(body).code)))
+        .then(
+          (answer) => {
+            reply(200, { hostName: answer.hostName });
+            void runPromise(closeInvite(threadId));
+          },
+          // A failed connect leaves the invite open, so the host can try again.
+          (error: unknown) =>
+            reply(400, {
+              error:
+                error instanceof Error && error.message !== ""
+                  ? error.message
+                  : "The helper's Mem could not connect.",
+            }),
+        );
+    };
+
+  const invite = Effect.fn("HandHelper.invite")(function* (threadId: ThreadId) {
+    yield* closeInvite(threadId);
+    const secret = NodeCrypto.randomBytes(32).toString("base64url");
+    const server = NodeHttp.createServer(serveInvite(threadId, secret));
+    const tunnel = yield* Effect.tryPromise({
+      try: async () => {
+        await new Promise<void>((resolve, reject) => {
+          server.once("error", reject);
+          server.listen(0, "127.0.0.1", () => resolve());
+        });
+        const address = server.address();
+        if (address === null || typeof address === "string") throw new Error("No local port.");
+        const executable = await ensureCloudflared(stateDir, platform);
+        return await openTunnel(executable, `http://127.0.0.1:${address.port}`);
+      },
+      catch: (cause) => {
+        server.close();
+        return new HandError({
+          message: cause instanceof Error ? cause.message : "The invite could not be opened.",
+        });
+      },
+    });
+    const timer = setTimeout(() => void runPromise(closeInvite(threadId)), INVITE_TTL_MS);
+    inviteClosers.set(threadId, () => {
+      clearTimeout(timer);
+      tunnel.close();
+      server.close();
+      server.closeAllConnections();
+    });
+    tunnel.onExit(() => void runPromise(closeInvite(threadId)));
+    const now = yield* Clock.currentTimeMillis;
+    return yield* SubscriptionRef.updateAndGet(state, (current) => ({
+      ...current,
+      invites: [
+        ...current.invites.filter((entry) => entry.threadId !== threadId),
+        {
+          threadId,
+          code: encodeInviteCode({ url: tunnel.url, secret }),
+          expiresAtMs: now + INVITE_TTL_MS,
+        },
+      ],
+    }));
+  });
+
+  yield* Effect.addFinalizer(() =>
+    Effect.sync(() => {
+      for (const close of inviteClosers.values()) close();
+      inviteClosers.clear();
+    }),
+  );
+
   return HandHelper.of({
     connect,
     disconnect: Effect.fn("HandHelper.disconnect")(function* (threadId: ThreadId) {
+      yield* closeInvite(threadId);
       return yield* forget(threadId);
     }),
+    invite,
     call,
     changes: SubscriptionRef.changes(state),
   });

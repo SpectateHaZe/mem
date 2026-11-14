@@ -111,6 +111,7 @@ import {
 import { ExternalLauncherError, LaunchEditorInput } from "./editor.ts";
 import { ComputerUseActivity, ComputerUseStopResult } from "./computer.ts";
 import {
+  HandAcceptInput,
   HandConnectInput,
   HandConnectResult,
   HandError,
@@ -615,6 +616,8 @@ export const WS_METHODS = {
   lendAHandConnect: "lendAHand.connect",
   lendAHandDisconnect: "lendAHand.disconnect",
   lendAHandHelperSubscribe: "lendAHand.helperSubscribe",
+  lendAHandInvite: "lendAHand.invite",
+  lendAHandAccept: "lendAHand.accept",
 
   roomsSubscribe: "rooms.subscribe",
   roomsCreate: "rooms.create",
@@ -2187,6 +2190,18 @@ const WsLendAHandDisconnectRpc = Rpc.make(WS_METHODS.lendAHandDisconnect, {
   error: EnvironmentAuthorizationError,
 });
 
+const WsLendAHandInviteRpc = Rpc.make(WS_METHODS.lendAHandInvite, {
+  payload: HandThreadInput,
+  success: HandHelperState,
+  error: Schema.Union([HandError, EnvironmentAuthorizationError]),
+});
+
+const WsLendAHandAcceptRpc = Rpc.make(WS_METHODS.lendAHandAccept, {
+  payload: HandAcceptInput,
+  success: HandHostState,
+  error: Schema.Union([HandError, EnvironmentAuthorizationError]),
+});
+
 const WsLendAHandHelperSubscribeRpc = Rpc.make(WS_METHODS.lendAHandHelperSubscribe, {
   payload: Schema.Struct({}),
   success: HandHelperState,
@@ -2395,6 +2410,8 @@ export const WsRpcGroup = RpcGroup.make(
   WsLendAHandConnectRpc,
   WsLendAHandDisconnectRpc,
   WsLendAHandHelperSubscribeRpc,
+  WsLendAHandInviteRpc,
+  WsLendAHandAcceptRpc,
   WsQueueSubscribeRpc,
   WsQueueAddRpc,
   WsQueueSetPausedRpc,

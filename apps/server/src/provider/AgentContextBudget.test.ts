@@ -51,7 +51,7 @@ import budget from "./agentContextBudget.json" with { type: "json" };
 // Registration only stores tool definitions, so the handlers' services are never called.
 const toolHandlerServices = Layer.mergeAll(
   ComputerUseActivity.layer,
-  HandHelper.layer,
+  Layer.mock(HandHelper.HandHelper)({}),
   Layer.mock(AssetSigner)({}),
   Layer.mock(DeviceService)({}),
   Layer.mock(DocumentText)({}),

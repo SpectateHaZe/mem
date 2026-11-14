@@ -1,4 +1,4 @@
-// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off globalTimersInEffect:off -- a private loopback listener and the helper's commands, both owned by this service.
+// @effect-diagnostics nodeBuiltinImport:off globalDate:off globalTimers:off globalTimersInEffect:off globalFetch:off -- a private loopback listener and the helper's commands, both owned by this service.
 import * as NodeChildProcess from "node:child_process";
 import * as NodeCrypto from "node:crypto";
 import * as NodeHttp from "node:http";
@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 
 import {
   type ComputerActInput,
+  decodeInviteCode,
   encodeHandCode,
   HandActInput,
   HandError,
@@ -43,6 +44,10 @@ const MAX_BODY_BYTES = 1024 * 1024;
 const MAX_STREAM_CHARS = 100_000;
 const DEFAULT_RUN_SECONDS = 60;
 const MAX_RUN_SECONDS = 120;
+/** The helper's Mem says hello back before answering, and a fresh tunnel can take a while. */
+const INVITE_POST_TIMEOUT_MS = 90_000;
+const INVITE_RETRIES = 7;
+const INVITE_RETRY_MS = 3_000;
 
 const decodeHello = Schema.decodeUnknownSync(HandHelloRequest);
 const decodeRun = Schema.decodeUnknownSync(HandRunInput);
@@ -62,6 +67,8 @@ export class HandHost extends Context.Service<
   {
     readonly start: () => Effect.Effect<HandHostState, HandError>;
     readonly end: (reason?: string) => Effect.Effect<HandHostState>;
+    /** Starts sharing and hands the new code to the helper chat waiting behind an invite code. */
+    readonly accept: (inviteCode: string) => Effect.Effect<HandHostState, HandError>;
     readonly changes: Stream.Stream<HandHostState>;
   }
 >()("t3/lendAHand/HandHost") {}
@@ -92,7 +99,11 @@ const runCommand = (platform: NodeJS.Platform, input: HandRunInput) => {
             "-NoProfile",
             "-NonInteractive",
             "-EncodedCommand",
-            Buffer.from(input.command, "utf16le").toString("base64"),
+            // Without this, progress records come back as CLIXML noise in stderr.
+            Buffer.from(
+              `$ProgressPreference = "SilentlyContinue"; ${input.command}`,
+              "utf16le",
+            ).toString("base64"),
           ],
         ]
       : ["/bin/sh", ["-c", input.command]];
@@ -120,7 +131,7 @@ const runCommand = (platform: NodeJS.Platform, input: HandRunInput) => {
   return { done, kill: () => child?.kill() };
 };
 
-const readBody = (request: NodeHttp.IncomingMessage) =>
+export const readBody = (request: NodeHttp.IncomingMessage) =>
   new Promise<unknown>((resolve, reject) => {
     const chunks: Array<Buffer> = [];
     let size = 0;
@@ -308,9 +319,63 @@ const make = Effect.gen(function* () {
     }));
   });
 
+  /** POSTs the hand code to the helper's invite listener, waiting out a tunnel still registering. */
+  const deliver = async (url: string, secret: string, code: string) => {
+    for (let attempt = 0; ; attempt++) {
+      const response = await fetch(`${url}/hand/invite`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${secret}`, "content-type": "application/json" },
+        body: JSON.stringify({ code }),
+        signal: AbortSignal.timeout(INVITE_POST_TIMEOUT_MS),
+      }).catch(() => undefined);
+      const status = response?.status;
+      if ((status === undefined || status === 502 || status === 530) && attempt < INVITE_RETRIES) {
+        await new Promise((resolve) => setTimeout(resolve, INVITE_RETRY_MS));
+        continue;
+      }
+      if (response === undefined || status === 502 || status === 530) {
+        throw new Error("Couldn't reach the helper's Mem. Ask them for a new invite.");
+      }
+      if (status === 404 || status === 410) {
+        throw new Error("That invite has ended or expired. Ask for a new one.");
+      }
+      if (!response.ok) {
+        const body = (await response.json().catch(() => ({}))) as { error?: unknown };
+        throw new Error(
+          typeof body.error === "string" ? body.error : `The helper's Mem answered ${status}.`,
+        );
+      }
+      return;
+    }
+  };
+
+  const accept = Effect.fn("HandHost.accept")(function* (inviteCode: string) {
+    const invite = decodeInviteCode(inviteCode);
+    if (invite === null) {
+      return yield* new HandError({
+        message: "That isn't an invite code. It starts with mem-invite-.",
+      });
+    }
+    const started = yield* start();
+    if (started.status !== "waiting" || started.code === null) {
+      return yield* new HandError({
+        message: "This PC is already being helped. End that session first.",
+      });
+    }
+    const code = started.code;
+    yield* Effect.tryPromise({
+      try: () => deliver(invite.url, invite.secret, code),
+      catch: (cause) =>
+        new HandError({
+          message: cause instanceof Error ? cause.message : "Couldn't reach the helper's Mem.",
+        }),
+    }).pipe(Effect.tapError((error) => end(error.message)));
+    return yield* SubscriptionRef.get(state);
+  });
+
   yield* Effect.addFinalizer(() => Effect.sync(teardown));
 
-  return HandHost.of({ start, end, changes: SubscriptionRef.changes(state) });
+  return HandHost.of({ start, end, accept, changes: SubscriptionRef.changes(state) });
 });
 
 export const layer = Layer.effect(HandHost, make);

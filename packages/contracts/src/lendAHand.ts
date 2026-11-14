@@ -10,6 +10,8 @@ import { ComputerActInput, ComputerActResult, ComputerScreenshotInput } from "./
  */
 
 const HAND_CODE_PREFIX = "mem-hand-";
+/** The reverse direction: a helper's chat waits behind this code for the host to let it in. */
+const INVITE_CODE_PREFIX = "mem-invite-";
 /** Quick tunnels only: a pasted code must not point the helper's server at an arbitrary host. */
 const TUNNEL_HOST = /^[a-z0-9-]+\.trycloudflare\.com$/;
 
@@ -22,25 +24,34 @@ const toBase64Url = (text: string) =>
   btoa(text).replaceAll("+", "-").replaceAll("/", "_").replace(/=+$/, "");
 const fromBase64Url = (text: string) => atob(text.replaceAll("-", "+").replaceAll("_", "/"));
 
-export const encodeHandCode = (endpoint: HandEndpoint): string =>
-  HAND_CODE_PREFIX + toBase64Url(JSON.stringify({ u: endpoint.url, s: endpoint.secret }));
+const encodeWith =
+  (prefix: string) =>
+  (endpoint: HandEndpoint): string =>
+    prefix + toBase64Url(JSON.stringify({ u: endpoint.url, s: endpoint.secret }));
 
-/** The endpoint a hand code names, or null for anything that is not a code from a quick tunnel. */
-export const decodeHandCode = (code: string): HandEndpoint | null => {
-  const trimmed = code.trim();
-  if (!trimmed.startsWith(HAND_CODE_PREFIX)) return null;
-  try {
-    const parsed: unknown = JSON.parse(fromBase64Url(trimmed.slice(HAND_CODE_PREFIX.length)));
-    if (typeof parsed !== "object" || parsed === null) return null;
-    const { u, s } = parsed as { u?: unknown; s?: unknown };
-    if (typeof u !== "string" || typeof s !== "string" || s.length < 32) return null;
-    const url = new URL(u);
-    if (url.protocol !== "https:" || !TUNNEL_HOST.test(url.hostname)) return null;
-    return { url: url.origin, secret: s };
-  } catch {
-    return null;
-  }
-};
+/** The endpoint a code names, or null for anything that is not a code from a quick tunnel. */
+const decodeWith =
+  (prefix: string) =>
+  (code: string): HandEndpoint | null => {
+    const trimmed = code.trim();
+    if (!trimmed.startsWith(prefix)) return null;
+    try {
+      const parsed: unknown = JSON.parse(fromBase64Url(trimmed.slice(prefix.length)));
+      if (typeof parsed !== "object" || parsed === null) return null;
+      const { u, s } = parsed as { u?: unknown; s?: unknown };
+      if (typeof u !== "string" || typeof s !== "string" || s.length < 32) return null;
+      const url = new URL(u);
+      if (url.protocol !== "https:" || !TUNNEL_HOST.test(url.hostname)) return null;
+      return { url: url.origin, secret: s };
+    } catch {
+      return null;
+    }
+  };
+
+export const encodeHandCode = encodeWith(HAND_CODE_PREFIX);
+export const decodeHandCode = decodeWith(HAND_CODE_PREFIX);
+export const encodeInviteCode = encodeWith(INVITE_CODE_PREFIX);
+export const decodeInviteCode = decodeWith(INVITE_CODE_PREFIX);
 
 // The wire protocol between the helper's server and the host's listener.
 
@@ -119,6 +130,11 @@ export const HandConnectInput = Schema.Struct({
 
 export const HandThreadInput = Schema.Struct({ threadId: ThreadId });
 
+/** The host pastes a helper's invite code to let that chat in. */
+export const HandAcceptInput = Schema.Struct({ code: TrimmedNonEmptyString });
+/** What the host's Mem posts to the helper's invite listener. */
+export const HandInviteRequest = Schema.Struct({ code: Schema.String });
+
 export const HandHelperSession = Schema.Struct({
   threadId: ThreadId,
   hostName: Schema.String,
@@ -127,7 +143,18 @@ export const HandHelperSession = Schema.Struct({
 });
 export type HandHelperSession = typeof HandHelperSession.Type;
 
-export const HandHelperState = Schema.Struct({ sessions: Schema.Array(HandHelperSession) });
+/** A chat waiting behind an invite code for the host to let it in. */
+export const HandHelperInvite = Schema.Struct({
+  threadId: ThreadId,
+  code: Schema.String,
+  expiresAtMs: Schema.Number,
+});
+export type HandHelperInvite = typeof HandHelperInvite.Type;
+
+export const HandHelperState = Schema.Struct({
+  sessions: Schema.Array(HandHelperSession),
+  invites: Schema.Array(HandHelperInvite),
+});
 export type HandHelperState = typeof HandHelperState.Type;
 
 export const HandConnectResult = Schema.Struct({ hostName: Schema.String });
