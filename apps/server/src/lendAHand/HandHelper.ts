@@ -34,6 +34,7 @@ const HELLO_RETRIES = 7;
 const HELLO_RETRY = Duration.seconds(3);
 const CALL_TIMEOUT_MS = 150_000;
 const INVITE_TTL_MS = 15 * 60_000;
+const INVITE_CLOSE_DELAY_MS = 10_000;
 const PING_RETRIES = 4;
 const PING_RETRY_MS = 2_000;
 const decodeHelloResponse = Schema.decodeUnknownEffect(HandHelloResponseSchema);
@@ -240,8 +241,12 @@ const make = Effect.gen(function* () {
         .then((body) => runPromise(connect(threadId, decodeInviteRequest(body).code)))
         .then(
           (answer) => {
+            // Closing the tunnel at once loses this reply on its way out (the host sees a 520),
+            // so give cloudflared a few seconds to deliver it first.
+            response.once("finish", () => {
+              setTimeout(() => void runPromise(closeInvite(threadId)), INVITE_CLOSE_DELAY_MS);
+            });
             reply(200, { hostName: answer.hostName });
-            void runPromise(closeInvite(threadId));
           },
           // A failed connect leaves the invite open, so the host can try again.
           (error: unknown) =>

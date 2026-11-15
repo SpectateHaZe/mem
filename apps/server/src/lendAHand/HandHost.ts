@@ -367,14 +367,18 @@ const make = Effect.gen(function* () {
       });
     }
     const code = started.code;
-    yield* Effect.tryPromise({
+    const delivered = yield* Effect.tryPromise({
       try: () => deliver(invite.url, invite.secret, code),
       catch: (cause) =>
         new HandError({
           message: cause instanceof Error ? cause.message : "Couldn't reach the helper's Mem.",
         }),
-    }).pipe(Effect.tapError((error) => end(error.message)));
-    return yield* SubscriptionRef.get(state);
+    }).pipe(Effect.result);
+    const after = yield* SubscriptionRef.get(state);
+    // The helper said hello, so the code arrived even if its reply got lost on the way back.
+    if (delivered._tag === "Success" || after.status === "connected") return after;
+    yield* end(delivered.failure.message);
+    return yield* delivered.failure;
   });
 
   yield* Effect.addFinalizer(() => Effect.sync(teardown));
