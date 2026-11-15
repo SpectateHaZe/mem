@@ -2396,10 +2396,6 @@ export const layerWsRpc = (
         [WS_METHODS.computerUseStop]: Effect.fn("ws.computerUseStop")(function* () {
           const target = yield* computerUseActivity.stop();
           if (target === null) return { stopped: false };
-          if (target.threadId === HandHost.HAND_CALLER.threadId) {
-            yield* handHost.end("Ended with Esc.");
-            return { stopped: true };
-          }
           yield* threadManagement
             .interruptThread({
               projectId: target.projectId,

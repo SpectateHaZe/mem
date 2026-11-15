@@ -210,7 +210,7 @@ const make = Effect.gen(function* () {
     if ([404, 410, 502, 530].includes(outcome.status)) {
       yield* forget(threadId);
       return yield* new HandError({
-        message: `The session ended (${outcome.status}): the other person pressed End or Esc, or closed Mem. Their Lend a hand screen says why.`,
+        message: `The session ended (${outcome.status}): the other person pressed End or closed Mem. Their Lend a hand screen says why.`,
       });
     }
     if (outcome.status !== 200) {

@@ -96,7 +96,7 @@ export function LendAHandSettings() {
       {status === "off" ? (
         <SettingsRow
           title="Ask someone for a hand"
-          description="Get a code to send someone who also has Mem. One chat in their Mem can then run commands, see your screen and use your mouse and keyboard, without asking first. Esc or End stops it at once."
+          description="Send a code to someone who has Mem. One chat in their Mem can then run commands, see your screen and use your mouse and keyboard without asking. Keep using your PC meanwhile; only End stops it."
           control={
             <Button size="xs" disabled={busy} onClick={() => void begin()}>
               {busy ? "Starting…" : "Ask for a hand"}

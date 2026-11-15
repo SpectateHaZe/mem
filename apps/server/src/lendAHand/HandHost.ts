@@ -15,8 +15,6 @@ import {
   type HandHostState,
   HandRunInput,
   type HandRunResult,
-  ProjectId,
-  ThreadId,
 } from "@t3tools/contracts";
 import * as HostProcess from "@t3tools/shared/HostProcess";
 import * as Context from "effect/Context";
@@ -26,16 +24,9 @@ import * as Schema from "effect/Schema";
 import * as Stream from "effect/Stream";
 import * as SubscriptionRef from "effect/SubscriptionRef";
 
-import * as ComputerUseActivity from "../computer/ComputerUseActivity.ts";
 import { captureScreen, performAct } from "../computer/desktop.ts";
 import * as ServerConfig from "../config.ts";
 import { ensureCloudflared, openTunnel, type Tunnel } from "./cloudflared.ts";
-
-/** The glow's owner while a helper drives: Esc on this id ends the session instead of a thread. */
-export const HAND_CALLER = {
-  threadId: ThreadId.make("lend-a-hand"),
-  projectId: ProjectId.make("lend-a-hand"),
-};
 
 const CODE_TTL_MS = 15 * 60_000;
 const SESSION_MAX_MS = 2 * 60 * 60_000;
@@ -167,7 +158,6 @@ const describeAct = (input: ComputerActInput) =>
 const make = Effect.gen(function* () {
   const { stateDir } = yield* ServerConfig.ServerConfig;
   const platform = yield* HostProcess.Platform;
-  const activity = yield* ComputerUseActivity.ComputerUseActivity;
   const state = yield* SubscriptionRef.make<HandHostState>(OFF);
   const runPromise = Effect.runPromiseWith(yield* Effect.context<never>());
 
@@ -201,9 +191,7 @@ const make = Effect.gen(function* () {
   };
 
   const end = Effect.fn("HandHost.end")(function* (reason?: string) {
-    const wasOn = session !== undefined;
     teardown();
-    if (wasOn) yield* activity.stop();
     return yield* SubscriptionRef.updateAndGet(state, (current): HandHostState => ({
       ...OFF,
       error: reason ?? null,
@@ -252,7 +240,6 @@ const make = Effect.gen(function* () {
       case "/hand/run": {
         const input = decodeRun(body);
         await log("run", input.command.slice(0, 300));
-        await runPromise(activity.act(HAND_CALLER, { action: "move" }));
         const command = runCommand(platform, input);
         current.running.add(command.kill);
         const result = await command.done.finally(() => current.running.delete(command.kill));
@@ -261,13 +248,11 @@ const make = Effect.gen(function* () {
       case "/hand/screenshot": {
         await log("screenshot", "Took a screenshot");
         const shot = await runPromise(captureScreen);
-        await runPromise(activity.screenshot(HAND_CALLER, shot));
         return reply(200, shot);
       }
       case "/hand/act": {
         const input = decodeAct(body);
         await log("act", describeAct(input));
-        await runPromise(activity.act(HAND_CALLER, input));
         return reply(200, await runPromise(performAct(input)));
       }
       default:

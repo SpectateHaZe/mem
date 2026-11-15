@@ -14,7 +14,7 @@ environments.
 4. That one chat's agent can now use `hand_run`, `hand_screenshot` and `hand_act` on the host's PC.
    No other chat or agent can. The agent acts freely: no approval per command.
 5. On the host: the screen glows while the agent works, a pill shows who is helping, every action
-   is listed live, and **End**, Esc, or quitting Mem ends access at once.
+   is listed live, and **End** or quitting Mem ends access at once.
 
 ## Decisions
 
@@ -27,7 +27,8 @@ environments.
   Pinned release, downloaded on first use, checked against a pinned SHA-256. Windows x64 and macOS
   arm64.
 - **Helper state is in memory**: a Mem restart forgets the connection; paste the code again.
-- **Esc on the host ends the session** (simpler and safer than pausing one action).
+- **Only End stops a session.** A helper session shows no glow and claims no Esc, so the host
+  keeps using the PC normally while the helper works (changed 2026-11-15: Esc kept ending it).
 - **v1 does not share the chat itself** with the host. They see the action list and talk to the
   helper elsewhere.
 
@@ -46,6 +47,6 @@ secret, and shows a `mem-invite-…` code (same encoding as a hand code, differe
 two never pass for each other). The host pastes it in Settings → Connections → **Let them in**;
 their Mem starts sharing as usual and posts the new hand code to the invite tunnel, and the
 helper's Mem connects that chat with it. The invite closes once used, withdrawn, or after 15
-minutes; a failed connect leaves it open for another try. The host still decides, and End or Esc
+minutes; a failed connect leaves it open for another try. The host still decides, and End
 still cuts access. Because the helper now runs cloudflared too, an invite needs the helper on
 Windows or an Apple Silicon Mac.
