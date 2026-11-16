@@ -20,7 +20,7 @@ import type { MouseEvent } from "react";
 
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
-import { useEnvironmentQuery } from "../../state/query";
+import { useEnvironmentQuery, useEnvironmentQueryRefresh } from "../../state/query";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { memSetPriority, memWatchedThreadsAtom } from "../mem/memOverseer";
 import { threadEnvironment } from "../../state/threads";
@@ -97,7 +97,9 @@ export function useThreadLifecycleMenu() {
   });
   const setPriority = useAtomCommand(memSetPriority, { label: "set Mem priority" });
   const environmentId = usePrimaryEnvironmentId();
-  const { data: watched } = useEnvironmentQuery(memWatchedThreadsAtom(environmentId));
+  const watchedAtom = memWatchedThreadsAtom(environmentId);
+  const { data: watched } = useEnvironmentQuery(watchedAtom);
+  const { refresh: refreshWatched } = useEnvironmentQueryRefresh(watchedAtom);
   const openMenu = (
     threadRef: ScopedThreadRef,
     thread: { readonly lifecycle?: ThreadLifecycle | undefined },
@@ -125,7 +127,7 @@ export function useThreadLifecycleMenu() {
             threadId: threadRef.threadId,
             priority: clicked.value.slice("priority:".length) as MemThreadPriority,
           },
-        });
+        }).then(refreshWatched);
         return;
       }
       const result = await setLifecycle({

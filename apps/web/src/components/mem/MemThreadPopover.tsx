@@ -4,11 +4,17 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { AuthOrchestrationOperateScope, ThreadId, type ScopedThreadRef } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  ThreadId,
+  type MemThreadPriority,
+  type ScopedThreadRef,
+} from "@t3tools/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
+import { useEnvironmentQuery, useEnvironmentQueryRefresh } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
 import { buildThreadRouteParams } from "~/threadRoutes";
@@ -16,7 +22,12 @@ import { buildThreadRouteParams } from "~/threadRoutes";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { PopoverTitle } from "../ui/popover";
-import { memAnswerApproval, memSetLifecycle } from "./memOverseer";
+import {
+  memAnswerApproval,
+  memSetLifecycle,
+  memSetPriority,
+  memWatchedThreadsAtom,
+} from "./memOverseer";
 import { memThreadSeed } from "./memThreadPrompt";
 import { useMemThreadData } from "./useMemThreadData";
 
@@ -39,7 +50,13 @@ export function MemThreadPopover(props: {
   const canOperate = useEnvironmentScope(threadRef.environmentId, AuthOrchestrationOperateScope);
   const setLifecycle = useAtomCommand(memSetLifecycle, { reportFailure: false });
   const answer = useAtomCommand(memAnswerApproval, { reportFailure: false });
-  const [busy, setBusy] = useState<"lifecycle" | "approval" | null>(null);
+  const setPriorityCommand = useAtomCommand(memSetPriority, { reportFailure: false });
+  const watchedAtom = memWatchedThreadsAtom(threadRef.environmentId);
+  const { data: watched } = useEnvironmentQuery(watchedAtom);
+  const { refresh: refreshWatched } = useEnvironmentQueryRefresh(watchedAtom);
+  const priority: MemThreadPriority =
+    watched?.threads.find((entry) => entry.threadId === threadRef.threadId)?.priority ?? "normal";
+  const [busy, setBusy] = useState<"lifecycle" | "approval" | "priority" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const watching = props.lifecycle === "in_progress";
 
@@ -58,6 +75,21 @@ export function MemThreadPopover(props: {
     } else if (result._tag === "Success") {
       refresh();
     }
+    setBusy(null);
+  };
+
+  const choosePriority = async (next: MemThreadPriority) => {
+    if (busy !== null || !canOperate || next === priority) return;
+    setBusy("priority");
+    setError(null);
+    const result = await setPriorityCommand({
+      environmentId: threadRef.environmentId,
+      input: { threadId: threadRef.threadId, priority: next },
+    });
+    if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
+      setError(failureMessage(squashAtomCommandFailure(result), "Could not set Mem's priority."));
+    }
+    refreshWatched();
     setBusy(null);
   };
 
@@ -177,6 +209,24 @@ export function MemThreadPopover(props: {
           Ask Mem
         </Button>
       </div>
+
+      {watching ? (
+        <div className="flex items-center gap-2">
+          <span className="text-muted-foreground text-xs">Mem priority</span>
+          {(["high", "normal", "low"] as const).map((level) => (
+            <Button
+              key={level}
+              aria-pressed={priority === level}
+              disabled={!canOperate || busy !== null}
+              onClick={() => void choosePriority(level)}
+              size="compact"
+              variant={priority === level ? "default" : "outline"}
+            >
+              {level === "high" ? "High" : level === "normal" ? "Normal" : "Low"}
+            </Button>
+          ))}
+        </div>
+      ) : null}
 
       {error === null ? null : (
         <p className="text-destructive text-xs" role="alert">
