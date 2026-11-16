@@ -1,6 +1,8 @@
 import { makeAssistantStreamingFilter } from "./assistantStreaming.ts";
+import { withMemMasterRole } from "../overseer/MemMasterThread.ts";
 import { resolveProjectSettings } from "@t3tools/shared/projectSettings";
 import {
+  isMemMasterThread,
   isOrchestrationV2WorkActive,
   CommandId,
   type EventId,
@@ -1709,7 +1711,10 @@ export const layer: Layer.Layer<
           attemptId: input.attemptId,
           rootNodeId: input.rootNode.id,
           providerThread: input.providerThread,
-          message: input.message,
+          // Mem's own thread routes project work to project sessions; the role rides on every turn.
+          message: isMemMasterThread(input.appThread)
+            ? { ...input.message, text: withMemMasterRole(input.message.text) }
+            : input.message,
           modelSelection: input.modelSelection,
           runtimePolicy: input.runtimePolicy,
           ...(appContext.length === 0 ? {} : { appContext }),
