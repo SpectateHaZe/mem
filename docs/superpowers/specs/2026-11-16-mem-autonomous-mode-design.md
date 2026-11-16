@@ -124,7 +124,9 @@ working on threads not marked in progress.
 - New settings field: `autonomous: Boolean` (decode default false) on `MemOverseerSettings`.
 - New task-record fields: `waitingUntilMs: NullOr(Number)`, `roundSummaries: Array(String)`
   (decode defaults, so existing records still load).
-- The UI toggle belongs next to the existing "enabled" switch in Mem's overseer settings.
+- The UI toggle lives under Mem's card in the sidebar, shown only while Mem's chat is open (owner,
+  2026-11-16; it was in Mem's overseer settings at first). Switching it on starts a tick on the next
+  5-second scheduler pass instead of waiting out the once-a-minute gate.
 - Tests: the reducer/loop decisions are pure (`MemOverseerLoop.ts`) — cover accept → new round,
   limit → wait, cap → wait, hook failure → rejection, nothing changed → rejection, off → no
   delivery.

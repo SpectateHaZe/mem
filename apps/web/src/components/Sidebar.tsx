@@ -283,6 +283,7 @@ import {
   scratchProjectKeysOf,
   sidebarSurfaceSchema,
 } from "./sidebar/sidebarSurface";
+import { MemAutonomousToggle } from "./mem/MemAutonomousToggle";
 import { MemMasterCard } from "./mem/MemMasterCard";
 import { Separator } from "./ui/separator";
 
@@ -3319,6 +3320,9 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
                     )
                   }
                 />
+                {memMasterThreadKey === routeThreadKey ? (
+                  <MemAutonomousToggle environmentId={memMasterThread.environmentId} />
+                ) : null}
                 <Separator className="mt-2" />
               </div>
             )}

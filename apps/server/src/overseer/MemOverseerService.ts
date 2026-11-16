@@ -42,6 +42,7 @@ import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Semaphore from "effect/Semaphore";
+import * as Stream from "effect/Stream";
 
 import {
   byPriority,
@@ -2215,6 +2216,14 @@ const make = Effect.gen(function* () {
   });
 
   yield* scheduler.register("mem-overseer", gated);
+  // Switching autonomous on starts work on the next scheduler pass, not up to a minute later.
+  yield* settings.streamChanges.pipe(
+    Stream.map((current) => current.mem.enabled && current.mem.autonomous),
+    Stream.changes,
+    Stream.filter((on) => on),
+    Stream.runForEach(() => Ref.set(lastTickMs, 0)),
+    Effect.forkScoped,
+  );
 
   return MemOverseerService.of(service);
 });
