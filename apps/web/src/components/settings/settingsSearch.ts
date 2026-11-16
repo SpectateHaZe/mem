@@ -606,6 +606,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     ],
   },
   {
+    id: "mem-autonomous",
+    title: "Autonomous mode",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [
+      "autonomous nonstop continuous keep working improve in progress commit priority usage limit",
+    ],
+  },
+  {
     id: "mem-spending-cap",
     title: "Spending cap per day",
     to: "/settings/threads",

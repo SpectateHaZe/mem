@@ -10,6 +10,10 @@ const thread = (threadId: string, sentAtMs: number | null): MemWatchedThread => 
   lastInstruction: null,
   spendUsd: 0,
   pendingApproval: false,
+  priority: "normal",
+  waitingUntilMs: null,
+  waitingFor: null,
+  roundSummaries: [],
   sentInstruction: sentAtMs === null ? null : `fix ${threadId}`,
   sentAtMs,
 });

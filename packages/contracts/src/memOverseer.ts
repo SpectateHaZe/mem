@@ -62,6 +62,11 @@ NEXT INSTRUCTION:
 export const MemOverseerSettings = Schema.Struct({
   /** Mem only acts while this is on. The switch exists so a long lunch cannot hand over the repo. */
   enabled: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /**
+   * Autonomous mode: Mem acts as if the owner were away, commits each accepted round, and starts the
+   * next improvement instead of finishing, until this is off. Usage limits and the cap only pause it.
+   */
+  autonomous: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   /** Rolling 24-hour stop for money. Reaching it parks every claimed task until spend ages out. */
   spendingCapUsd: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(5))),
   /** Folder Mem creates new project checkouts in when no existing session fits the task. */
@@ -98,6 +103,10 @@ export const DEFAULT_MEM_OVERSEER_SETTINGS: MemOverseerSettings = Schema.decodeS
 export const MemThreadLifecycle = Schema.Literals(["none", "in_progress", "complete", "abandoned"]);
 export type MemThreadLifecycle = typeof MemThreadLifecycle.Type;
 
+/** Which in-progress threads Mem serves first; near a usage limit only the highest present runs. */
+export const MemThreadPriority = Schema.Literals(["high", "normal", "low"]);
+export type MemThreadPriority = typeof MemThreadPriority.Type;
+
 export const MemWatchedThread = Schema.Struct({
   threadId: Schema.String,
   phase: Schema.Literals(["claimed", "awaitingReview", "accepted", "escalated", "parked"]),
@@ -108,6 +117,12 @@ export const MemWatchedThread = Schema.Struct({
   /** The last message Mem actually posted in the thread, and when. */
   sentInstruction: Schema.NullOr(Schema.String),
   sentAtMs: Schema.NullOr(Schema.Number),
+  priority: MemThreadPriority,
+  /** Autonomous mode is waiting out a usage limit or the spending cap until then. */
+  waitingUntilMs: Schema.NullOr(Schema.Number),
+  waitingFor: Schema.NullOr(Schema.Literals(["usage", "budget"])),
+  /** Accepted autonomous rounds, newest last. */
+  roundSummaries: Schema.Array(Schema.String),
 });
 export type MemWatchedThread = typeof MemWatchedThread.Type;
 
@@ -155,6 +170,12 @@ export const MemSetLifecycleInput = Schema.Struct({
   lifecycle: MemThreadLifecycle,
 });
 export type MemSetLifecycleInput = typeof MemSetLifecycleInput.Type;
+
+export const MemSetPriorityInput = Schema.Struct({
+  threadId: TrimmedString,
+  priority: MemThreadPriority,
+});
+export type MemSetPriorityInput = typeof MemSetPriorityInput.Type;
 
 export const MemSpawnSessionInput = Schema.Struct({
   /** The session's first message; also the title when none is given. */

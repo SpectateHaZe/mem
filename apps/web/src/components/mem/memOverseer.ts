@@ -49,6 +49,11 @@ export const memSetLifecycle = createEnvironmentRpcCommand(connectionAtomRuntime
   tag: WS_METHODS.memOverseerSetLifecycle,
 });
 
+export const memSetPriority = createEnvironmentRpcCommand(connectionAtomRuntime, {
+  label: "environment-data:mem-overseer:set-priority",
+  tag: WS_METHODS.memOverseerSetPriority,
+});
+
 export const memThreadStateAtom = (threadRef: ScopedThreadRef | null) =>
   threadRef === null
     ? null

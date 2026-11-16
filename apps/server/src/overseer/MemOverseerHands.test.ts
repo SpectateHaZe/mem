@@ -128,6 +128,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
       completed.push(target.threadId);
       return Effect.void;
     },
+    commitRound: () => Effect.succeed({ type: "committed" as const }),
     setLifecycle: (threadId, lifecycle) => {
       lifecycles.push(`${threadId}:${lifecycle}`);
       return Effect.void;
@@ -426,6 +427,10 @@ describe("MemOverseerService.listWatched", () => {
         pendingApproval: false,
         sentInstruction: REJECTED_INSTRUCTION,
         sentAtMs: 2,
+        priority: "normal",
+        waitingUntilMs: null,
+        waitingFor: null,
+        roundSummaries: [],
       },
       {
         threadId: "thread-2",
@@ -436,6 +441,10 @@ describe("MemOverseerService.listWatched", () => {
         pendingApproval: true,
         sentInstruction: null,
         sentAtMs: null,
+        priority: "normal",
+        waitingUntilMs: null,
+        waitingFor: null,
+        roundSummaries: [],
       },
     ]);
   });

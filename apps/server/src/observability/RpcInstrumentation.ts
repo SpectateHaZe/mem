@@ -100,6 +100,7 @@ const RPC_AGGREGATES = {
   [WS_METHODS.memOverseerReviewThread]: "memOverseer",
   [WS_METHODS.memOverseerSendInstruction]: "memOverseer",
   [WS_METHODS.memOverseerSetLifecycle]: "memOverseer",
+  [WS_METHODS.memOverseerSetPriority]: "memOverseer",
   [WS_METHODS.memOverseerSpawnSession]: "memOverseer",
   [WS_METHODS.computerUseSubscribe]: "server",
   [WS_METHODS.computerUseStop]: "server",

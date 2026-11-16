@@ -122,6 +122,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.memOverseerReviewThread]: AuthOrchestrationOperateScope,
   [WS_METHODS.memOverseerSendInstruction]: AuthOrchestrationOperateScope,
   [WS_METHODS.memOverseerSetLifecycle]: AuthOrchestrationOperateScope,
+  [WS_METHODS.memOverseerSetPriority]: AuthOrchestrationOperateScope,
   [WS_METHODS.memOverseerSpawnSession]: AuthOrchestrationOperateScope,
   [WS_METHODS.computerUseSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,

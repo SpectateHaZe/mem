@@ -2885,6 +2885,8 @@ export const layerWsRpc = (
           memOverseer.sendInstruction(input.threadId, input.instruction),
         [WS_METHODS.memOverseerSetLifecycle]: (input) =>
           memOverseer.setLifecycle(input.threadId, input.lifecycle),
+        [WS_METHODS.memOverseerSetPriority]: (input) =>
+          memOverseer.setPriority(input.threadId, input.priority),
         [WS_METHODS.memOverseerSpawnSession]: (input) => memOverseer.spawnSession(input),
         [WS_METHODS.cloudGetRelayClientStatus]: (_input) => relayClient.resolve,
         [WS_METHODS.cloudInstallRelayClient]: (_input) =>

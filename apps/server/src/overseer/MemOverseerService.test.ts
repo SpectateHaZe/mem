@@ -20,12 +20,14 @@ import { isDestructiveDeletion, type MemDestructiveSignals } from "./MemDestruct
 import * as MemIdleTracker from "./MemIdleTracker.ts";
 import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
+  changedPathsFromPorcelain,
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_APPROVAL_TIMEOUT_MS,
   MEM_ESTIMATED_REVIEW_USD,
   MEM_ESTIMATED_TURN_USD,
   MemOverseerFailure,
+  type MemCommitOutcome,
   type MemOverseerPorts,
   type MemOverseerReviewRequest,
   type MemOverseerThread,
@@ -103,11 +105,13 @@ interface HarnessOptions {
   /** Ledger entries already spent, so a test can start near the cap. */
   readonly spend?: ReadonlyArray<MemSpendEntry>;
   readonly modelSelection?: ModelSelection | null;
+  readonly commit?: MemCommitOutcome;
 }
 
 const makeHarness = (options: HarnessOptions = {}) => {
   const sent: string[] = [];
   const completed: string[] = [];
+  const commits: string[] = [];
   const reviews: MemOverseerReviewRequest[] = [];
   const plans: MemOverseerThread[] = [];
   const store = options.store ?? new Map<string, MemOverseerTaskRecord>();
@@ -163,6 +167,10 @@ const makeHarness = (options: HarnessOptions = {}) => {
       completed.push(target.threadId);
       return Effect.void;
     },
+    commitRound: (_target, summary) => {
+      commits.push(summary);
+      return Effect.succeed(options.commit ?? { type: "committed" });
+    },
     setLifecycle: () => Effect.void,
     findProjectForDirectory: () => Effect.succeed("project-1"),
     findMasterThreadId: () => Effect.undefined,
@@ -200,6 +208,7 @@ const makeHarness = (options: HarnessOptions = {}) => {
     sent,
     plans,
     completed,
+    commits,
     reviews,
     store,
     spend,
@@ -895,5 +904,105 @@ describe("destructive deletion classifier", () => {
     expect(isDestructiveDeletion(signals({ deletedLines: 199, deletedFiles: ["a.ts"] }))).toBe(
       false,
     );
+  });
+});
+
+describe("MemOverseerService autonomous mode", () => {
+  const autonomous = { autonomous: true } as const;
+
+  it("commits an accepted round and starts the next improvement instead of completing", async () => {
+    const harness = makeHarness({
+      mem: autonomous,
+      away: false,
+      threads: [thread({ evidence: "Done.\nImproved: the parser fails closed" })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.completed).toStrictEqual([]);
+    expect(harness.commits).toStrictEqual(["the parser fails closed"]);
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent[0]).toContain("most valuable improvement");
+    expect(harness.sent[0]).toContain("- the parser fails closed");
+    const record = harness.store.get("thread-1");
+    expect(record?.task.phase).toBe("claimed");
+    expect(record?.task.rejections).toBe(0);
+    expect(record?.roundSummaries).toStrictEqual(["the parser fails closed"]);
+  });
+
+  it("sends a failed commit back as a correction rather than starting a round", async () => {
+    const harness = makeHarness({
+      mem: autonomous,
+      review: () => Effect.succeed(ACCEPT),
+      commit: { type: "failed", output: "lint: 2 errors" },
+    });
+
+    await run(harness.tick());
+
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent[0]).toContain("lint: 2 errors");
+    const record = harness.store.get("thread-1");
+    expect(record?.task.rejections).toBe(1);
+    expect(record?.roundSummaries).toStrictEqual([]);
+  });
+
+  it("waits out a full usage window instead of reviewing", async () => {
+    const resetsAtMs = 4_102_444_800_000;
+    const harness = makeHarness({
+      mem: autonomous,
+      threads: [thread({ usage: { limited: true, windows: [{ usedPercent: 100, resetsAtMs }] } })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toStrictEqual([]);
+    expect(harness.sent).toStrictEqual([]);
+    const record = harness.store.get("thread-1");
+    expect(record?.waitingFor).toBe("usage");
+    expect(record?.waitingUntilMs).toBeGreaterThan(resetsAtMs);
+  });
+
+  it("waits for the spending cap instead of parking", async () => {
+    const harness = makeHarness({
+      mem: { ...autonomous, spendingCapUsd: 0.01 },
+      spend: [{ atMs: NEVER_EXPIRES_MS, usd: 1, threadId: "thread-1" }],
+    });
+
+    await run(harness.tick());
+
+    const record = harness.store.get("thread-1");
+    expect(record?.task.phase).not.toBe("parked");
+    expect(record?.waitingFor).toBe("budget");
+    expect(harness.sent).toStrictEqual([]);
+  });
+
+  it("near a usage limit, serves only the highest-priority thread", async () => {
+    const nearly = { limited: false, windows: [{ usedPercent: 95, resetsAtMs: null }] };
+    const store = new Map<string, MemOverseerTaskRecord>([
+      ["thread-1", { ...newTaskRecord("thread-1", 1), priority: "low" }],
+      ["thread-2", { ...newTaskRecord("thread-2", 1), priority: "high" }],
+    ]);
+    const harness = makeHarness({
+      mem: autonomous,
+      store,
+      threads: [
+        thread({ usage: nearly }),
+        thread({ threadId: ThreadId.make("thread-2"), usage: nearly }),
+      ],
+    });
+
+    await run(harness.tick());
+
+    expect(harness.plans.map((entry) => entry.threadId)).toStrictEqual(["thread-2"]);
+  });
+});
+
+describe("changedPathsFromPorcelain", () => {
+  it("reads paths and skips a rename's source", () => {
+    expect(
+      changedPathsFromPorcelain(" M src/a.ts\0?? new file.ts\0R  b.ts\0old-b.ts\0 D gone.ts\0"),
+    ).toStrictEqual(["src/a.ts", "new file.ts", "b.ts", "gone.ts"]);
   });
 });

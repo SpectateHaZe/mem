@@ -41,6 +41,7 @@ import {
   MemSendInstructionInput,
   MemSendInstructionResult,
   MemSetLifecycleInput,
+  MemSetPriorityInput,
   MemSpawnSessionInput,
   MemSpawnSessionResult,
   MemThreadIdInput,
@@ -601,6 +602,7 @@ export const WS_METHODS = {
   memOverseerReviewThread: "memOverseer.reviewThread",
   memOverseerSendInstruction: "memOverseer.sendInstruction",
   memOverseerSetLifecycle: "memOverseer.setLifecycle",
+  memOverseerSetPriority: "memOverseer.setPriority",
   memOverseerSpawnSession: "memOverseer.spawnSession",
   serverGetUsageSummary: "server.getUsageSummary",
   serverRefreshUsageRates: "server.refreshUsageRates",
@@ -1166,6 +1168,11 @@ const WsMemOverseerSendInstructionRpc = Rpc.make(WS_METHODS.memOverseerSendInstr
 
 const WsMemOverseerSetLifecycleRpc = Rpc.make(WS_METHODS.memOverseerSetLifecycle, {
   payload: MemSetLifecycleInput,
+  error: MemOverseerRpcError,
+});
+
+const WsMemOverseerSetPriorityRpc = Rpc.make(WS_METHODS.memOverseerSetPriority, {
+  payload: MemSetPriorityInput,
   error: MemOverseerRpcError,
 });
 
@@ -2432,6 +2439,7 @@ export const WsRpcGroup = RpcGroup.make(
   WsMemOverseerReviewThreadRpc,
   WsMemOverseerSendInstructionRpc,
   WsMemOverseerSetLifecycleRpc,
+  WsMemOverseerSetPriorityRpc,
   WsMemOverseerSpawnSessionRpc,
   WsCloudGetRelayClientStatusRpc,
   WsCloudInstallRelayClientRpc,

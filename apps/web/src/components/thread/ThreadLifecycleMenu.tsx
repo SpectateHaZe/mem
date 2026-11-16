@@ -1,4 +1,4 @@
-import type { ContextMenuItem, ScopedThreadRef } from "@t3tools/contracts";
+import type { ContextMenuItem, MemThreadPriority, ScopedThreadRef } from "@t3tools/contracts";
 import {
   THREAD_LIFECYCLES,
   threadLifecycleOf,
@@ -20,8 +20,12 @@ import type { MouseEvent } from "react";
 
 import { cn } from "../../lib/utils";
 import { readLocalApi } from "../../localApi";
+import { useEnvironmentQuery } from "../../state/query";
+import { useAtomCommand } from "../../state/use-atom-command";
+import { memSetPriority, memWatchedThreadsAtom } from "../mem/memOverseer";
 import { threadEnvironment } from "../../state/threads";
 import { useOrchestrationCommand } from "../../state/use-orchestration-command";
+import { usePrimaryEnvironmentId } from "../../state/environments";
 import { stackedThreadToast, toastManager } from "../ui/toast";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
@@ -54,20 +58,46 @@ const THREAD_LIFECYCLE_PRESENTATION: Record<ThreadLifecycle, ThreadLifecyclePres
   },
 };
 
+type PriorityMenuId = `priority:${MemThreadPriority}`;
+type LifecycleMenuId = ThreadLifecycle | "priority" | PriorityMenuId;
+
+const PRIORITY_LABELS: Record<MemThreadPriority, string> = {
+  high: "High",
+  normal: "Normal",
+  low: "Low",
+};
+
+/** Mem serves high-priority sessions first, and near a usage limit only those. */
 function buildThreadLifecycleMenuItems(
   current: ThreadLifecycle,
-): ReadonlyArray<ContextMenuItem<ThreadLifecycle>> {
-  return THREAD_LIFECYCLES.map((lifecycle) => ({
-    id: lifecycle,
-    label: THREAD_LIFECYCLE_PRESENTATION[lifecycle].label,
-    checked: lifecycle === current,
-  }));
+  priority: MemThreadPriority,
+): ReadonlyArray<ContextMenuItem<LifecycleMenuId>> {
+  return [
+    ...THREAD_LIFECYCLES.map((lifecycle) => ({
+      id: lifecycle,
+      label: THREAD_LIFECYCLE_PRESENTATION[lifecycle].label,
+      checked: lifecycle === current,
+    })),
+    {
+      id: "priority" as const,
+      label: "Mem priority",
+      separatorBefore: true,
+      children: (["high", "normal", "low"] as const).map((level) => ({
+        id: `priority:${level}` as const,
+        label: PRIORITY_LABELS[level],
+        checked: level === priority,
+      })),
+    },
+  ];
 }
 
 export function useThreadLifecycleMenu() {
   const setLifecycle = useOrchestrationCommand(threadEnvironment.setLifecycle, {
     reportFailure: false,
   });
+  const setPriority = useAtomCommand(memSetPriority, { label: "set Mem priority" });
+  const environmentId = usePrimaryEnvironmentId();
+  const { data: watched } = useEnvironmentQuery(memWatchedThreadsAtom(environmentId));
   const openMenu = (
     threadRef: ScopedThreadRef,
     thread: { readonly lifecycle?: ThreadLifecycle | undefined },
@@ -77,14 +107,30 @@ export function useThreadLifecycleMenu() {
       const api = readLocalApi();
       if (!api) return;
       const current = threadLifecycleOf(thread);
+      // Priorities live with this environment's Mem; another environment's thread reads as normal.
+      const priority =
+        threadRef.environmentId === environmentId
+          ? (watched?.threads.find((entry) => entry.threadId === threadRef.threadId)?.priority ??
+            "normal")
+          : "normal";
       const clicked = await settlePromise(() =>
-        api.contextMenu.show(buildThreadLifecycleMenuItems(current), position),
+        api.contextMenu.show(buildThreadLifecycleMenuItems(current, priority), position),
       );
       if (clicked._tag === "Failure" || clicked.value === null) return;
-      if (clicked.value === current) return;
+      if (clicked.value === current || clicked.value === "priority") return;
+      if (clicked.value.startsWith("priority:")) {
+        void setPriority({
+          environmentId: threadRef.environmentId,
+          input: {
+            threadId: threadRef.threadId,
+            priority: clicked.value.slice("priority:".length) as MemThreadPriority,
+          },
+        });
+        return;
+      }
       const result = await setLifecycle({
         environmentId: threadRef.environmentId,
-        input: { threadId: threadRef.threadId, lifecycle: clicked.value },
+        input: { threadId: threadRef.threadId, lifecycle: clicked.value as ThreadLifecycle },
       });
       if (result._tag === "Failure" && !isAtomCommandInterrupted(result)) {
         const error = squashAtomCommandFailure(result);

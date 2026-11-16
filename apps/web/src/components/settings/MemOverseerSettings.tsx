@@ -29,6 +29,7 @@ import {
   SettingsRow,
   SettingsSection,
 } from "./settingsLayout";
+import { MemAutonomousStatus } from "../mem/MemAutonomousStatus";
 import { useScopedModelDisabledReason } from "./useScopedModelAvailability";
 import {
   useScopedSettings,
@@ -163,6 +164,24 @@ export function MemOverseerSettingsSection() {
           />
         }
       />
+      <SettingsRow
+        serverScoped
+        settingKeys={["mem"]}
+        {...searchableSetting("mem-autonomous")}
+        description="Mem keeps improving how your in-progress sessions look and work, round after round, committing each one. It only pauses for usage limits and the cap, and never pushes."
+        control={
+          <ScopedSwitch
+            settingKeys={["mem"]}
+            checked={mem.autonomous}
+            onCheckedChange={(checked) =>
+              update(checked ? { autonomous: true, enabled: true } : { autonomous: false })
+            }
+            aria-label="Autonomous mode"
+          />
+        }
+      >
+        {mem.autonomous ? <MemAutonomousStatus environmentId={environmentId} /> : null}
+      </SettingsRow>
       <SettingsRow
         serverScoped
         settingKeys={["mem"]}

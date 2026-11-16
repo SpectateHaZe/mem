@@ -6,6 +6,7 @@
  * bounded to the threads Mem has claimed and pruned oldest-first.
  */
 
+import type { MemThreadPriority } from "@t3tools/contracts";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -64,6 +65,12 @@ export interface MemOverseerTaskRecord {
   /** A `mode: "ask"` instruction waiting for the owner, cleared by an answer or by the clock. */
   readonly pendingApproval: MemPendingApprovalRecord | null;
   readonly lastGuideSource: MemGuideSource | null;
+  readonly priority: MemThreadPriority;
+  /** Autonomous mode skips the thread until then, waiting out a usage limit or the cap. */
+  readonly waitingUntilMs: number | null;
+  readonly waitingFor: "usage" | "budget" | null;
+  /** One line per accepted autonomous round, newest last, so the next round won't repeat one. */
+  readonly roundSummaries: ReadonlyArray<string>;
   readonly updatedAtMs: number;
 }
 
@@ -83,6 +90,10 @@ export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskR
   settledPhase: null,
   pendingApproval: null,
   lastGuideSource: null,
+  priority: "normal",
+  waitingUntilMs: null,
+  waitingFor: null,
+  roundSummaries: [],
   updatedAtMs: nowMs,
 });
 
@@ -123,6 +134,11 @@ const PersistedTaskRecord = Schema.Struct({
   // Optional so a file written before approvals existed still decodes.
   pendingApproval: Schema.optionalKey(Schema.NullOr(PersistedPendingApproval)),
   lastGuideSource: Schema.optionalKey(Schema.NullOr(Schema.Literals(["owner", "auto"]))),
+  // Optional so a file written before autonomous mode still decodes.
+  priority: Schema.optionalKey(Schema.Literals(["high", "normal", "low"])),
+  waitingUntilMs: Schema.optionalKey(Schema.NullOr(Schema.Int)),
+  waitingFor: Schema.optionalKey(Schema.NullOr(Schema.Literals(["usage", "budget"]))),
+  roundSummaries: Schema.optionalKey(Schema.Array(Schema.String)),
   updatedAtMs: Schema.Int,
 });
 
@@ -157,6 +173,10 @@ const toPersisted = (record: MemOverseerTaskRecord) => ({
   settledPhase: record.settledPhase,
   pendingApproval: record.pendingApproval,
   lastGuideSource: record.lastGuideSource,
+  priority: record.priority,
+  waitingUntilMs: record.waitingUntilMs,
+  waitingFor: record.waitingFor,
+  roundSummaries: record.roundSummaries,
   updatedAtMs: record.updatedAtMs,
 });
 
@@ -179,6 +199,10 @@ const fromPersisted = (persisted: typeof PersistedTaskRecord.Type): MemOverseerT
       ? null
       : { ...persisted.pendingApproval, blocking: persisted.pendingApproval.blocking ?? false },
   lastGuideSource: persisted.lastGuideSource ?? null,
+  priority: persisted.priority ?? "normal",
+  waitingUntilMs: persisted.waitingUntilMs ?? null,
+  waitingFor: persisted.waitingFor ?? null,
+  roundSummaries: persisted.roundSummaries ?? [],
   updatedAtMs: persisted.updatedAtMs,
 });
 

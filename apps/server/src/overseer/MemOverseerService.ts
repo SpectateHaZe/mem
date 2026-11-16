@@ -17,6 +17,7 @@ import {
   type MemPendingApproval,
   type MemSendInstructionResult,
   type MemThreadLifecycle,
+  type MemThreadPriority,
   type MemThreadReview,
   type MemThreadState,
   type MemWatchedThread,
@@ -27,6 +28,7 @@ import {
   type ServerSettings as ServerSettingsValue,
   ThreadId,
 } from "@t3tools/contracts";
+import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
 import { elapsedShare } from "@t3tools/shared/usageLimits";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
@@ -41,6 +43,19 @@ import * as Schema from "effect/Schema";
 import * as SecureRandom from "effect/crypto/SecureRandom";
 import * as Semaphore from "effect/Semaphore";
 
+import {
+  byPriority,
+  CONTINUE_AFTER_LIMIT_INSTRUCTION,
+  improvementInstruction,
+  MEM_AUTONOMOUS_RETRY_MS,
+  MEM_MAX_COMMIT_FAILURES,
+  MEM_ROUND_MEMORY,
+  type MemThreadUsage,
+  nearUsageLimit,
+  PRIORITY_RANK,
+  roundSummary,
+  usageWaitUntil,
+} from "./MemAutonomy.ts";
 import { isDestructiveDeletion } from "./MemDestructiveChange.ts";
 import { MemIdleTracker } from "./MemIdleTracker.ts";
 import { chooseModel, type MemPaceDecision, type MemPaceInputs } from "./MemModelPace.ts";
@@ -76,6 +91,7 @@ import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
+import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import type { QualityGateResult } from "./MemQualityGate.ts";
 
@@ -118,7 +134,17 @@ export interface MemOverseerThread {
   readonly evidence: string;
   /** The newest completed provider turn, for the cost its provider actually reported. */
   readonly lastTurn: MemOverseerLastTurn | null;
+  /** Whether the thread's provider is out of usage; absent reads as not limited. */
+  readonly usage?: MemThreadUsage;
 }
+
+const NO_USAGE: MemThreadUsage = { limited: false, windows: [] };
+
+/** What committing an accepted autonomous round did. */
+export type MemCommitOutcome =
+  | { readonly type: "committed" }
+  | { readonly type: "nothing" }
+  | { readonly type: "failed"; readonly output: string };
 
 export interface MemOverseerLastTurn {
   readonly completedAtMs: number;
@@ -185,6 +211,7 @@ export class MemOverseerFailure extends Schema.TaggedError<MemOverseerFailure>()
       "read-activity",
       "review",
       "guide",
+      "commit",
       "complete",
       "lifecycle",
       "spawn",
@@ -217,6 +244,11 @@ export interface MemOverseerPorts {
     instruction: string,
   ) => Effect.Effect<void, MemOverseerFailure>;
   readonly complete: (thread: MemOverseerThread) => Effect.Effect<void, MemOverseerFailure>;
+  /** Commits only the files this thread touched, on its current branch. Never pushes. */
+  readonly commitRound: (
+    thread: MemOverseerThread,
+    summary: string,
+  ) => Effect.Effect<MemCommitOutcome, MemOverseerFailure>;
   readonly setLifecycle: (
     threadId: string,
     lifecycle: MemThreadLifecycle,
@@ -266,6 +298,10 @@ export interface MemOverseerServiceShape {
     threadId: string,
     lifecycle: MemThreadLifecycle,
   ) => Effect.Effect<void, MemOverseerRequestError>;
+  readonly setPriority: (
+    threadId: string,
+    priority: MemThreadPriority,
+  ) => Effect.Effect<void, MemOverseerRequestError>;
   readonly spawnSession: (input: {
     readonly prompt: string;
     readonly title?: string | undefined;
@@ -304,7 +340,12 @@ const sameRecord = (
   left.settledPhase === right.settledPhase &&
   left.pendingApproval?.approvalId === right.pendingApproval?.approvalId &&
   left.pendingApproval?.createdAtMs === right.pendingApproval?.createdAtMs &&
-  left.lastGuideSource === right.lastGuideSource;
+  left.lastGuideSource === right.lastGuideSource &&
+  left.priority === right.priority &&
+  left.waitingUntilMs === right.waitingUntilMs &&
+  left.waitingFor === right.waitingFor &&
+  left.roundSummaries.length === right.roundSummaries.length &&
+  left.roundSummaries.at(-1) === right.roundSummaries.at(-1);
 
 export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServiceShape => {
   const deliver = (target: MemOverseerGuideTarget, instruction: string) =>
@@ -340,6 +381,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
   const settleTurnCharge = Effect.fn("MemOverseerService.settleTurnCharge")(function* (
     record: MemOverseerTaskRecord,
     thread: MemOverseerThread,
+    autonomous: boolean,
   ) {
     const deliveredAtMs = record.deliveredAtMs;
     const turn = thread.lastTurn;
@@ -347,7 +389,12 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       turn !== null && (deliveredAtMs === null || turn.completedAtMs >= deliveredAtMs)
         ? turn.costUsd
         : null;
-    const usd = reportedUsd !== null && reportedUsd > 0 ? reportedUsd : MEM_ESTIMATED_TURN_USD;
+    // Autonomous mode runs on the owner's subscription, whose turns honestly report zero; outside
+    // it a zero is treated as unknown, as before.
+    const usd =
+      reportedUsd !== null && (reportedUsd > 0 || (autonomous && reportedUsd === 0))
+        ? reportedUsd
+        : MEM_ESTIMATED_TURN_USD;
     const settled = yield* charge({ ...record, pendingCharge: false }, usd);
     // Persisted here because several branches below return without another write, and a charge
     // that landed in the ledger must not be charged again on the next tick.
@@ -475,7 +522,9 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     mem: MemOverseerSettings,
     pace: MemPaceDecision,
     ownerAway: boolean,
+    throttled: boolean,
   ) {
+    const autonomous = mem.autonomous;
     const existing = yield* ports.store.get(thread.threadId).pipe(
       Effect.catchCause((cause) =>
         Effect.logWarning("Mem could not read a task's state.", {
@@ -495,11 +544,56 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
 
     // The guided turn is over once the thread is idle, so its real cost can finally be booked.
     if (record.pendingCharge) {
-      record = yield* settleTurnCharge(record, thread);
+      record = yield* settleTurnCharge(record, thread, autonomous);
     }
 
     // Read after settling, so the just-booked turn counts against this thread's own decision.
     const { spend } = yield* spendForTurn(mem);
+
+    if (autonomous) {
+      // Parking is final outside autonomous mode; here a cap or limit only pauses, so resume it.
+      if (record.task.phase === "parked") {
+        record = {
+          ...record,
+          task: { ...record.task, phase: "awaitingReview" },
+          settledPhase: null,
+        };
+      }
+      const persist = () =>
+        sameRecord(existing, record)
+          ? Effect.void
+          : ports.store.put({ ...record, updatedAtMs: nowMs });
+      if (record.waitingUntilMs !== null && nowMs < record.waitingUntilMs) {
+        yield* persist();
+        return;
+      }
+      const usage = thread.usage ?? NO_USAGE;
+      const usageUntil = usageWaitUntil(usage, nowMs);
+      const windowFull = usage.windows.some((window) => window.usedPercent >= 100);
+      const waitedOutLimit = record.waitingFor === "usage";
+      if (usageUntil !== null && (windowFull || !waitedOutLimit)) {
+        record = { ...record, waitingUntilMs: usageUntil, waitingFor: "usage" };
+        yield* persist();
+        yield* Effect.logInfo("Mem is waiting out a usage limit.", {
+          threadId: thread.threadId,
+          untilMs: usageUntil,
+        });
+        return;
+      }
+      record = { ...record, waitingUntilMs: null, waitingFor: null };
+      if (usage.limited && waitedOutLimit) {
+        // The limit cut the last run short; the reset lets it pick up where it stopped.
+        if (yield* deliver(thread, CONTINUE_AFTER_LIMIT_INSTRUCTION)) {
+          record = { ...record, pendingCharge: true };
+        }
+        yield* persist();
+        return;
+      }
+      if (throttled) {
+        yield* persist();
+        return;
+      }
+    }
 
     // An escalated task is finished with Mem: a denial or an unusable review must not be re-asked.
     if (record.task.phase === "escalated") {
@@ -566,7 +660,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           threadId: thread.threadId,
           reason: pace.reason,
         });
-        state = reduceTask(state, { type: "capReached" });
+        if (autonomous) {
+          record = { ...record, waitingUntilMs: nowMs + MEM_AUTONOMOUS_RETRY_MS, waitingFor: null };
+        } else {
+          state = reduceTask(state, { type: "capReached" });
+        }
       } else {
         const plan = yield* ports.planReview(thread).pipe(
           Effect.catchCause((cause) =>
@@ -590,7 +688,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         } else {
           const outcome = yield* reviewBatches(thread, plan, mem, pace.selection);
           record = yield* charge(record, outcome.costUsd);
-          if (outcome.type === "parked") {
+          if (outcome.type === "parked" && autonomous) {
+            record = {
+              ...record,
+              waitingUntilMs: nowMs + MEM_AUTONOMOUS_RETRY_MS,
+              waitingFor: "budget",
+            };
+          } else if (outcome.type === "parked") {
             state = reduceTask(state, { type: "capReached" });
             if (record.settledPhase !== "parked") {
               record = { ...record, settledPhase: "parked", pendingApproval: null };
@@ -619,6 +723,29 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       }
       action = nextAction(state, inputs);
     }
+
+    if (autonomous && action.type === "park") {
+      record = { ...record, waitingUntilMs: nowMs + MEM_AUTONOMOUS_RETRY_MS, waitingFor: "budget" };
+    }
+    if (autonomous && record.waitingUntilMs !== null && nowMs < record.waitingUntilMs) {
+      action = { type: "wait" };
+    }
+
+    const sendGuide = Effect.fn("MemOverseerService.sendGuide")(function* (instruction: string) {
+      const delivered = yield* deliver(thread, instruction);
+      if (delivered) {
+        record = {
+          ...record,
+          pendingCharge: true,
+          pendingApproval: null,
+          deliveredInstruction: instruction,
+          deliveredAtMs: nowMs,
+          deliveredEvidenceFingerprint: fingerprintEvidence(thread.evidence),
+          lastGuideSource: ownerAway ? "auto" : "owner",
+        };
+      }
+      return delivered;
+    });
 
     switch (action.type) {
       case "wait":
@@ -678,6 +805,58 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         break;
       }
       case "accept": {
+        if (autonomous) {
+          const summary = roundSummary(thread.evidence, record.lastReview?.reasoning ?? null);
+          const commit = yield* ports.commitRound(thread, summary).pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Mem could not commit a round.", {
+                threadId: thread.threadId,
+                cause,
+              }).pipe(
+                Effect.as<MemCommitOutcome>({
+                  type: "failed",
+                  output: "Mem could not run git to commit this round.",
+                }),
+              ),
+            ),
+          );
+          if (commit.type === "failed") {
+            const failures = state.rejections + 1;
+            if (failures >= MEM_MAX_COMMIT_FAILURES) {
+              state = { ...state, phase: "escalated", lastInstruction: null };
+              record = { ...record, settledPhase: "escalated", pendingApproval: null };
+              yield* Effect.logWarning("Mem escalated a thread whose commits keep failing.", {
+                threadId: thread.threadId,
+              });
+              break;
+            }
+            state = {
+              ...state,
+              phase: "claimed",
+              rejections: failures,
+              lastInstruction: `Mem couldn't commit this round. Git said:\n\n${commit.output}\n\nFix what it reports, then end with one \`Improved:\` line.`,
+            };
+          } else {
+            const summaries = [...record.roundSummaries, summary].slice(-MEM_ROUND_MEMORY);
+            record = { ...record, roundSummaries: summaries, settledPhase: null };
+            state = {
+              threadId: state.threadId,
+              phase: "claimed",
+              rejections: 0,
+              lastInstruction: improvementInstruction(summaries),
+            };
+            yield* Effect.logInfo("Mem finished an autonomous round.", {
+              threadId: thread.threadId,
+              committed: commit.type === "committed",
+              summary,
+            });
+          }
+          // The next tick sends it if the budget is out now; the record keeps the instruction.
+          if (spend.allowed && state.lastInstruction !== null) {
+            yield* sendGuide(state.lastInstruction);
+          }
+          break;
+        }
         if (record.settledPhase === "accepted") break;
         const completed = yield* ports.complete(thread).pipe(
           Effect.as(true),
@@ -974,6 +1153,10 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         pendingApproval: record.pendingApproval !== null,
         sentInstruction: record.deliveredInstruction,
         sentAtMs: record.deliveredAtMs,
+        priority: record.priority,
+        waitingUntilMs: record.waitingUntilMs,
+        waitingFor: record.waitingFor,
+        roundSummaries: record.roundSummaries,
       }));
   });
 
@@ -1233,6 +1416,25 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       );
   });
 
+  const setPriority = Effect.fn("MemOverseerService.setPriority")(function* (
+    threadId: string,
+    priority: MemThreadPriority,
+  ) {
+    yield* actorLock.withPermit(
+      Effect.gen(function* () {
+        const nowMs = yield* Clock.currentTimeMillis;
+        const existing = yield* ports.store
+          .get(threadId)
+          .pipe(Effect.orElseSucceed(() => undefined as MemOverseerTaskRecord | undefined));
+        yield* ports.store.put({
+          ...(existing ?? newTaskRecord(threadId, nowMs)),
+          priority,
+          updatedAtMs: nowMs,
+        });
+      }),
+    );
+  });
+
   const spawnSession = Effect.fn("MemOverseerService.spawnSession")(function* (input: {
     readonly prompt: string;
     readonly title?: string | undefined;
@@ -1332,13 +1534,19 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       });
     }
 
-    const ownerAway = yield* ports
-      .isOwnerAway(settings.mem.idleThresholdMinutes)
-      .pipe(
-        Effect.catchCause((cause) =>
-          Effect.logWarning("Mem could not read the idle clock.", { cause }).pipe(Effect.as(false)),
-        ),
-      );
+    const autonomous = settings.mem.autonomous;
+    // Autonomous mode acts on its own whether or not the owner is at the keyboard.
+    const ownerAway = autonomous
+      ? true
+      : yield* ports
+          .isOwnerAway(settings.mem.idleThresholdMinutes)
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Mem could not read the idle clock.", { cause }).pipe(
+                Effect.as(false),
+              ),
+            ),
+          );
 
     // Nothing answered the last question, so Mem's own recommendation goes out before anything new.
     const settledThreads = yield* actorLock.withPermit(expireApprovals(settings.mem));
@@ -1354,20 +1562,35 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       );
     if (threads.length === 0) return;
 
+    const records = yield* ports.store
+      .all()
+      .pipe(Effect.orElseSucceed(() => [] as ReadonlyArray<MemOverseerTaskRecord>));
+    const priorities = new Map(records.map((record) => [record.task.threadId, record.priority]));
+    const priorityOf = (thread: MemOverseerThread): MemThreadPriority =>
+      priorities.get(thread.threadId) ?? "normal";
+    const topRank = Math.min(...threads.map((thread) => PRIORITY_RANK[priorityOf(thread)]));
+    // Near a usage limit, what is left goes to the most important threads only.
+    const throttled = (thread: MemOverseerThread) =>
+      autonomous &&
+      PRIORITY_RANK[priorityOf(thread)] > topRank &&
+      nearUsageLimit(thread.usage ?? NO_USAGE);
+
     // Sequential on purpose: one action per thread, and each thread re-reads spend, so anything
     // booked while this tick ran is already counted.
     // Each thread is one actor action, so a chat request can take the lock between threads only.
     yield* Effect.forEach(
-      threads.filter((thread) => !settledThreads.has(thread.threadId)),
+      byPriority(threads, priorityOf).filter((thread) => !settledThreads.has(thread.threadId)),
       (thread) =>
-        actorLock.withPermit(runThread(thread, settings.mem, settings.pace, ownerAway)).pipe(
-          Effect.catchCause((cause) =>
-            Effect.logWarning("Mem skipped a thread after an unexpected failure.", {
-              threadId: thread.threadId,
-              cause,
-            }),
+        actorLock
+          .withPermit(runThread(thread, settings.mem, settings.pace, ownerAway, throttled(thread)))
+          .pipe(
+            Effect.catchCause((cause) =>
+              Effect.logWarning("Mem skipped a thread after an unexpected failure.", {
+                threadId: thread.threadId,
+                cause,
+              }),
+            ),
           ),
-        ),
       { concurrency: 1, discard: true },
     );
   });
@@ -1381,6 +1604,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     reviewThreadNow,
     sendInstruction,
     setLifecycle,
+    setPriority,
     spawnSession,
   };
 };
@@ -1531,11 +1755,25 @@ const readLastTurn = Effect.fn("MemOverseerService.readLastTurn")(function* (
   return last;
 });
 
+/** Paths in `git status --porcelain=v1 -z` output; a rename's original path is skipped. */
+export const changedPathsFromPorcelain = (output: string): ReadonlyArray<string> => {
+  const fields = output.split("\0");
+  const paths: Array<string> = [];
+  for (let index = 0; index < fields.length; index += 1) {
+    const entry = fields[index]!;
+    if (entry.length < 4) continue;
+    paths.push(entry.slice(3));
+    if (entry[0] === "R" || entry[0] === "C") index += 1;
+  }
+  return paths;
+};
+
 const toThread = (
   shell: OrchestrationV2ThreadShell,
   activity: RecentActivity,
   root: string | null,
   lastTurn: MemOverseerLastTurn | null,
+  usage: MemThreadUsage,
 ): MemOverseerThread => ({
   threadId: shell.id,
   projectId: shell.projectId,
@@ -1552,6 +1790,7 @@ const toThread = (
   files: [...activity.files.values()],
   evidence: activity.lastAssistantText,
   lastTurn,
+  usage,
 });
 
 const make = Effect.gen(function* () {
@@ -1567,6 +1806,30 @@ const make = Effect.gen(function* () {
   const random = yield* SecureRandom.SecureRandom;
   const scheduler = yield* Scheduler.Scheduler;
   const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+  const git = yield* GitVcsDriver.GitVcsDriver;
+
+  /** Out of usage when the last run failed on a limit or a window of its provider is full. */
+  const readUsage = Effect.fn("MemOverseerService.readUsage")(
+    function* (shell: OrchestrationV2ThreadShell) {
+      const records = yield* projections
+        .getThreadRecords(shell.id, ["runs", "turnItems"])
+        .pipe(Effect.option);
+      const limited =
+        Option.isSome(records) &&
+        usageLimitBlockedRun(records.value.runs, records.value.turnItems, null) !== null;
+      const instance = yield* providerInstances.getInstance(shell.modelSelection.instanceId);
+      const provider = instance === undefined ? undefined : yield* instance.snapshot.getSnapshot;
+      const windows = (provider?.usageLimits?.windows ?? []).map((window) => ({
+        usedPercent: window.usedPercent,
+        resetsAtMs:
+          window.resetsAt === undefined
+            ? null
+            : DateTime.toEpochMillis(DateTime.makeUnsafe(window.resetsAt)),
+      }));
+      return { limited, windows } satisfies MemThreadUsage;
+    },
+    Effect.catchCause(() => Effect.succeed(NO_USAGE)),
+  );
 
   const shellSnapshot = () =>
     projections.getShellSnapshot({ location: "active" }).pipe(
@@ -1603,8 +1866,9 @@ const make = Effect.gen(function* () {
         readRecentActivity(projections, shell.id),
         rootForShell(shell, roots),
         readLastTurn(projections, shell.id),
+        readUsage(shell),
       ]),
-      ([activity, root, lastTurn]) => toThread(shell, activity, root, lastTurn),
+      ([activity, root, lastTurn, usage]) => toThread(shell, activity, root, lastTurn, usage),
     );
 
   /** The same directory comparison the project store makes: resolved absolute paths. */
@@ -1660,6 +1924,73 @@ const make = Effect.gen(function* () {
       const shell = snapshot.threads.find((entry) => entry.id === threadId);
       if (shell === undefined) return undefined;
       return yield* threadForShell(shell, new Map());
+    }),
+    commitRound: Effect.fn("MemOverseerService.commitRound")(function* (thread, summary) {
+      const root = thread.root;
+      if (root === null) {
+        return { type: "failed", output: "This thread has no workspace folder to commit in." };
+      }
+      const failure = (cause: unknown) =>
+        new MemOverseerFailure({
+          operation: "commit",
+          detail: "git could not commit the round.",
+          cause,
+        });
+      // Only the files this thread touched, and only inside its workspace.
+      const touched = thread.files
+        .map((file) => path.relative(root, path.resolve(root, file.path)))
+        .filter(
+          (relative) => relative !== "" && !relative.startsWith("..") && !path.isAbsolute(relative),
+        );
+      if (touched.length === 0) return { type: "nothing" };
+      const top = (yield* git
+        .execute({
+          operation: "MemOverseer.commitTop",
+          cwd: root,
+          args: ["rev-parse", "--show-toplevel"],
+          timeoutMs: 30_000,
+        })
+        .pipe(Effect.mapError(failure))).stdout.trim();
+      const status = yield* git
+        .execute({
+          operation: "MemOverseer.commitStatus",
+          cwd: root,
+          args: ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...touched],
+          timeoutMs: 30_000,
+        })
+        .pipe(Effect.mapError(failure));
+      const changed = changedPathsFromPorcelain(status.stdout);
+      if (changed.length === 0) return { type: "nothing" };
+      // Porcelain paths are relative to the repository top, so add and commit from there.
+      yield* git
+        .execute({
+          operation: "MemOverseer.commitAdd",
+          cwd: top,
+          args: ["add", "-A", "--", ...changed],
+          timeoutMs: 30_000,
+        })
+        .pipe(Effect.mapError(failure));
+      // Naming the paths commits only them, never something else the owner had staged.
+      const result = yield* git
+        .execute({
+          operation: "MemOverseer.commit",
+          cwd: top,
+          args: [
+            "commit",
+            "--message",
+            `${summary}\n\nCommitted by Mem in autonomous mode.`,
+            "--",
+            ...changed,
+          ],
+          allowNonZeroExit: true,
+          timeoutMs: 120_000,
+        })
+        .pipe(Effect.mapError(failure));
+      if (result.exitCode === 0) return { type: "committed" };
+      return {
+        type: "failed",
+        output: `${result.stdout}\n${result.stderr}`.trim().slice(-2_000),
+      };
     }),
     planReview: Effect.fn("MemOverseerService.planReview")(function* (thread) {
       if (thread.root === null) {
