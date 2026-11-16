@@ -21,6 +21,7 @@ import * as MemIdleTracker from "./MemIdleTracker.ts";
 import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
   changedPathsFromPorcelain,
+  isOwnerSession,
   isShellIdle,
   fingerprintEvidence,
   makeMemOverseerService,
@@ -1050,5 +1051,112 @@ describe("MemOverseerService autonomous kickoff", () => {
     await run(harness.tick());
 
     expect(harness.sent).toStrictEqual([]);
+  });
+});
+
+describe("MemOverseerService failed rounds", () => {
+  const INSTRUCTION = "Find the single most valuable improvement.";
+  // Delivered at epoch 1, so any run or turn stamped after it belongs to this round.
+  const deliveredRecord = (failedRounds = 0): MemOverseerTaskRecord => ({
+    ...claimedRecord(INSTRUCTION),
+    failedRounds,
+    pendingCharge: true,
+    deliveredInstruction: INSTRUCTION,
+    deliveredAtMs: 1,
+    deliveredEvidenceFingerprint: fingerprintEvidence("earlier round"),
+  });
+
+  it("never accepts or charges a run that failed, and backs off before resending", async () => {
+    const store = new Map([["thread-1", deliveredRecord()]]);
+    const harness = makeHarness({
+      mem: { autonomous: true },
+      store,
+      threads: [thread({ lastRunFailedAtMs: 2 })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toStrictEqual([]);
+    expect(harness.commits).toStrictEqual([]);
+    expect(harness.sent).toStrictEqual([]);
+    expect(harness.spend).toStrictEqual([]);
+    const record = store.get("thread-1");
+    expect(record?.lastReview).toBeNull();
+    expect(record?.failedRounds).toBe(1);
+    expect(record?.pendingCharge).toBe(false);
+    expect(record?.task.lastInstruction).toBe(INSTRUCTION);
+    expect(record?.waitingUntilMs).toBeGreaterThan(1);
+
+    // Still inside the backoff: no resend a minute later.
+    await run(harness.tick());
+    expect(harness.sent).toStrictEqual([]);
+  });
+
+  it("escalates to the owner on the second failed round in a row", async () => {
+    const store = new Map([["thread-1", deliveredRecord(1)]]);
+    const harness = makeHarness({
+      mem: { autonomous: true },
+      store,
+      threads: [thread({ lastRunFailedAtMs: 2 })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.sent).toStrictEqual([]);
+    expect(harness.spend).toStrictEqual([]);
+    expect(store.get("thread-1")?.task.phase).toBe("escalated");
+    expect(store.get("thread-1")?.settledPhase).toBe("escalated");
+  });
+
+  it("treats a finished turn with no assistant output as a failure", async () => {
+    const store = new Map([["thread-1", deliveredRecord()]]);
+    const harness = makeHarness({
+      mem: { autonomous: true },
+      store,
+      threads: [thread({ evidence: "", lastTurn: { completedAtMs: 2, costUsd: null } })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toStrictEqual([]);
+    expect(harness.commits).toStrictEqual([]);
+    expect(store.get("thread-1")?.failedRounds).toBe(1);
+  });
+
+  it("does not count a failure from before the instruction was sent", async () => {
+    const store = new Map([["thread-1", { ...deliveredRecord(), deliveredAtMs: 5 }]]);
+    const harness = makeHarness({
+      mem: { autonomous: true },
+      store,
+      threads: [
+        thread({
+          evidence: "Done.\nImproved: darker sidebar",
+          lastRunFailedAtMs: 2,
+          lastTurn: { completedAtMs: 6, costUsd: null },
+        }),
+      ],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.commits).toStrictEqual(["darker sidebar"]);
+    expect(store.get("thread-1")?.roundSummaries).toStrictEqual(["darker sidebar"]);
+  });
+});
+
+describe("isOwnerSession", () => {
+  const shell = (id: string, relationshipToParent: string | null, delegatedFrom?: unknown) =>
+    ({ id, lineage: { relationshipToParent }, delegatedFrom }) as never;
+
+  it("skips delegated-task children and provider subagent threads", () => {
+    expect(isOwnerSession(shell("thread-1", null))).toBe(true);
+    expect(isOwnerSession(shell("thread-2", "fork"))).toBe(true);
+    expect(isOwnerSession(shell("thread:delegated-task:abc", null))).toBe(false);
+    expect(isOwnerSession(shell("thread-3", "subagent"))).toBe(false);
+    expect(isOwnerSession(shell("thread-4", null, { threadId: "thread-1" }))).toBe(false);
   });
 });

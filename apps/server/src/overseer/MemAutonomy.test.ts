@@ -14,10 +14,11 @@ describe("MemAutonomy", () => {
     expect(roundSummary("Did things.\n**Improved: darker sidebar**", "Fine.")).toBe(
       "darker sidebar",
     );
-    expect(roundSummary("Did things.", "Verified the sidebar.\nMore.")).toBe(
-      "Verified the sidebar.",
+    expect(roundSummary("Did things.\nMade the sidebar darker.", "Verified.")).toBe(
+      "Made the sidebar darker.",
     );
-    expect(roundSummary("", null)).toBe("An improvement Mem accepted");
+    expect(roundSummary("", "Verified the sidebar.\nMore.")).toBe("Verified the sidebar.");
+    expect(roundSummary("", null)).toBe("Change with no summary");
   });
 
   it("lists recent rounds so the next one won't repeat them", () => {

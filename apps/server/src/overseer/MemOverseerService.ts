@@ -7,6 +7,7 @@
 import {
   CommandId,
   MessageId,
+  isDelegatedAppThread,
   isMemMasterThread,
   type MemAnswerApprovalInput,
   type MemAnswerApprovalResult,
@@ -49,7 +50,9 @@ import {
   CONTINUE_AFTER_LIMIT_INSTRUCTION,
   improvementInstruction,
   MEM_AUTONOMOUS_RETRY_MS,
+  MEM_FAILED_ROUND_BACKOFF_MS,
   MEM_MAX_COMMIT_FAILURES,
+  MEM_MAX_FAILED_ROUNDS,
   MEM_ROUND_MEMORY,
   type MemThreadUsage,
   nearUsageLimit,
@@ -137,6 +140,8 @@ export interface MemOverseerThread {
   readonly lastTurn: MemOverseerLastTurn | null;
   /** Whether the thread's provider is out of usage; absent reads as not limited. */
   readonly usage?: MemThreadUsage;
+  /** When the latest run failed for a reason other than a usage limit; absent or null if it didn't. */
+  readonly lastRunFailedAtMs?: number | null;
 }
 
 const NO_USAGE: MemThreadUsage = { limited: false, windows: [] };
@@ -536,6 +541,63 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     );
     const nowMs = yield* Clock.currentTimeMillis;
     let record: MemOverseerTaskRecord = existing ?? newTaskRecord(thread.threadId, nowMs);
+
+    // A failed round backs off before its instruction is sent again.
+    if (
+      record.failedRounds > 0 &&
+      record.waitingUntilMs !== null &&
+      nowMs < record.waitingUntilMs
+    ) {
+      return;
+    }
+
+    // A delivered round whose run failed or said nothing is not work to review: reviewing it read
+    // as an empty accept, charged the turn and started the next round a minute later, forever.
+    const deliveredAtMs = record.deliveredInstruction === null ? null : record.deliveredAtMs;
+    if (thread.idle && deliveredAtMs !== null && !(thread.usage?.limited ?? false)) {
+      const failedAfterSend = (thread.lastRunFailedAtMs ?? -1) >= deliveredAtMs;
+      const silentAfterSend =
+        thread.lastTurn !== null &&
+        thread.lastTurn.completedAtMs >= deliveredAtMs &&
+        thread.evidence.trim() === "";
+      if (failedAfterSend || silentAfterSend) {
+        const failedRounds = record.failedRounds + 1;
+        const escalate = failedRounds >= MEM_MAX_FAILED_ROUNDS;
+        // Nothing came of the turn, so nothing is charged for it.
+        yield* ports.store.put({
+          ...record,
+          failedRounds,
+          pendingCharge: false,
+          deliveredInstruction: null,
+          deliveredAtMs: null,
+          deliveredEvidenceFingerprint: null,
+          ...(escalate
+            ? {
+                task: { ...record.task, phase: "escalated" as const, lastInstruction: null },
+                settledPhase: "escalated" as const,
+                pendingApproval: null,
+                waitingUntilMs: null,
+                waitingFor: null,
+              }
+            : { waitingUntilMs: nowMs + MEM_FAILED_ROUND_BACKOFF_MS, waitingFor: null }),
+          updatedAtMs: nowMs,
+        });
+        yield* (escalate ? Effect.logWarning : Effect.logInfo)(
+          escalate
+            ? "Mem escalated a thread whose runs keep failing."
+            : "Mem's instruction produced nothing; it will retry after a pause.",
+          { threadId: thread.threadId, failedRounds, failed: failedAfterSend },
+        );
+        return;
+      }
+      if (
+        record.failedRounds > 0 &&
+        thread.lastTurn !== null &&
+        thread.lastTurn.completedAtMs >= deliveredAtMs
+      ) {
+        record = { ...record, failedRounds: 0 };
+      }
+    }
 
     // Autonomous mode starts work instead of waiting for some: an idle thread with nothing to
     // review gets the improvement instruction until one is delivered.
@@ -1842,7 +1904,20 @@ const toThread = (
   evidence: activity.lastAssistantText,
   lastTurn,
   usage,
+  lastRunFailedAtMs:
+    shell.status === "failed" && shell.lastErrorClass !== "usage_limit"
+      ? DateTime.toEpochMillis(shell.latestRunCompletedAt ?? shell.updatedAt)
+      : null,
 });
+
+/**
+ * A session the owner works in: delegated-task children and provider subagent threads inherit
+ * the in-progress mark but are not the owner's to hand to Mem.
+ */
+export const isOwnerSession = (
+  shell: Pick<OrchestrationV2ThreadShell, "id" | "lineage" | "delegatedFrom">,
+): boolean =>
+  !isDelegatedAppThread(shell) && !String(shell.id).startsWith("thread:delegated-task:");
 
 const make = Effect.gen(function* () {
   const settings = yield* ServerSettings.ServerSettingsService;
@@ -1981,7 +2056,10 @@ const make = Effect.gen(function* () {
     listThreads: Effect.fn("MemOverseerService.listThreads")(function* () {
       const snapshot = yield* shellSnapshot();
       const claimed = snapshot.threads.filter(
-        (shell) => (shell.lifecycle ?? "none") === "in_progress" && !isMemMasterThread(shell),
+        (shell) =>
+          (shell.lifecycle ?? "none") === "in_progress" &&
+          !isMemMasterThread(shell) &&
+          isOwnerSession(shell),
       );
       const roots = new Map<string, string | null>();
       return yield* Effect.forEach(claimed, (shell) => threadForShell(shell, roots));

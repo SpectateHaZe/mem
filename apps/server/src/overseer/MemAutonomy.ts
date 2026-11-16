@@ -16,6 +16,10 @@ export const MEM_AUTONOMOUS_RETRY_MS = 30 * 60_000;
 const MEM_NEAR_LIMIT_PERCENT = 90;
 /** Commit-hook failures sent back before Mem escalates the thread to the owner. */
 export const MEM_MAX_COMMIT_FAILURES = 5;
+/** Delivered rounds in a row that produced nothing before Mem stops and hands it to the owner. */
+export const MEM_MAX_FAILED_ROUNDS = 2;
+/** Wait before resending a round whose run produced nothing. */
+export const MEM_FAILED_ROUND_BACKOFF_MS = 10 * 60_000;
 const SUMMARY_MAX_LENGTH = 120;
 
 export interface MemUsageWindow {
@@ -58,7 +62,7 @@ const firstLine = (text: string) =>
 const clip = (text: string) =>
   text.length > SUMMARY_MAX_LENGTH ? `${text.slice(0, SUMMARY_MAX_LENGTH - 1)}…` : text;
 
-/** The agent's own `Improved:` line, else the review's reasoning, else a plain fallback. */
+/** The agent's own `Improved:` line, else its closing line, else the review's reasoning. */
 export const roundSummary = (evidence: string, reviewReasoning: string | null): string => {
   const improved = evidence
     .split("\n")
@@ -68,8 +72,14 @@ export const roundSummary = (evidence: string, reviewReasoning: string | null): 
     const text = improved.replace(/^improved:\s*/i, "").trim();
     if (text !== "") return clip(text);
   }
+  // No Improved line: the agent's own closing line still says what it did, better than the review.
+  const closing = evidence
+    .split("\n")
+    .map((line) => line.trim())
+    .findLast((line) => line !== "");
+  if (closing !== undefined) return clip(closing);
   const reasoning = firstLine(reviewReasoning ?? "");
-  return reasoning === "" ? "An improvement Mem accepted" : clip(reasoning);
+  return reasoning === "" ? "Change with no summary" : clip(reasoning);
 };
 
 /**

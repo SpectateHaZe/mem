@@ -71,6 +71,8 @@ export interface MemOverseerTaskRecord {
   readonly waitingFor: "usage" | "budget" | null;
   /** One line per accepted autonomous round, newest last, so the next round won't repeat one. */
   readonly roundSummaries: ReadonlyArray<string>;
+  /** Delivered rounds in a row whose run produced nothing; the second escalates to the owner. */
+  readonly failedRounds: number;
   readonly updatedAtMs: number;
 }
 
@@ -94,6 +96,7 @@ export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskR
   waitingUntilMs: null,
   waitingFor: null,
   roundSummaries: [],
+  failedRounds: 0,
   updatedAtMs: nowMs,
 });
 
@@ -139,6 +142,7 @@ const PersistedTaskRecord = Schema.Struct({
   waitingUntilMs: Schema.optionalKey(Schema.NullOr(Schema.Int)),
   waitingFor: Schema.optionalKey(Schema.NullOr(Schema.Literals(["usage", "budget"]))),
   roundSummaries: Schema.optionalKey(Schema.Array(Schema.String)),
+  failedRounds: Schema.optionalKey(Schema.Int),
   updatedAtMs: Schema.Int,
 });
 
@@ -177,6 +181,7 @@ const toPersisted = (record: MemOverseerTaskRecord) => ({
   waitingUntilMs: record.waitingUntilMs,
   waitingFor: record.waitingFor,
   roundSummaries: record.roundSummaries,
+  failedRounds: record.failedRounds,
   updatedAtMs: record.updatedAtMs,
 });
 
@@ -203,6 +208,7 @@ const fromPersisted = (persisted: typeof PersistedTaskRecord.Type): MemOverseerT
   waitingUntilMs: persisted.waitingUntilMs ?? null,
   waitingFor: persisted.waitingFor ?? null,
   roundSummaries: persisted.roundSummaries ?? [],
+  failedRounds: persisted.failedRounds ?? 0,
   updatedAtMs: persisted.updatedAtMs,
 });
 
