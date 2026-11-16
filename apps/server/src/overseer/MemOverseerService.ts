@@ -537,6 +537,36 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     const nowMs = yield* Clock.currentTimeMillis;
     let record: MemOverseerTaskRecord = existing ?? newTaskRecord(thread.threadId, nowMs);
 
+    // Autonomous mode starts work instead of waiting for some: an idle thread with nothing to
+    // review gets the improvement instruction until one is delivered.
+    if (
+      mem.autonomous &&
+      thread.idle &&
+      !thread.hasWork &&
+      record.task.phase === "claimed" &&
+      record.deliveredInstruction === null
+    ) {
+      // A failed send keeps the instruction, so the next tick retries the same one.
+      const instruction =
+        record.task.lastInstruction ?? improvementInstruction(record.roundSummaries);
+      const delivered = yield* deliver(thread, instruction);
+      yield* ports.store.put({
+        ...record,
+        task: { ...record.task, lastInstruction: instruction },
+        ...(delivered
+          ? {
+              pendingCharge: true,
+              deliveredInstruction: instruction,
+              deliveredAtMs: nowMs,
+              deliveredEvidenceFingerprint: fingerprintEvidence(thread.evidence),
+              lastGuideSource: "auto" as const,
+            }
+          : {}),
+        updatedAtMs: nowMs,
+      });
+      return;
+    }
+
     // A working thread, or one with nothing to review yet, is left alone until it is idle.
     if (!thread.idle || !thread.hasWork) {
       if (existing === undefined) yield* ports.store.put({ ...record, updatedAtMs: nowMs });
@@ -1769,6 +1799,30 @@ export const changedPathsFromPorcelain = (output: string): ReadonlyArray<string>
   return paths;
 };
 
+/** Run states that can still produce output; the shell's status is its latest run's status. */
+const ACTIVE_RUN_STATUSES: ReadonlySet<string> = new Set([
+  "preparing",
+  "queued",
+  "starting",
+  "running",
+  "waiting",
+]);
+
+/**
+ * Idle means nothing can still produce output. The shell reports its latest run's status, so a
+ * finished thread reads "completed" or "failed", never "idle": only a thread that never ran does.
+ */
+export const isShellIdle = (
+  shell: Pick<
+    OrchestrationV2ThreadShell,
+    "status" | "activeRunId" | "pendingRuntimeRequest" | "pendingBackgroundTasks"
+  >,
+): boolean =>
+  !ACTIVE_RUN_STATUSES.has(shell.status) &&
+  shell.activeRunId === null &&
+  shell.pendingRuntimeRequest === null &&
+  (shell.pendingBackgroundTasks ?? []).length === 0;
+
 const toThread = (
   shell: OrchestrationV2ThreadShell,
   activity: RecentActivity,
@@ -1779,11 +1833,7 @@ const toThread = (
   threadId: shell.id,
   projectId: shell.projectId,
   title: shell.title,
-  idle:
-    shell.status === "idle" &&
-    shell.activeRunId === null &&
-    shell.pendingRuntimeRequest === null &&
-    (shell.pendingBackgroundTasks ?? []).length === 0,
+  idle: isShellIdle(shell),
   hasWork: activity.hasWork,
   task: [shell.title, activity.lastUserText].filter((part) => part.trim() !== "").join("\n\n"),
   acceptance: shell.goal?.objective ?? DEFAULT_ACCEPTANCE,
@@ -1812,12 +1862,28 @@ const make = Effect.gen(function* () {
   /** Out of usage when the last run failed on a limit or a window of its provider is full. */
   const readUsage = Effect.fn("MemOverseerService.readUsage")(
     function* (shell: OrchestrationV2ThreadShell) {
-      const records = yield* projections
-        .getThreadRecords(shell.id, ["runs", "turnItems"])
-        .pipe(Effect.option);
+      const runs = yield* projections.getThreadRecords(shell.id, ["runs"]).pipe(Effect.option);
+      // Only a failed latest run can be a usage limit; read just that run's items, since loading a
+      // long thread's whole history every tick is what spiked the heap.
+      const lastFailed = Option.isNone(runs)
+        ? undefined
+        : runs.value.runs
+            .filter((run) => run.status === "failed")
+            .reduce<(typeof runs.value.runs)[number] | undefined>(
+              (latest, run) =>
+                latest === undefined || run.ordinal > latest.ordinal ? run : latest,
+              undefined,
+            );
+      const items =
+        lastFailed === undefined
+          ? Option.none()
+          : yield* projections
+              .getThreadRecords(shell.id, ["turnItems"], { turnItemRunId: lastFailed.id })
+              .pipe(Effect.option);
       const limited =
-        Option.isSome(records) &&
-        usageLimitBlockedRun(records.value.runs, records.value.turnItems, null) !== null;
+        Option.isSome(runs) &&
+        Option.isSome(items) &&
+        usageLimitBlockedRun(runs.value.runs, items.value.turnItems, null) !== null;
       const instance = yield* providerInstances.getInstance(shell.modelSelection.instanceId);
       const provider = instance === undefined ? undefined : yield* instance.snapshot.getSnapshot;
       const windows = (provider?.usageLimits?.windows ?? []).map((window) => ({

@@ -21,6 +21,7 @@ import * as MemIdleTracker from "./MemIdleTracker.ts";
 import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
   changedPathsFromPorcelain,
+  isShellIdle,
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_APPROVAL_TIMEOUT_MS,
@@ -1004,5 +1005,50 @@ describe("changedPathsFromPorcelain", () => {
     expect(
       changedPathsFromPorcelain(" M src/a.ts\0?? new file.ts\0R  b.ts\0old-b.ts\0 D gone.ts\0"),
     ).toStrictEqual(["src/a.ts", "new file.ts", "b.ts", "gone.ts"]);
+  });
+});
+
+describe("isShellIdle", () => {
+  const shell = (status: string, activeRunId: string | null = null) =>
+    ({ status, activeRunId, pendingRuntimeRequest: null, pendingBackgroundTasks: [] }) as never;
+
+  it("treats a finished run as idle, since the shell reports its latest run's status", () => {
+    expect(isShellIdle(shell("completed"))).toBe(true);
+    expect(isShellIdle(shell("failed"))).toBe(true);
+    expect(isShellIdle(shell("idle"))).toBe(true);
+  });
+
+  it("treats a live or queued run as busy", () => {
+    expect(isShellIdle(shell("running"))).toBe(false);
+    expect(isShellIdle(shell("queued"))).toBe(false);
+    expect(isShellIdle(shell("completed", "run-2"))).toBe(false);
+  });
+});
+
+describe("MemOverseerService autonomous kickoff", () => {
+  it("starts a round on an idle thread with nothing to review", async () => {
+    const harness = makeHarness({
+      mem: { autonomous: true },
+      threads: [thread({ hasWork: false })],
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toStrictEqual([]);
+    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent[0]).toContain("most valuable improvement");
+    expect(harness.store.get("thread-1")?.deliveredInstruction).toBe(harness.sent[0]);
+
+    // Delivered once: the next tick waits for the round instead of sending again.
+    await run(harness.tick());
+    expect(harness.sent).toHaveLength(1);
+  });
+
+  it("still leaves such a thread alone outside autonomous mode", async () => {
+    const harness = makeHarness({ threads: [thread({ hasWork: false })] });
+
+    await run(harness.tick());
+
+    expect(harness.sent).toStrictEqual([]);
   });
 });
