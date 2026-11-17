@@ -27,7 +27,6 @@ import {
   type OrchestrationV2ThreadShell,
   ProjectId,
   type ServerProvider,
-  type ServerSettings as ServerSettingsValue,
   ThreadId,
 } from "@t3tools/contracts";
 import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
@@ -63,7 +62,7 @@ import {
 } from "./MemAutonomy.ts";
 import { isDestructiveDeletion } from "./MemDestructiveChange.ts";
 import { MemIdleTracker } from "./MemIdleTracker.ts";
-import { chooseModel, type MemPaceDecision, type MemPaceInputs } from "./MemModelPace.ts";
+import { chooseModel, type MemPaceDecision } from "./MemModelPace.ts";
 import {
   buildReviewContext,
   MEM_REVIEW_MAX_BATCHES,
@@ -1794,18 +1793,6 @@ export class MemOverseerService extends Context.Service<
   MemOverseerServiceShape
 >()("t3/overseer/MemOverseerService") {}
 
-/** The review model follows the owner's pace choice: premium, economy, or unset. */
-const resolveOverseerModelSelection = (
-  settings: ServerSettingsValue,
-  fractions: Pick<MemPaceInputs, "usedFraction" | "elapsedFraction">,
-): MemPaceDecision =>
-  chooseModel({
-    paceMode: settings.mem.paceMode,
-    premium: settings.mem.premiumModelSelection,
-    economy: settings.mem.economyModelSelection,
-    ...fractions,
-  });
-
 interface PaceFractions {
   readonly usedFraction: number | null;
   readonly elapsedFraction: number | null;
@@ -1832,6 +1819,18 @@ const readWeeklyPace = Effect.fn("MemOverseerService.readWeeklyPace")(function* 
     usedFraction: window.usedPercent / 100,
     elapsedFraction: elapsedShare(window, nowMs),
   };
+});
+
+/** A model whose provider was removed or turned off cannot review, so the other tier is used. */
+export const usableModelSelection = Effect.fn("MemOverseerService.usableModelSelection")(function* (
+  instances: Pick<ProviderInstanceRegistry.ProviderInstanceRegistry["Service"], "getInstance">,
+  selection: ModelSelection | null,
+) {
+  if (selection === null) return null;
+  const instance = yield* instances.getInstance(selection.instanceId);
+  if (instance === undefined) return null;
+  const provider = yield* instance.snapshot.getSnapshot;
+  return provider.enabled ? selection : null;
 });
 
 interface RecentActivity {
@@ -2177,13 +2176,22 @@ const make = Effect.gen(function* () {
         ),
       );
       const nowMs = yield* Clock.currentTimeMillis;
+      const usable = (selection: ModelSelection | null) =>
+        usableModelSelection(providerInstances, selection).pipe(
+          Effect.catchCause(() => Effect.succeed(selection)),
+        );
+      const premium = yield* usable(current.mem.premiumModelSelection);
+      const economy = yield* usable(current.mem.economyModelSelection);
       // One read per tick, before any thread runs, so every thread in this tick shares one pace.
-      const fractions = yield* readWeeklyPace(
-        providerInstances,
-        current.mem.premiumModelSelection ?? current.mem.economyModelSelection,
-        nowMs,
-      ).pipe(Effect.catchCause(() => Effect.succeed(UNKNOWN_PACE)));
-      const pace = resolveOverseerModelSelection(current, fractions);
+      const fractions = yield* readWeeklyPace(providerInstances, premium ?? economy, nowMs).pipe(
+        Effect.catchCause(() => Effect.succeed(UNKNOWN_PACE)),
+      );
+      const pace = chooseModel({
+        paceMode: current.mem.paceMode,
+        premium,
+        economy,
+        ...fractions,
+      });
       return {
         mem: current.mem,
         modelSelection: pace.kind === "unset" ? null : pace.selection,

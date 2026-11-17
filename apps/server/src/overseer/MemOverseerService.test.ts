@@ -31,6 +31,7 @@ import {
   MEM_ESTIMATED_TURN_USD,
   MemOverseerFailure,
   readRecentActivity,
+  usableModelSelection,
   rootRelativeFiles,
   type MemCommitOutcome,
   type MemOverseerPorts,
@@ -1401,5 +1402,27 @@ describe("rootRelativeFiles", () => {
     );
     expect(context.text).toContain("+export const theRealEdit = 1;");
     expect(context.text).not.toContain("unrelated top");
+  });
+});
+
+describe("usableModelSelection", () => {
+  const selection = { instanceId: "codex", model: "gpt-5" } as never;
+  const registry = (instance: { enabled: boolean } | undefined) =>
+    ({
+      getInstance: () =>
+        Effect.succeed(
+          instance === undefined
+            ? undefined
+            : { snapshot: { getSnapshot: Effect.succeed({ enabled: instance.enabled }) } },
+        ),
+    }) as unknown as Parameters<typeof usableModelSelection>[0];
+
+  it("keeps a model whose provider is on", async () => {
+    expect(await run(usableModelSelection(registry({ enabled: true }), selection))).toBe(selection);
+  });
+
+  it("drops a model whose provider was turned off or removed", async () => {
+    expect(await run(usableModelSelection(registry({ enabled: false }), selection))).toBeNull();
+    expect(await run(usableModelSelection(registry(undefined), selection))).toBeNull();
   });
 });
