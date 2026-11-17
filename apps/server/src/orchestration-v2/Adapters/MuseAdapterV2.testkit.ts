@@ -470,7 +470,10 @@ const CURRENT_RUNTIME_INFO_END = (() => {
   return info.slice(info.indexOf("Mem's files viewer."));
 })();
 
-function withCurrentRuntimeInfoTail<T extends { readonly frame: unknown }>(entry: T): T {
+function withCurrentRuntimeInfoTail(
+  entry: ProviderReplayTranscript["entries"][number],
+): ProviderReplayTranscript["entries"][number] {
+  if (entry.type !== "expect_outbound") return entry;
   const json = JSON.stringify(entry.frame);
   const recorded = JSON.stringify(RECORDED_RUNTIME_INFO_END).slice(1, -1);
   if (!json.includes(recorded)) return entry;
