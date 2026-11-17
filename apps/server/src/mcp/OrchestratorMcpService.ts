@@ -2710,9 +2710,12 @@ ${creditFallbackRetryNote({
         MAX_WAIT_TIMEOUT_MS,
         Math.max(1, input.timeoutMs ?? DEFAULT_WAIT_TIMEOUT_MS),
       );
+      const waitStartedMs = yield* Clock.currentTimeMillis;
       const waited = yield* waitForTask(scope, taskId, timeoutMs);
       if (Option.isSome(waited) && isTerminalTaskStatus(waited.value.status)) {
-        return yield* retryOnFallback(waited.value, timeoutMs);
+        // A fallback retry gets what is left of the caller's timeout, not a second full one.
+        const elapsedMs = (yield* Clock.currentTimeMillis) - waitStartedMs;
+        return yield* retryOnFallback(waited.value, Math.max(1, timeoutMs - elapsedMs));
       }
       // An incomplete wait gives up delivery: upgrade so a later terminal
       // wakes the parent even mid-turn.
