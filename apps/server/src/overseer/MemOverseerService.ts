@@ -705,7 +705,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       if (usage.limited && waitedOutLimit) {
         // The limit cut the last run short; the reset lets it pick up where it stopped.
         if (yield* deliver(thread, CONTINUE_AFTER_LIMIT_INSTRUCTION)) {
-          record = { ...record, pendingCharge: true };
+          // A fresh stamp, so settling charges this run and not the last completed turn again.
+          record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
         }
         yield* persist();
         return;

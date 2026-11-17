@@ -998,6 +998,34 @@ describe("MemOverseerService autonomous mode", () => {
     expect(record?.waitingUntilMs).toBeGreaterThan(resetsAtMs);
   });
 
+  it("stamps the resume after a limit, so the old turn is not charged again", async () => {
+    const startMs = await run(Clock.currentTimeMillis);
+    const store = new Map<string, MemOverseerTaskRecord>([
+      [
+        "thread-1",
+        {
+          ...newTaskRecord("thread-1", 1),
+          task: { threadId: "thread-1", phase: "claimed", rejections: 0, lastInstruction: null },
+          deliveredInstruction: "Add the guard.",
+          deliveredAtMs: 5,
+          waitingFor: "usage",
+          waitingUntilMs: 1,
+        },
+      ],
+    ]);
+    const harness = makeHarness({
+      mem: autonomous,
+      store,
+      threads: [thread({ usage: { limited: true, windows: [] } })],
+    });
+
+    await run(harness.tick());
+
+    expect(harness.sent).toHaveLength(1);
+    expect(store.get("thread-1")?.pendingCharge).toBe(true);
+    expect(store.get("thread-1")?.deliveredAtMs).toBeGreaterThanOrEqual(startMs);
+  });
+
   it("waits for the spending cap instead of parking", async () => {
     const harness = makeHarness({
       mem: { ...autonomous, spendingCapUsd: 0.01 },
