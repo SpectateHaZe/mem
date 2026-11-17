@@ -340,6 +340,29 @@ describe("MemOverseerService.tick", () => {
     expect(harness.sent).toHaveLength(1);
   });
 
+  it("does not send an approved instruction into a turn that is running", async () => {
+    const harness = makeHarness({
+      away: false,
+      threads: [thread({ idle: false })],
+      store: new Map([["thread-1", pendingRecord(DESTRUCTIVE_INSTRUCTION)]]),
+    });
+
+    const answer = await run(
+      harness.answerApproval({
+        threadId: "thread-1",
+        approvalId: pendingApprovalId(),
+        decision: "approve",
+      }),
+    );
+
+    expect(answer).toStrictEqual({ outcome: "failed" });
+    expect(harness.sent).toStrictEqual([]);
+    // Still waiting, so the owner can approve once the turn ends.
+    expect(harness.store.get("thread-1")?.pendingApproval?.instruction).toBe(
+      DESTRUCTIVE_INSTRUCTION,
+    );
+  });
+
   it("never sends a denied instruction and never asks again", async () => {
     const harness = makeHarness({
       away: false,

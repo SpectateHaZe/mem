@@ -1174,7 +1174,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     }));
   });
 
-  const answerApproval = Effect.fn("MemOverseerService.answerApproval")(function* (
+  const answerApproval = (input: MemAnswerApprovalInput) =>
+    // Two clients approving at once must not both send; the record is read again under the lock.
+    actorLock.withPermit(answerApprovalLocked(input));
+
+  const answerApprovalLocked = Effect.fn("MemOverseerService.answerApproval")(function* (
     input: MemAnswerApprovalInput,
   ) {
     const record = yield* ports.store.get(input.threadId).pipe(
@@ -1208,6 +1212,12 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       });
       return { outcome: "denied" as const };
     }
+
+    // Never steer an approved instruction into a turn the owner is running; approve again after it.
+    const thread = yield* ports
+      .readThread(pending.threadId)
+      .pipe(Effect.orElseSucceed(() => undefined));
+    if (thread !== undefined && !thread.idle) return { outcome: "failed" as const };
 
     const delivered = yield* deliver(
       {
