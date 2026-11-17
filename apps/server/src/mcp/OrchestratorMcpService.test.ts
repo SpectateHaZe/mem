@@ -1237,7 +1237,8 @@ describe("OrchestratorMcpService provider resolution", () => {
     turnItems: [],
   } as unknown as OrchestrationV2ThreadProjection;
 
-  it.effect.each([
+  // Live clock: the still-running case ends on the wait timeout.
+  it.live.each([
     {
       name: "a successful fallback retry",
       retryStatus: "completed" as const,
@@ -1261,6 +1262,12 @@ describe("OrchestratorMcpService provider resolution", () => {
       retryStatus: "failed" as const,
       fallbackSameAsFailedTarget: false,
       wakeAlways: true,
+    },
+    {
+      name: "a fallback retry still running when the wait ends",
+      retryStatus: "running" as const,
+      fallbackSameAsFailedTarget: false,
+      wakeAlways: false,
     },
   ])("retries an out-of-credit delegated task once: $name", (testCase) =>
     Effect.gen(function* () {
@@ -1288,6 +1295,7 @@ describe("OrchestratorMcpService provider resolution", () => {
         }>
       >([]);
       const launched: Array<LaunchedTask> = [];
+      const wakeUpgrades = yield* Ref.make<ReadonlyArray<string>>([]);
       const parentThread = {
         id: parentThreadId,
         projectId,
@@ -1444,7 +1452,12 @@ describe("OrchestratorMcpService provider resolution", () => {
                     } as never;
                   }),
                 )
-              : Effect.succeed({ sequence: 0, storedEvents: [] } as never),
+              : command.type === "delegated_task.wake-policy"
+                ? Ref.update(wakeUpgrades, (ids) => [...ids, command.taskId]).pipe(
+                    Effect.as({ sequence: 0, storedEvents: [] } as never),
+                  )
+                : Effect.succeed({ sequence: 0, storedEvents: [] } as never),
+          streamStoredEventsFrom: () => Stream.never,
         }),
         ServerSettings.layerTest({
           subagentFallbackModelSelection: testCase.fallbackSameAsFailedTarget
@@ -1475,8 +1488,14 @@ describe("OrchestratorMcpService provider resolution", () => {
         const result = yield* service.delegateTask(scope, {
           task: "Review the change.",
           mode: "wait",
+          timeoutMs: 50,
         });
         const commands = yield* Ref.get(dispatched);
+        if (testCase.retryStatus === "running") {
+          assert.equal(commands.length, 2);
+          assert.deepEqual(yield* Ref.get(wakeUpgrades), [String(launched[1]?.taskId)]);
+          return;
+        }
         if (testCase.wakeAlways) {
           assert.equal(commands.length, 1);
           assert.equal(result.status, "failed");

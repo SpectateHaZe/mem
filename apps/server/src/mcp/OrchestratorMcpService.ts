@@ -2583,8 +2583,26 @@ ${creditFallbackRetryNote({
             });
           }
           const retryWaited = yield* waitForTask(scope, retryTaskId, timeoutMs);
+          const retryFinished =
+            Option.isSome(retryWaited) && isTerminalTaskStatus(retryWaited.value.status);
+          if (!retryFinished) {
+            // As for the first attempt: this call stops waiting, so the result must wake the parent.
+            yield* threadManagement
+              .dispatch({
+                type: "delegated_task.wake-policy",
+                commandId: stableCommandId({
+                  scope,
+                  requestKey: retryTaskId,
+                  operation: "delegate-task-wake-policy",
+                }),
+                parentThreadId: scope.thread.threadId,
+                taskId: retryTaskId,
+                completionWake: "always",
+              })
+              .pipe(Effect.ignoreCause({ log: true }));
+          }
           const retried =
-            Option.isSome(retryWaited) && isTerminalTaskStatus(retryWaited.value.status)
+            retryFinished && Option.isSome(retryWaited)
               ? retryWaited.value
               : yield* readTask(scope, retryTaskId, Option.isNone(retryWaited), true);
           const note = `Retried on ${fallback.instanceId}/${fallback.model} after ${failed.providerInstanceId}/${failed.model} ran out of credit. The retry was told to continue from existing uncommitted changes.`;
