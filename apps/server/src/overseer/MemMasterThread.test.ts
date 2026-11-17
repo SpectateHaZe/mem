@@ -12,6 +12,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as SqlClient from "effect/sql/SqlClient";
 
 import * as SqlitePersistence from "../persistence/Sqlite.ts";
 import * as ServerSettings from "../serverSettings.ts";
@@ -263,6 +264,26 @@ describe("Mem master thread", () => {
       assert.strictEqual(snapshot.threads[0]?.id, MEM_MASTER_THREAD_ID);
       assert.strictEqual(snapshot.threads[0]?.snoozedUntil, null);
       assert.strictEqual(snapshot.threads[0]?.memMaster, true);
+    }).pipe(Effect.provide(makeLayer())),
+  );
+
+  it.effect("creates a new Mem thread after the old one is deleted with its project", () =>
+    Effect.gen(function* () {
+      yield* insertProject;
+      const first = yield* ensureMemThread;
+      assert.strictEqual(first, MEM_MASTER_THREAD_ID);
+      // Removing a project tombstones its threads, the Mem thread included.
+      const sql = yield* SqlClient.SqlClient;
+      yield* sql`UPDATE orchestration_v2_projection_threads SET deleted_at = ${at} WHERE thread_id = ${MEM_MASTER_THREAD_ID}`;
+
+      const second = yield* ensureMemThread;
+      assert.isNotNull(second);
+      assert.notStrictEqual(second, MEM_MASTER_THREAD_ID);
+      const orchestrator = yield* Orchestrator.OrchestratorV2;
+      const shell = (yield* orchestrator.getShellSnapshot()).threads.find(
+        (thread) => thread.id === second,
+      );
+      assert.strictEqual(shell?.memMaster, true);
     }).pipe(Effect.provide(makeLayer())),
   );
 

@@ -47,7 +47,6 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const settings = yield* ServerSettings.ServerSettingsService;
   const scheduler = yield* Scheduler.Scheduler;
-  const known = yield* Ref.make<ThreadId | null>(null);
   const attempts = yield* Ref.make(0);
 
   const nextCommandId = Effect.gen(function* () {
@@ -81,51 +80,59 @@ const make = Effect.gen(function* () {
       );
       return null;
     }
-    const threadId = input.threadId ?? MEM_MASTER_THREAD_ID;
-    yield* threads.dispatch({
-      type: "thread.create",
-      createdBy: "user",
-      creationSource: "server",
-      commandId: yield* nextCommandId,
-      threadId,
-      projectId,
-      title: MEM_MASTER_THREAD_TITLE,
-      memMaster: true,
-      modelSelection,
-      runtimeMode: DEFAULT_RUNTIME_MODE,
-      interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
-      branch: null,
-      worktreePath: null,
+    const dispatchCreate = Effect.fn("MemMasterThreadService.dispatchCreate")(function* (
+      threadId: ThreadId,
+    ) {
+      yield* threads.dispatch({
+        type: "thread.create",
+        createdBy: "user",
+        creationSource: "server",
+        commandId: yield* nextCommandId,
+        threadId,
+        projectId,
+        title: MEM_MASTER_THREAD_TITLE,
+        memMaster: true,
+        modelSelection,
+        runtimeMode: DEFAULT_RUNTIME_MODE,
+        interactionMode: DEFAULT_PROVIDER_INTERACTION_MODE,
+        branch: null,
+        worktreePath: null,
+      });
+      return threadId;
     });
-    return threadId;
+    const threadId = input.threadId ?? MEM_MASTER_THREAD_ID;
+    return yield* dispatchCreate(threadId).pipe(
+      // A deleted Mem thread (its project was removed) still holds the usual id.
+      Effect.catchTags({
+        OrchestratorThreadAlreadyExistsError: Effect.fn("MemMasterThreadService.recreate")(
+          function* (error) {
+            const live = yield* projections.findMemMasterThreadId();
+            if (live !== null) return live;
+            if (input.threadId !== undefined) return yield* error;
+            const nowMs = yield* Clock.currentTimeMillis;
+            return yield* dispatchCreate(ThreadId.make(`${MEM_MASTER_THREAD_ID}:${nowMs}`));
+          },
+        ),
+      }),
+    );
   });
 
   const ensureOnce = Effect.fn("MemMasterThreadService.ensure")(function* (
     input: MemMasterThreadInput = {},
   ) {
-    const knownId = yield* Ref.get(known);
-    if (knownId !== null) return knownId;
+    // Looked up every time, not cached: removing its project deletes the Mem thread.
     const existing = yield* projections.findMemMasterThreadId();
-    if (existing !== null) {
-      yield* Ref.set(known, existing);
-      return existing;
-    }
-    const created = yield* create(input);
-    if (created !== null) yield* Ref.set(known, created);
-    return created;
+    if (existing !== null) return existing;
+    return yield* create(input);
   });
 
   const ensure = (input: MemMasterThreadInput = {}) =>
     ensureOnce(input).pipe(
       // Another caller created it first; that thread is the one and this call is done.
       Effect.catchTags({
-        OrchestratorMemMasterThreadExistsError: (error) =>
-          Ref.set(known, error.threadId).pipe(Effect.as(error.threadId)),
+        OrchestratorMemMasterThreadExistsError: (error) => Effect.succeed(error.threadId),
         OrchestratorThreadAlreadyExistsError: () =>
-          projections.findMemMasterThreadId().pipe(
-            Effect.tap((threadId) => (threadId === null ? Effect.void : Ref.set(known, threadId))),
-            Effect.orElseSucceed(() => null),
-          ),
+          projections.findMemMasterThreadId().pipe(Effect.orElseSucceed(() => null)),
       }),
       Effect.catch((cause) =>
         Effect.logWarning("Could not ensure the Mem thread", { cause }).pipe(Effect.as(null)),
@@ -135,7 +142,7 @@ const make = Effect.gen(function* () {
   const service = MemMasterThreadService.of({ ensure });
 
   // Startup attempt: a fresh install has no project or Mem model yet, so a slow retry keeps
-  // trying until both exist. Once the thread is known every retry is one Ref read.
+  // trying until both exist. Once the thread exists every retry is one indexed lookup.
   yield* ensure();
   const lastAttemptMs = yield* Ref.make(0);
   const retry = Effect.gen(function* () {
