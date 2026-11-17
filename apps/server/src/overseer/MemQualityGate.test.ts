@@ -81,7 +81,7 @@ describe("buildQualityGatePrompt", () => {
     );
   });
 
-  it("truncates changes and evidence but not task or acceptance", () => {
+  it("truncates evidence but not task, acceptance or the change batch", () => {
     const oversized = "x".repeat(QUALITY_GATE_SUBSTITUTION_LIMIT + 500);
     const prompt = buildQualityGatePrompt({
       template: "{{task}}|{{acceptance}}|{{changes}}|{{evidence}}",
@@ -93,9 +93,7 @@ describe("buildQualityGatePrompt", () => {
     const [task, acceptance, changes, evidence] = prompt.split("|");
     expect(task).toHaveLength(QUALITY_GATE_SUBSTITUTION_LIMIT + 500);
     expect(acceptance).toHaveLength(QUALITY_GATE_SUBSTITUTION_LIMIT + 500);
-    expect(changes).toBe(
-      "x".repeat(QUALITY_GATE_SUBSTITUTION_LIMIT) + QUALITY_GATE_TRUNCATION_MARKER,
-    );
+    expect(changes).toHaveLength(QUALITY_GATE_SUBSTITUTION_LIMIT + 500);
     expect(evidence).toBe(
       "x".repeat(QUALITY_GATE_SUBSTITUTION_LIMIT) + QUALITY_GATE_TRUNCATION_MARKER,
     );

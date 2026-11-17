@@ -1,6 +1,9 @@
 import { DEFAULT_MEM_QUALITY_PROMPT } from "@t3tools/contracts";
 
-/** Per-field cap on `{{changes}}` and `{{evidence}}`, so a runaway diff cannot crowd out the rubric. */
+/**
+ * Cap on `{{evidence}}`, so a runaway reply cannot crowd out the rubric. `{{changes}}` is one review
+ * batch, already capped by `MemReviewContext`; cutting it again hid most of every batch.
+ */
 export const QUALITY_GATE_SUBSTITUTION_LIMIT = 40_000;
 
 export const QUALITY_GATE_TRUNCATION_MARKER = "\u2026[truncated]";
@@ -52,7 +55,7 @@ export const buildQualityGatePrompt = (input: QualityGatePromptInput): string =>
   const substitutions: Record<string, string> = {
     task: input.task,
     acceptance: input.acceptance,
-    changes: truncate(input.changes),
+    changes: input.changes,
     evidence: truncate(input.evidence),
   };
   // One pass, so substituted text is never rescanned for placeholders it happens to contain.
