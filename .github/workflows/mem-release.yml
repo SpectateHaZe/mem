@@ -114,7 +114,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          mac=(release/*.dmg release/*.zip release/latest-mac.yml)
+          # Every entry needs a wildcard: nullglob keeps a plain name even when the file is missing.
+          mac=(release/*.dmg release/*.zip release/latest-mac*.yml)
           if [ ${#mac[@]} -eq 0 ]; then echo "::warning::No macOS build; publishing Windows only."; fi
           gh release create "$GITHUB_REF_NAME" --generate-notes \
             release/*.exe release/*.blockmap release/latest.yml "${mac[@]}"
