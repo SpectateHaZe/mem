@@ -120,6 +120,7 @@ export const MEM_APPROVAL_TIMEOUT_MS = 120_000;
 const MEM_TIMELINE_PAGE_SIZE = 1_000;
 const MEM_TIMELINE_MAX_PAGES = 8;
 const MEM_EVIDENCE_MAX_LENGTH = 4_000;
+export const MEM_NO_CHANGES_BATCH = "(No file changes were recorded for this session.)";
 
 const DEFAULT_ACCEPTANCE =
   "The last request in the thread is fulfilled and the evidence in the thread supports every claim it makes.";
@@ -445,7 +446,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     let rejectInstruction: string | null = null;
     let acceptNote: string | null = null;
 
-    const batches = plan.batches.slice(0, MEM_REVIEW_MAX_BATCHES);
+    // No recorded files still gets one review: "done, tests pass" is a claim the reviewer must judge.
+    const batches =
+      plan.batches.length === 0
+        ? [MEM_NO_CHANGES_BATCH]
+        : plan.batches.slice(0, MEM_REVIEW_MAX_BATCHES);
     for (const batch of batches) {
       const budget = decideSpend({
         capUsd: mem.spendingCapUsd,

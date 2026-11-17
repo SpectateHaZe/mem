@@ -17,6 +17,7 @@ import {
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_ESTIMATED_REVIEW_USD,
+  MEM_NO_CHANGES_BATCH,
   MemOverseerFailure,
   type MemOverseerPorts,
   type MemOverseerReviewRequest,
@@ -197,6 +198,14 @@ const claimedRecord = (instruction: string): MemOverseerTaskRecord => ({
 });
 
 describe("MemOverseerService.reviewThreadNow", () => {
+  it("still reviews a session that changed no files instead of accepting it", async () => {
+    const harness = makeHarness({ plan: { batches: [], deletedLines: 0, deletedFiles: [] } });
+    const review = await run(harness.service.reviewThreadNow("thread-1"));
+
+    expect(harness.reviews.map((entry) => entry.changes)).toStrictEqual([MEM_NO_CHANGES_BATCH]);
+    expect(review.accepted).toBe(false);
+  });
+
   it("reaches the same verdict and shape a tick review would", async () => {
     const tick = makeHarness();
     await run(tick.service.tick());
