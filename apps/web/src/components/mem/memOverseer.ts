@@ -15,6 +15,7 @@ export const NO_MEM_THREAD_STATE: MemThreadState = {
   verdict: null,
   reason: null,
   escalated: false,
+  spentUsd: 0,
   masterThreadId: null,
 };
 

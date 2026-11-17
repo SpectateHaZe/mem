@@ -1338,6 +1338,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       verdict: review?.verdict ?? null,
       reason: review?.reasoning ?? null,
       escalated: record?.task.phase === "escalated",
+      spentUsd: record?.spentUsd ?? 0,
       masterThreadId: masterThreadId ?? null,
     } satisfies MemThreadState;
   });

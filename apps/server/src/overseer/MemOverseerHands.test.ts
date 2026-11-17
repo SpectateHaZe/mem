@@ -385,6 +385,8 @@ describe("MemOverseerService.threadState", () => {
       verdict: "reject",
       reason: REJECT.reasoning,
       escalated: false,
+      // The one review is charged and shown back on the thread.
+      spentUsd: MEM_ESTIMATED_REVIEW_USD,
       masterThreadId: null,
     });
     expect(harness.reviews).toHaveLength(1);

@@ -31,6 +31,9 @@ import {
 import { memThreadSeed } from "./memThreadPrompt";
 import { useMemThreadData } from "./useMemThreadData";
 
+/** Under a cent still reads as spent, not as $0.00. */
+const formatMemSpend = (usd: number): string => (usd < 0.01 ? "under $0.01" : `$${usd.toFixed(2)}`);
+
 const failureMessage = (failure: unknown, fallback: string) =>
   failure instanceof Error && failure.message.trim().length > 0 ? failure.message : fallback;
 
@@ -159,6 +162,12 @@ export function MemThreadPopover(props: {
           )}
         </div>
       )}
+
+      {state.spentUsd > 0 ? (
+        <p className="text-muted-foreground text-xs">
+          Mem spent {formatMemSpend(state.spentUsd)} on this session.
+        </p>
+      ) : null}
 
       {pendingApproval === null ? null : (
         <div className="space-y-1.5 rounded-md border p-2">

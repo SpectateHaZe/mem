@@ -229,6 +229,8 @@ export const MemThreadState = Schema.Struct({
   reason: Schema.NullOr(Schema.String),
   /** Mem stopped on this thread and is waiting for the owner; `reason` says why. */
   escalated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
+  /** What Mem has paid for its own reviews and guides on this thread, in dollars. */
+  spentUsd: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   masterThreadId: Schema.NullOr(Schema.String),
 });
 export type MemThreadState = typeof MemThreadState.Type;
