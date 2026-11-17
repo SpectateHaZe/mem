@@ -35,6 +35,7 @@ import {
   useScopedSettingsMixed,
   useUpdateScopedSettings,
 } from "./useScopedSettings";
+import { parseMemSettingNumber } from "./memSettingsInput";
 
 const PACE_MODE_LABELS = { on_pace: "On pace", full: "Full" } as const;
 
@@ -75,13 +76,10 @@ export function MemOverseerSettingsSection() {
     updateSettings({ mem: { ...mem, ...patch } });
   const reset = (key: keyof MemOverseerSettings) =>
     updateSettings({ mem: { ...mem, [key]: DEFAULT_MEM_OVERSEER_SETTINGS[key] } });
-  const commitWholeNumber = (key: "spendingCapUsd" | "idleThresholdMinutes", next: string) => {
-    const draft = next.trim();
-    if (draft === "") return;
-    const value = Number(draft);
-    if (!Number.isFinite(value) || value < 0) return;
-    const whole = Math.round(value);
-    update(key === "spendingCapUsd" ? { spendingCapUsd: whole } : { idleThresholdMinutes: whole });
+  const commitNumber = (key: "spendingCapUsd" | "idleThresholdMinutes", next: string) => {
+    const value = parseMemSettingNumber(key, next);
+    if (value === null) return;
+    update(key === "spendingCapUsd" ? { spendingCapUsd: value } : { idleThresholdMinutes: value });
   };
   const modelRow = (
     title: "premium model" | "economy model",
@@ -181,9 +179,9 @@ export function MemOverseerSettingsSection() {
             <DraftInput
               size="sm"
               className="w-full sm:w-24"
-              inputMode="numeric"
+              inputMode="decimal"
               value={String(mem.spendingCapUsd)}
-              onCommit={(next) => commitWholeNumber("spendingCapUsd", next)}
+              onCommit={(next) => commitNumber("spendingCapUsd", next)}
               placeholder={mixed ? "Mixed" : "0"}
               aria-label="Mem spending cap in US dollars per day"
             />
@@ -233,7 +231,7 @@ export function MemOverseerSettingsSection() {
               className="w-full sm:w-24"
               inputMode="numeric"
               value={String(mem.idleThresholdMinutes)}
-              onCommit={(next) => commitWholeNumber("idleThresholdMinutes", next)}
+              onCommit={(next) => commitNumber("idleThresholdMinutes", next)}
               placeholder={mixed ? "Mixed" : "20"}
               aria-label="Idle threshold in minutes"
             />
