@@ -39,6 +39,9 @@ export type MemLoopAction =
   | { readonly type: "escalate"; readonly reason: string }
   | { readonly type: "park"; readonly reason: string };
 
+/** Rejections in a row before Mem stops sending corrections and hands the thread to the owner. */
+export const MEM_MAX_REJECTIONS = 5;
+
 export const startTask = (threadId: string): MemTaskState => ({
   threadId,
   phase: "claimed",
@@ -73,10 +76,15 @@ export const reduceTask = (state: MemTaskState, event: MemTaskEvent): MemTaskSta
       if (result.nextInstruction === null || result.nextInstruction.trim() === "") {
         return { ...state, phase: "escalated", lastInstruction: null };
       }
+      const rejections = state.rejections + 1;
+      // An agent that keeps failing review would otherwise loop on corrections forever.
+      if (rejections >= MEM_MAX_REJECTIONS) {
+        return { ...state, phase: "escalated", rejections, lastInstruction: null };
+      }
       return {
         ...state,
         phase: "claimed",
-        rejections: state.rejections + 1,
+        rejections,
         lastInstruction: result.nextInstruction,
       };
     }

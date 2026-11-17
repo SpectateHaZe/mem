@@ -945,8 +945,36 @@ describe("MemOverseerService autonomous mode", () => {
     expect(harness.sent).toHaveLength(1);
     expect(harness.sent[0]).toContain("lint: 2 errors");
     const record = harness.store.get("thread-1");
-    expect(record?.task.rejections).toBe(1);
+    expect(record?.commitFailures).toBe(1);
     expect(record?.roundSummaries).toStrictEqual([]);
+  });
+
+  it("gives a round's commit its own five tries, whatever review rejected before", async () => {
+    const store = new Map([
+      [
+        "thread-1",
+        {
+          ...newTaskRecord("thread-1", 1),
+          task: {
+            threadId: "thread-1",
+            phase: "claimed" as const,
+            rejections: 4,
+            lastInstruction: null,
+          },
+        },
+      ],
+    ]);
+    const harness = makeHarness({
+      mem: autonomous,
+      store,
+      review: () => Effect.succeed(ACCEPT),
+      commit: { type: "failed", output: "hook failed" },
+    });
+
+    await run(harness.tick());
+
+    expect(store.get("thread-1")?.task.phase).toBe("claimed");
+    expect(store.get("thread-1")?.commitFailures).toBe(1);
   });
 
   it("waits out a full usage window instead of reviewing", async () => {

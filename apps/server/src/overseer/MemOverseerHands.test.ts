@@ -503,6 +503,9 @@ describe("MemOverseerService.setLifecycle", () => {
       task: { threadId: "thread-1", phase: "escalated", rejections: 3, lastInstruction: null },
       settledPhase: "escalated",
       spentUsd: 1,
+      failedRounds: 2,
+      waitingUntilMs: 4_102_444_800_000,
+      waitingFor: "usage",
     };
     const harness = makeHarness({ store: new Map([["thread-1", settled]]) });
 
@@ -514,6 +517,10 @@ describe("MemOverseerService.setLifecycle", () => {
     expect(record?.settledPhase).toBeNull();
     // The budget spent so far is never handed back.
     expect(record?.spentUsd).toBe(1);
+    // Old failures and waits do not cut the fresh attempt short.
+    expect(record?.failedRounds).toBe(0);
+    expect(record?.waitingUntilMs).toBeNull();
+    expect(record?.waitingFor).toBeNull();
   });
 });
 

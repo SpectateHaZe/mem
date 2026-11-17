@@ -350,6 +350,8 @@ const sameRecord = (
   left.priority === right.priority &&
   left.waitingUntilMs === right.waitingUntilMs &&
   left.waitingFor === right.waitingFor &&
+  left.failedRounds === right.failedRounds &&
+  left.commitFailures === right.commitFailures &&
   left.roundSummaries.length === right.roundSummaries.length &&
   left.roundSummaries.at(-1) === right.roundSummaries.at(-1);
 
@@ -581,8 +583,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
                 lastReview: {
                   verdict: "reject" as const,
                   reasoning: failedAfterSend
-                    ? "Two runs in a row failed before doing anything, so Mem stopped resending. Check the session's error, then mark it in progress again."
-                    : "Two runs in a row ended without saying anything, so Mem stopped resending. Mark the session in progress again to resume.",
+                    ? "Two runs in a row failed before doing anything, so Mem stopped resending. Check the session's error, then press Resume Mem."
+                    : "Two runs in a row ended without saying anything, so Mem stopped resending. Press Resume Mem to try again.",
                 },
               }
             : { waitingUntilMs: nowMs + MEM_FAILED_ROUND_BACKOFF_MS, waitingFor: null }),
@@ -734,7 +736,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         lastReview: {
           verdict: "reject",
           reasoning:
-            "The session never answered Mem's last instruction, so Mem stopped. Mark it in progress again to resume.",
+            "The session never answered Mem's last instruction, so Mem stopped. Press Resume Mem to try again.",
         },
         updatedAtMs: nowMs,
       });
@@ -925,7 +927,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             ),
           );
           if (commit.type === "failed") {
-            const failures = state.rejections + 1;
+            const failures = record.commitFailures + 1;
+            record = { ...record, commitFailures: failures };
             if (failures >= MEM_MAX_COMMIT_FAILURES) {
               state = { ...state, phase: "escalated", lastInstruction: null };
               record = {
@@ -945,12 +948,16 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             state = {
               ...state,
               phase: "claimed",
-              rejections: failures,
               lastInstruction: `Mem couldn't commit this round. Git said:\n\n${commit.output}\n\nFix what it reports, then end with one \`Improved:\` line.`,
             };
           } else {
             const summaries = [...record.roundSummaries, summary].slice(-MEM_ROUND_MEMORY);
-            record = { ...record, roundSummaries: summaries, settledPhase: null };
+            record = {
+              ...record,
+              roundSummaries: summaries,
+              settledPhase: null,
+              commitFailures: 0,
+            };
             state = {
               threadId: state.threadId,
               phase: "claimed",
@@ -1526,6 +1533,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             task: startTask(threadId),
             settledPhase: null,
             pendingApproval: null,
+            // A fresh start: old failures and waits must not cut the new attempt short.
+            failedRounds: 0,
+            commitFailures: 0,
+            waitingUntilMs: null,
+            waitingFor: null,
             updatedAtMs: nowMs,
           });
         }),

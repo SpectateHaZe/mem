@@ -73,6 +73,8 @@ export interface MemOverseerTaskRecord {
   readonly roundSummaries: ReadonlyArray<string>;
   /** Delivered rounds in a row whose run produced nothing; the second escalates to the owner. */
   readonly failedRounds: number;
+  /** Commits of an accepted round that failed in a row; apart from review rejections. */
+  readonly commitFailures: number;
   readonly updatedAtMs: number;
 }
 
@@ -97,6 +99,7 @@ export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskR
   waitingFor: null,
   roundSummaries: [],
   failedRounds: 0,
+  commitFailures: 0,
   updatedAtMs: nowMs,
 });
 
@@ -143,6 +146,7 @@ const PersistedTaskRecord = Schema.Struct({
   waitingFor: Schema.optionalKey(Schema.NullOr(Schema.Literals(["usage", "budget"]))),
   roundSummaries: Schema.optionalKey(Schema.Array(Schema.String)),
   failedRounds: Schema.optionalKey(Schema.Int),
+  commitFailures: Schema.optionalKey(Schema.Int),
   updatedAtMs: Schema.Int,
 });
 
@@ -182,6 +186,7 @@ const toPersisted = (record: MemOverseerTaskRecord) => ({
   waitingFor: record.waitingFor,
   roundSummaries: record.roundSummaries,
   failedRounds: record.failedRounds,
+  commitFailures: record.commitFailures,
   updatedAtMs: record.updatedAtMs,
 });
 
@@ -209,6 +214,7 @@ const fromPersisted = (persisted: typeof PersistedTaskRecord.Type): MemOverseerT
   waitingFor: persisted.waitingFor ?? null,
   roundSummaries: persisted.roundSummaries ?? [],
   failedRounds: persisted.failedRounds ?? 0,
+  commitFailures: persisted.commitFailures ?? 0,
   updatedAtMs: persisted.updatedAtMs,
 });
 

@@ -188,12 +188,13 @@ export function MemThreadPopover(props: {
 
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={!canOperate || busy !== null || watching}
+          // An escalated session is still marked in progress; marking it again lets Mem resume.
+          disabled={!canOperate || busy !== null || (watching && !state.escalated)}
           onClick={() => void mark("in_progress")}
           size="sm"
-          variant="outline"
+          variant={state.escalated ? "default" : "outline"}
         >
-          Mark in progress
+          {state.escalated ? "Resume Mem" : "Mark in progress"}
         </Button>
         <Button
           disabled={!canOperate || busy !== null || props.lifecycle === "complete"}

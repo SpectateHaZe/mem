@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vite-plus/test";
 
 import {
+  MEM_MAX_REJECTIONS,
   nextAction,
   reduceTask,
   startTask,
@@ -39,6 +40,24 @@ describe("Mem overseer task machine", () => {
     });
     expect(accepted.phase).toBe("accepted");
     expect(nextAction(accepted, IDLE_AWAY)).toStrictEqual({ type: "accept" });
+  });
+
+  it("hands the thread to the owner after too many rejections in a row", () => {
+    const reject = review({ verdict: "reject", nextInstruction: "Fix the parser." });
+    let state = startTask("thread-1");
+    for (let round = 1; round < MEM_MAX_REJECTIONS; round += 1) {
+      state = reduceTask(reduceTask(state, { type: "turnEnded", status: "completed" }), {
+        type: "reviewed",
+        result: reject,
+      });
+      expect(state.phase).toBe("claimed");
+    }
+    state = reduceTask(reduceTask(state, { type: "turnEnded", status: "completed" }), {
+      type: "reviewed",
+      result: reject,
+    });
+    expect(state.phase).toBe("escalated");
+    expect(state.rejections).toBe(MEM_MAX_REJECTIONS);
   });
 
   it("sends the rejection instruction back and counts the round", () => {
