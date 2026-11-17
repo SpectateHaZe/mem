@@ -39,6 +39,8 @@ describe("isCreditExhaustionFailure", () => {
     "Their billing review found no changes to make.",
     "Run quota check succeeded: the account is in credit.",
     "Child task ended with status failed.",
+    "RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'Generate requests' and limit 'Generate requests per minute'.",
+    "You exceeded your current quota. Quota exceeded for metric: GenerateRequestsPerMinutePerProjectPerModel. Please retry in 21s.",
   ])("ignores non-credit failures in %s", (message) => {
     assert.isFalse(isCreditExhaustionFailure(message));
   });

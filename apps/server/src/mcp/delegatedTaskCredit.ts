@@ -13,8 +13,12 @@ const CREDIT_EXHAUSTION_PATTERNS: ReadonlyArray<RegExp> = [
   /\bpayment required\b/i,
 ];
 
+// Gemini reports a per-minute limit as RESOURCE_EXHAUSTED / quota exceeded; it clears by itself.
+const SHORT_WINDOW_LIMIT = /\bper[ _-]?(?:minute|second)\b|PerMinute|PerSecond/i;
+
 /** True only for an account out of credit. A rate limit, a bad request, or a cancel is not one. */
 export function isCreditExhaustionFailure(message: string): boolean {
+  if (SHORT_WINDOW_LIMIT.test(message)) return false;
   return CREDIT_EXHAUSTION_PATTERNS.some((pattern) => pattern.test(message));
 }
 
