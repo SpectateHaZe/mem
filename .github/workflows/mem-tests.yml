@@ -1,0 +1,43 @@
+# On-demand Linux test lane for the Mem fork. ci.yml runs on Blacksmith runners
+# and only for main and pull requests, so this gives mem-features a Linux box to
+# tell Windows-only failures from real ones.
+#
+#   gh workflow run mem-tests.yml -R SpectateHaZe/mem --ref mem-features \
+#     -f package=apps/server -f files="src/overseer/MemOverseerService.test.ts"
+name: Mem Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: "Workspace directory to test, e.g. apps/server or packages/shared."
+        required: true
+        type: string
+      files:
+        description: "Space-separated test files relative to the package. Empty runs the whole suite."
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test (Linux)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup Vite+
+        uses: ./.github/actions/setup-ci-deps
+
+      - name: Test
+        env:
+          PACKAGE: ${{ inputs.package }}
+          FILES: ${{ inputs.files }}
+        run: |
+          cd "$PACKAGE"
+          # Word splitting is the point: FILES is a space-separated list.
+          # shellcheck disable=SC2086
+          vp test run $FILES
