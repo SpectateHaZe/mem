@@ -347,6 +347,68 @@ it.effect(
     }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("records a fixed-time run missed while the computer was off instead of running it", () =>
+  Effect.gen(function* () {
+    const sql = yield* SqlClient.SqlClient;
+    const now = "2026-09-09T12:00:00.000Z";
+    yield* insertRow(
+      sql,
+      {
+        id: "missed",
+        next: "2026-09-09T09:00:00.000Z",
+        enabled: 1,
+        status: "succeeded",
+        scheduleJson: '{"type":"fixed_time","timeOfDay":"09:00"}',
+      },
+      now,
+    );
+    yield* TestClock.setTime(Date.parse(now));
+    const launched = yield* Ref.make(0);
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* Layer.build(
+          Layer.provideMerge(
+            ScheduledTaskService.layer,
+            Layer.mergeAll(
+              ManagedPolicy.layerTest(),
+              Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+                launch: () =>
+                  Ref.update(launched, (n) => n + 1).pipe(
+                    Effect.andThen(Effect.die(new Error("missed run must not launch"))),
+                  ),
+              }),
+              Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+                namedProjectsRoot: "/projects",
+                isScratchProject: () => Effect.succeed(false),
+              }),
+              Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+              Layer.mock(SecretRequests.SecretRequests)({}),
+              NodeCrypto.layer,
+              Scheduler.layer,
+            ),
+          ),
+        );
+        yield* TestClock.adjust("6 seconds");
+      }),
+    );
+    const rows = yield* sql<{
+      last_run_status: string;
+      last_run_error: string | null;
+      next_run_at: string | null;
+      run_count: number;
+    }>`SELECT last_run_status, last_run_error, next_run_at, run_count
+       FROM scheduled_tasks WHERE task_id = 'missed'`;
+    assert.equal(yield* Ref.get(launched), 0);
+    assert.equal(rows[0]?.last_run_status, "failed");
+    assert.equal(
+      rows[0]?.last_run_error,
+      "Skipped: the computer was off or asleep at the scheduled time.",
+    );
+    assert.equal(rows[0]?.run_count, 0);
+    assert.isTrue(Date.parse(rows[0]?.next_run_at ?? "") > Date.parse(now));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect("thread cleanup notifies subscribers and a finishing run cannot recreate the task", () =>
   Effect.gen(function* () {
     const started = yield* Deferred.make<void>();

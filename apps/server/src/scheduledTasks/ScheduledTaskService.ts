@@ -1111,6 +1111,8 @@ export const layer = Layer.effect(
       );
     });
 
+    // Recorded so the owner sees the skip instead of a run that silently never happened.
+    const MISSED_RUN_ERROR = "Skipped: the computer was off or asleep at the scheduled time.";
     const rescheduleMissedRun = Effect.fn("ScheduledTaskService.rescheduleMissedRun")(function* (
       task: ScheduledTask,
       now: DateTime.DateTime,
@@ -1124,6 +1126,8 @@ export const layer = Layer.effect(
       yield* sql`
         UPDATE scheduled_tasks
         SET next_run_at = ${next},
+            last_run_status = 'failed',
+            last_run_error = ${MISSED_RUN_ERROR},
             updated_at = ${iso(now)}
         WHERE task_id = ${task.id}
       `.pipe(
