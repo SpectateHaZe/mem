@@ -20,6 +20,7 @@ import { isDestructiveDeletion, type MemDestructiveSignals } from "./MemDestruct
 import * as MemIdleTracker from "./MemIdleTracker.ts";
 import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
+  blockingUsageWindows,
   changedPathsFromPorcelain,
   isOwnerSession,
   isShellIdle,
@@ -1073,6 +1074,31 @@ describe("MemOverseerService autonomous kickoff", () => {
     expect(harness.sent).toHaveLength(1);
   });
 
+  it("does not start a round past the spending cap or a full usage window", async () => {
+    const capped = makeHarness({
+      mem: { autonomous: true, spendingCapUsd: 0.01 },
+      spend: [{ atMs: NEVER_EXPIRES_MS, usd: 1, threadId: "thread-1" }],
+      threads: [thread({ hasWork: false })],
+    });
+    await run(capped.tick());
+    expect(capped.sent).toStrictEqual([]);
+    expect(capped.store.get("thread-1")?.waitingFor).toBe("budget");
+
+    const resetsAtMs = 4_102_444_800_000;
+    const limited = makeHarness({
+      mem: { autonomous: true },
+      threads: [
+        thread({
+          hasWork: false,
+          usage: { limited: false, windows: [{ usedPercent: 100, resetsAtMs }] },
+        }),
+      ],
+    });
+    await run(limited.tick());
+    expect(limited.sent).toStrictEqual([]);
+    expect(limited.store.get("thread-1")?.waitingFor).toBe("usage");
+  });
+
   it("still leaves such a thread alone outside autonomous mode", async () => {
     const harness = makeHarness({ threads: [thread({ hasWork: false })] });
 
@@ -1188,5 +1214,40 @@ describe("isOwnerSession", () => {
     expect(isOwnerSession(shell("thread:delegated-task:abc", null))).toBe(false);
     expect(isOwnerSession(shell("thread-3", "subagent"))).toBe(false);
     expect(isOwnerSession(shell("thread-4", null, { threadId: "thread-1" }))).toBe(false);
+  });
+});
+
+describe("blockingUsageWindows", () => {
+  const NOW = 4_102_444_800_000;
+  const future = "2100-01-01T01:00:00.000Z";
+  const past = "2099-12-31T23:00:00.000Z";
+  const provider = (driver: string, windows: ReadonlyArray<Record<string, unknown>>) =>
+    ({ driver, usageLimits: { checkedAt: past, windows } }) as never;
+
+  it("keeps only windows that can stop this model's next turn", () => {
+    const claude = provider("claudeAgent", [
+      { id: "five_hour", kind: "session", label: "Session", usedPercent: 100, resetsAt: future },
+      { id: "seven_day", kind: "weekly", label: "Weekly", usedPercent: 100, resetsAt: past },
+      { id: "seven_day_sonnet", kind: "weekly", label: "Weekly · Sonnet", usedPercent: 100 },
+      { id: "seven_day_opus", kind: "weekly", label: "Weekly · Opus", usedPercent: 100 },
+      { id: "monthly_spend", kind: "monthly", label: "Monthly spend", usedPercent: 100 },
+    ]);
+
+    expect(blockingUsageWindows(claude, "claude-opus-5-5", NOW).map((w) => w.id)).toStrictEqual([
+      "five_hour",
+      "seven_day_opus",
+    ]);
+    expect(blockingUsageWindows(undefined, "claude-opus-5-5", NOW)).toStrictEqual([]);
+  });
+
+  it("scopes Antigravity's pools to the model family", () => {
+    const antigravity = provider("antigravity", [
+      { id: "gemini-pro", kind: "session", label: "Gemini", usedPercent: 100, resetsAt: future },
+      { id: "claude-pool", kind: "session", label: "Claude", usedPercent: 100, resetsAt: future },
+    ]);
+
+    expect(blockingUsageWindows(antigravity, "gemini-3.1-pro", NOW).map((w) => w.id)).toStrictEqual(
+      ["gemini-pro"],
+    );
   });
 });

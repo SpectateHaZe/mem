@@ -26,11 +26,12 @@ import {
   type OrchestrationV2ProjectedTurnItem,
   type OrchestrationV2ThreadShell,
   ProjectId,
+  type ServerProvider,
   type ServerSettings as ServerSettingsValue,
   ThreadId,
 } from "@t3tools/contracts";
 import { usageLimitBlockedRun } from "@t3tools/shared/orchestrationV2ThreadError";
-import { elapsedShare } from "@t3tools/shared/usageLimits";
+import { elapsedShare, exhaustedUsageWindow } from "@t3tools/shared/usageLimits";
 import * as Clock from "effect/Clock";
 import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
@@ -616,6 +617,19 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       record.task.phase === "claimed" &&
       record.deliveredInstruction === null
     ) {
+      // Starting a round is a turn like any other: limits and the cap apply before it is sent.
+      if (throttled || (record.waitingUntilMs !== null && nowMs < record.waitingUntilMs)) return;
+      const usageUntil = usageWaitUntil(thread.usage ?? NO_USAGE, nowMs);
+      const { spend } = yield* spendForTurn(mem);
+      if (usageUntil !== null || !spend.allowed) {
+        yield* ports.store.put({
+          ...record,
+          waitingUntilMs: usageUntil ?? nowMs + MEM_AUTONOMOUS_RETRY_MS,
+          waitingFor: usageUntil !== null ? "usage" : "budget",
+          updatedAtMs: nowMs,
+        });
+        return;
+      }
       // A failed send keeps the instruction, so the next tick retries the same one.
       const instruction =
         record.task.lastInstruction ?? improvementInstruction(record.roundSummaries);
@@ -1889,6 +1903,31 @@ const readLastTurn = Effect.fn("MemOverseerService.readLastTurn")(function* (
   return last;
 });
 
+/**
+ * The usage windows that can stop this thread's next turn. A monthly spend budget only caps extra
+ * usage, so the plan quota still runs; a window already past its reset no longer applies; and a
+ * window scoped to another model (Claude's per-model weekly, Antigravity's pools) does not block.
+ */
+export const blockingUsageWindows = (
+  provider: ServerProvider | undefined,
+  model: string,
+  nowMs: number,
+): ReadonlyArray<NonNullable<ServerProvider["usageLimits"]>["windows"][number]> => {
+  const limits = provider?.usageLimits;
+  if (provider === undefined || limits === undefined) return [];
+  const modelKey = model.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+  return limits.windows.filter((window) => {
+    if (window.kind === "monthly") return false;
+    const resetsAtMs = window.resetsAt === undefined ? Number.NaN : Date.parse(window.resetsAt);
+    if (Number.isFinite(resetsAtMs) && resetsAtMs <= nowMs) return false;
+    const scoped = /^seven_day_(.+)$/.exec(window.id)?.[1];
+    if (provider.driver === "claudeAgent" && scoped !== undefined) return modelKey.includes(scoped);
+    // The same scoping a new thread's model check uses, asked as if this window were full.
+    const asFull = { ...limits, windows: [{ ...window, usedPercent: 100 }] };
+    return exhaustedUsageWindow({ ...provider, usageLimits: asFull }, nowMs, model) !== undefined;
+  });
+};
+
 /** Paths in `git status --porcelain=v1 -z` output; a rename's original path is skipped. */
 export const changedPathsFromPorcelain = (output: string): ReadonlyArray<string> => {
   const fields = output.split("\0");
@@ -2002,13 +2041,16 @@ const make = Effect.gen(function* () {
         usageLimitBlockedRun(runs.value.runs, items.value.turnItems, null) !== null;
       const instance = yield* providerInstances.getInstance(shell.modelSelection.instanceId);
       const provider = instance === undefined ? undefined : yield* instance.snapshot.getSnapshot;
-      const windows = (provider?.usageLimits?.windows ?? []).map((window) => ({
-        usedPercent: window.usedPercent,
-        resetsAtMs:
-          window.resetsAt === undefined
-            ? null
-            : DateTime.toEpochMillis(DateTime.makeUnsafe(window.resetsAt)),
-      }));
+      const nowMs = yield* Clock.currentTimeMillis;
+      const windows = blockingUsageWindows(provider, shell.modelSelection.model, nowMs).map(
+        (window) => ({
+          usedPercent: window.usedPercent,
+          resetsAtMs:
+            window.resetsAt === undefined
+              ? null
+              : DateTime.toEpochMillis(DateTime.makeUnsafe(window.resetsAt)),
+        }),
+      );
       return { limited, windows } satisfies MemThreadUsage;
     },
     Effect.catchCause(() => Effect.succeed(NO_USAGE)),
