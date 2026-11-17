@@ -36,6 +36,7 @@ import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
 import { addAgentReply, addUserMessage, beginTurn, ENDED_RUN_STATUSES } from "./roomModerator.ts";
+import { makeEndedRunTracker } from "./endedRuns.ts";
 
 const RoomsFile = Schema.fromJsonString(Schema.Array(Room));
 const decodeRooms = Schema.decodeUnknownEffect(RoomsFile);
@@ -154,6 +155,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause((cause) => Effect.logWarning("rooms.stop-failed", { cause })));
   });
 
+  const firstEnd = makeEndedRunTracker();
   const handleRunEnded = Effect.fn("RoomService.handleRunEnded")(function* (
     threadId: ThreadId,
     run: OrchestrationV2Run,
@@ -170,7 +172,7 @@ const make = Effect.gen(function* () {
           candidate.mode === "lead" &&
           candidate.participants[0]?.threadId === threadId),
     );
-    if (room === undefined) return;
+    if (room === undefined || !firstEnd(run.id)) return;
     const speakerIndex = room.speakerIndex ?? 0;
     const speaker = room.participants[speakerIndex]!;
     if (run.status !== "completed") {

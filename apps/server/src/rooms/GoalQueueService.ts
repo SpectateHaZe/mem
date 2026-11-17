@@ -40,6 +40,7 @@ import {
   updateGoal,
 } from "./goalQueueLogic.ts";
 import { ENDED_RUN_STATUSES } from "./roomModerator.ts";
+import { makeEndedRunTracker } from "./endedRuns.ts";
 
 const QueueFile = Schema.fromJsonString(GoalQueue);
 const decodeQueue = Schema.decodeUnknownEffect(QueueFile);
@@ -169,6 +170,7 @@ const make = Effect.gen(function* () {
       .pipe(Effect.catchCause((cause) => Effect.logWarning("goal-queue.stop-failed", { cause })));
   });
 
+  const firstEnd = makeEndedRunTracker();
   const handleRunEnded = Effect.fn("GoalQueueService.handleRunEnded")(function* (
     threadId: ThreadId,
     run: OrchestrationV2Run,
@@ -177,7 +179,7 @@ const make = Effect.gen(function* () {
     const goal = queue.goals.find(
       (candidate) => candidate.status === "running" && candidate.threadId === threadId,
     );
-    if (goal === undefined) return;
+    if (goal === undefined || !firstEnd(run.id)) return;
     const heldBack = queue.paused || (yield* Ref.get(currentHit)) !== undefined;
     yield* setQueue(updateGoal(queue, goal.id, (entry) => settleGoal(entry, run.status, heldBack)));
     yield* advance;
