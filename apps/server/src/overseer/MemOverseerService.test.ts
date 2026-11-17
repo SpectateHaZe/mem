@@ -31,6 +31,7 @@ import {
   MEM_ESTIMATED_TURN_USD,
   MemOverseerFailure,
   readRecentActivity,
+  rootRelativeFiles,
   type MemCommitOutcome,
   type MemOverseerPorts,
   type MemOverseerReviewRequest,
@@ -38,6 +39,7 @@ import {
   type MemReviewPlan,
 } from "./MemOverseerService.ts";
 import { newTaskRecord, type MemOverseerTaskRecord } from "./MemOverseerTaskStore.ts";
+import { buildReviewContext } from "./MemReviewContext.ts";
 import { sumSpendInWindow, type MemSpendEntry } from "./MemSpendingCap.ts";
 import type { QualityGateResult } from "./MemQualityGate.ts";
 
@@ -1254,6 +1256,37 @@ describe("blockingUsageWindows", () => {
 });
 
 describe("readRecentActivity", () => {
+  it("lists every file of a multi-file patch, not only the first", async () => {
+    const projections = {
+      getTimelinePage: () =>
+        Effect.succeed({
+          items: [
+            {
+              position: 0,
+              item: {
+                type: "file_change",
+                fileName: "src/a.ts",
+                additions: 3,
+                changes: [
+                  { operation: "update", path: "src/a.ts" },
+                  { operation: "add", path: "src/b.ts" },
+                  { operation: "delete", path: "src/c.ts" },
+                ],
+              },
+            },
+          ],
+          totalItems: 1,
+          hasMore: false,
+        }),
+    } as unknown as Parameters<typeof readRecentActivity>[0];
+    const activity = await run(readRecentActivity(projections, ThreadId.make("patch-thread")));
+    expect([...activity.files.values()]).toEqual([
+      { path: "src/a.ts", additions: 3 },
+      { path: "src/b.ts" },
+      { path: "src/c.ts" },
+    ]);
+  });
+
   it("reads the newest items of a thread longer than the read window", async () => {
     const total = 9_000;
     const reads: number[] = [];
@@ -1275,5 +1308,33 @@ describe("readRecentActivity", () => {
     const activity = await run(readRecentActivity(projections, ThreadId.make("long-thread")));
     expect(activity.lastAssistantText).toBe(`reply ${total - 1}`);
     expect(reads[1]).toBe(total - 8_000);
+  });
+});
+
+describe("rootRelativeFiles", () => {
+  it("lets an absolute recorded path pick up its hunk from git diff --relative", async () => {
+    const context = await runNode(
+      Effect.gen(function* () {
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const root = yield* fileSystem.makeTempDirectoryScoped({ prefix: "mem-review-diff-" });
+        yield* fileSystem.makeDirectory(path.join(root, "src"), { recursive: true });
+        yield* fileSystem.writeFileString(path.join(root, "src", "big.ts"), "unrelated top\n");
+        const files = rootRelativeFiles(path, root, [
+          { path: path.join(root, "src", "big.ts"), additions: 1 },
+        ]);
+        const diff = [
+          "diff --git a/src/big.ts b/src/big.ts",
+          "--- a/src/big.ts",
+          "+++ b/src/big.ts",
+          "@@ -9,0 +10 @@",
+          "+export const theRealEdit = 1;",
+          "",
+        ].join("\n");
+        return yield* buildReviewContext({ root, files, diff });
+      }).pipe(Effect.scoped),
+    );
+    expect(context.text).toContain("+export const theRealEdit = 1;");
+    expect(context.text).not.toContain("unrelated top");
   });
 });

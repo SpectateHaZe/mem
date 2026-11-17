@@ -1843,6 +1843,10 @@ const summarizeActivity = (
         ...(item.additions === undefined ? {} : { additions: item.additions }),
         ...(item.deletions === undefined ? {} : { deletions: item.deletions }),
       });
+      // A Codex patch names its first file in `fileName` and every file in `changes`.
+      for (const change of item.changes ?? []) {
+        if (!current.files.has(change.path)) current.files.set(change.path, { path: change.path });
+      }
       return current;
     default:
       return current;
@@ -1941,6 +1945,22 @@ export const blockingUsageWindows = (
     return exhaustedUsageWindow({ ...provider, usageLimits: asFull }, nowMs, model) !== undefined;
   });
 };
+
+/**
+ * Recorded paths relative to the root, with forward slashes, so they match `git diff --relative`.
+ * A path outside the root is left as it is, and the review context refuses it.
+ */
+export const rootRelativeFiles = (
+  path: Pick<Path.Path, "relative" | "resolve" | "isAbsolute">,
+  root: string,
+  files: ReadonlyArray<MemChangedFile>,
+): ReadonlyArray<MemChangedFile> =>
+  files.map((file) => {
+    const relative = path.relative(root, path.resolve(root, file.path));
+    return relative === "" || relative.startsWith("..") || path.isAbsolute(relative)
+      ? file
+      : { ...file, path: relative.replace(/\\/g, "/") };
+  });
 
 /** Paths in `git status --porcelain=v1 -z` output; a rename's original path is skipped. */
 export const changedPathsFromPorcelain = (output: string): ReadonlyArray<string> => {
@@ -2241,7 +2261,29 @@ const make = Effect.gen(function* () {
           detail: "the thread has no workspace root to read.",
         });
       }
-      const input = { root: thread.root, files: thread.files };
+      const files = rootRelativeFiles(path, thread.root, thread.files);
+      // The uncommitted change itself; a file with no diff here (new, or already committed) is read whole.
+      const diff = yield* git
+        .execute({
+          operation: "MemOverseer.reviewDiff",
+          cwd: thread.root,
+          args: [
+            "diff",
+            "--relative",
+            "--no-color",
+            "--no-ext-diff",
+            "HEAD",
+            "--",
+            ...files.map((file) => file.path),
+          ],
+          timeoutMs: 30_000,
+          maxOutputBytes: 4_000_000,
+        })
+        .pipe(
+          Effect.map((result) => result.stdout),
+          Effect.orElseSucceed(() => ""),
+        );
+      const input = { root: thread.root, files, ...(diff.length === 0 ? {} : { diff }) };
       const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
         effect.pipe(
           Effect.provideService(FileSystem.FileSystem, fileSystem),
