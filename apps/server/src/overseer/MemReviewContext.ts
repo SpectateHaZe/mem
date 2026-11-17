@@ -305,7 +305,11 @@ const containPath = Effect.fnUntraced(function* (input: {
     });
   }
 
-  const within = path.resolveWithin(input.root, input.candidate);
+  // Claude records absolute paths; `resolveWithin` refuses every absolute path, even one inside the root.
+  const candidate = path.isAbsolute(input.candidate)
+    ? path.relative(input.root, input.candidate)
+    : input.candidate;
+  const within = path.resolveWithin(input.root, candidate);
   if (Option.isNone(within)) {
     return yield* new MemReviewContextError({
       reason: "path-escaped",

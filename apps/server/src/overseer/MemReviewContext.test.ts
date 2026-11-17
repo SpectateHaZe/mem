@@ -217,6 +217,16 @@ describe("buildReviewContext", () => {
     expect(context.text).toContain("[deleted]");
   });
 
+  it("reads an absolute path inside the root, as Claude records them", async () => {
+    const root = await makeRoot();
+    await writeFiles(root, { "src/abs.ts": "export const fromClaude = true;\n" });
+    const absolute = await run(Effect.map(Path.Path, (path) => path.join(root, "src", "abs.ts")));
+
+    const context = await run(buildReviewContext(input({ root, files: [{ path: absolute }] })));
+
+    expect(context.text).toContain("export const fromClaude = true;");
+  });
+
   it("refuses a path that escapes the root", async () => {
     const root = await makeRoot();
     const failure = await run(
