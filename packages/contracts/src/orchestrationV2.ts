@@ -168,8 +168,12 @@ export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage):
  * deleted, archived, or reordered; identity is this flag, never a fixed thread id.
  */
 export const MEM_MASTER_THREAD_TITLE = "Mem";
-export const isMemMasterThread = (thread: { readonly memMaster?: boolean | undefined }): boolean =>
-  thread.memMaster === true;
+export const isMemMasterThread = (thread: {
+  readonly memMaster?: boolean | undefined;
+  readonly lineage?: { readonly parentThreadId: string | null } | undefined;
+}): boolean =>
+  // Children of Mem's thread once copied its flag, and replayed events still carry it.
+  thread.memMaster === true && (thread.lineage?.parentThreadId ?? null) === null;
 
 export const OrchestrationV2ContextTransferType = Schema.Literals([
   "fork",

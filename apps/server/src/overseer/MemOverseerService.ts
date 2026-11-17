@@ -2281,7 +2281,7 @@ const make = Effect.gen(function* () {
     ),
     findMasterThreadId: Effect.fn("MemOverseerService.findMasterThreadId")(function* () {
       const snapshot = yield* shellSnapshot();
-      return snapshot.threads.find((shell) => shell.memMaster === true)?.id;
+      return snapshot.threads.find(isMemMasterThread)?.id;
     }),
     spawnSession: Effect.fn("MemOverseerService.spawn")(function* (input) {
       const id = yield* random.uuidV4();

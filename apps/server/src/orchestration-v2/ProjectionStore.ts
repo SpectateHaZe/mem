@@ -7440,6 +7440,8 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         FROM orchestration_v2_projection_threads
         WHERE deleted_at IS NULL
           AND json_extract(payload_json, '$.memMaster') = 1
+          AND json_extract(payload_json, '$.lineage.parentThreadId') IS NULL
+        ORDER BY created_at, thread_id
         LIMIT 1
       `;
       return rows[0] === undefined ? null : ThreadId.make(rows[0].thread_id);
