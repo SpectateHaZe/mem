@@ -319,20 +319,6 @@ export function MemOverseerSettingsSection() {
           </div>
         </div>
       </SettingsRow>
-      <SettingsRow
-        serverScoped
-        settingKeys={["mem"]}
-        {...searchableSetting("mem-summary-images")}
-        description="Adds screenshots of the finished work to the completion summary."
-        control={
-          <ScopedSwitch
-            settingKeys={["mem"]}
-            checked={mem.summaryWithImages}
-            onCheckedChange={(checked) => update({ summaryWithImages: Boolean(checked) })}
-            aria-label="Screenshot the summary"
-          />
-        }
-      />
     </SettingsSection>
   );
 }

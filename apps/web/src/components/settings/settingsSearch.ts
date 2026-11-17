@@ -657,13 +657,6 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["rubric review prompt judging finished work accept reject overseer"],
   },
   {
-    id: "mem-summary-images",
-    title: "Screenshot the summary",
-    to: "/settings/threads",
-    scope: "environment-defaults",
-    searchTerms: ["screenshot images summary completion overseer"],
-  },
-  {
     id: "working-shelf",
     title: "Working section",
     to: "/settings/general",

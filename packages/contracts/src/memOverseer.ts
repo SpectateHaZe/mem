@@ -76,8 +76,6 @@ export const MemOverseerSettings = Schema.Struct({
   qualityPrompt: Schema.String.pipe(
     Schema.withDecodingDefault(Effect.succeed(DEFAULT_MEM_QUALITY_PROMPT)),
   ),
-  /** Screenshot the finished work for the completion summary. Costs a computer-use pass. */
-  summaryWithImages: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /**
    * How Mem spends the owner's weekly budget. `on_pace` drops to the economy model when spending
    * runs ahead of the week; `full` always uses the premium model.
