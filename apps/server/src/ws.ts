@@ -2870,8 +2870,10 @@ export const layerWsRpc = (
                 input,
               ),
             ),
-            // Every connected client's report moves the one idle clock the overseer reads.
-            Effect.andThen(memIdleTracker.recordActivity()),
+            // Only a report of real use moves the idle clock: an open but idle window reports every 25 s.
+            Effect.andThen(
+              input.recentlyInteracted ? memIdleTracker.recordActivity() : Effect.void,
+            ),
           ),
         [WS_METHODS.memOverseerListApprovals]: (_input) =>
           memOverseer.pendingApprovals().pipe(Effect.map((approvals) => ({ approvals }))),
