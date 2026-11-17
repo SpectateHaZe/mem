@@ -425,6 +425,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     readonly result: QualityGateResult | null;
     readonly reason: string;
     readonly costUsd: number;
+    /** The reviewer call itself failed (limit, timeout, network), not the reply it gave. */
+    readonly unanswered?: boolean;
   }
 
   /**
@@ -501,6 +503,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           },
           reason: "",
           costUsd,
+          ...(result === null ? { unanswered: true } : {}),
         };
       }
 
@@ -834,6 +837,17 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
                 spend: describeCap({ capUsd: mem.spendingCapUsd, spentUsd: total }),
               });
             }
+          } else if (autonomous && outcome.unanswered === true) {
+            // A reviewer limit or a network blip pauses autonomous mode; it does not end the session.
+            record = {
+              ...record,
+              waitingUntilMs: nowMs + MEM_AUTONOMOUS_RETRY_MS,
+              waitingFor: null,
+              lastReview: {
+                verdict: "reject",
+                reasoning: "Mem's reviewer did not answer; it will try again shortly.",
+              },
+            };
           } else if (outcome.result !== null) {
             deletedLines = plan.deletedLines;
             deletedFiles = plan.deletedFiles;

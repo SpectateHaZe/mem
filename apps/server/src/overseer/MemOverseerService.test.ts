@@ -998,6 +998,20 @@ describe("MemOverseerService autonomous mode", () => {
     expect(record?.waitingUntilMs).toBeGreaterThan(resetsAtMs);
   });
 
+  it("retries a reviewer that did not answer instead of escalating", async () => {
+    const harness = makeHarness({
+      mem: autonomous,
+      review: () => Effect.fail(new MemOverseerFailure({ operation: "review", detail: "429" })),
+    });
+
+    await run(harness.tick());
+
+    const record = harness.store.get("thread-1");
+    expect(record?.task.phase).not.toBe("escalated");
+    expect(record?.waitingUntilMs).not.toBeNull();
+    expect(harness.sent).toStrictEqual([]);
+  });
+
   it("stamps the resume after a limit, so the old turn is not charged again", async () => {
     const startMs = await run(Clock.currentTimeMillis);
     const store = new Map<string, MemOverseerTaskRecord>([
