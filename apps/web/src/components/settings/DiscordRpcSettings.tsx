@@ -165,7 +165,7 @@ export function DiscordRpcSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("discord-enabled")}
-          description="Shows what Mem is doing on your Discord profile. Turning it off clears the card and stops talking to Discord."
+          description="Shows what Mem is doing on your Discord profile. Turning it off clears the card."
           settingKeys={["discordPresence"]}
           control={
             <ScopedSwitch
