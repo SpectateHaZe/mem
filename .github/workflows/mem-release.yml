@@ -44,8 +44,39 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
+  release:
+    name: Publish GitHub release
+    needs: windows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Setup dependencies
+        uses: ./.github/actions/setup-ci-deps
+        with:
+          install-args: --filter=@t3tools/scripts...
+
+      - name: Download installers
+        uses: actions/download-artifact@v8
+        with:
+          name: desktop-windows
+          path: release
+
+      # Windows keeps its existing asset names: installed copies update from
+      # Mem-<version>-x64.exe and latest.yml.
+      - name: Publish release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" --generate-notes \
+            release/*.exe release/*.blockmap release/latest.yml
+
   macos:
     name: Build macOS installer (${{ matrix.arch }})
+    # After the release, so a macOS runner that never starts cannot hold up Windows users' update.
+    needs: release
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -76,46 +107,9 @@ jobs:
             --platform mac --target dmg --arch "${{ matrix.arch }}" \
             --build-version "${GITHUB_REF_NAME#v}" --verbose
 
-      - name: Upload installer
-        uses: actions/upload-artifact@v7
-        with:
-          name: desktop-mac-${{ matrix.arch }}
-          path: release/*
-          if-no-files-found: error
-          retention-days: 1
-
-  release:
-    name: Publish GitHub release
-    needs: [windows, macos]
-    # GitHub's macOS arm64 pool sometimes never picks the job up; Windows users still get the update.
-    if: ${{ !cancelled() && needs.windows.result == 'success' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Setup dependencies
-        uses: ./.github/actions/setup-ci-deps
-        with:
-          install-args: --filter=@t3tools/scripts...
-
-      - name: Download installers
-        uses: actions/download-artifact@v8
-        with:
-          pattern: desktop-*
-          merge-multiple: true
-          path: release
-
-      # Windows keeps its existing asset names: installed copies update from
-      # Mem-<version>-x64.exe and latest.yml.
-      - name: Publish release
-        shell: bash
+      - name: Add to the release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           shopt -s nullglob
-          # Every entry needs a wildcard: nullglob keeps a plain name even when the file is missing.
-          mac=(release/*.dmg release/*.zip release/latest-mac*.yml)
-          if [ ${#mac[@]} -eq 0 ]; then echo "::warning::No macOS build; publishing Windows only."; fi
-          gh release create "$GITHUB_REF_NAME" --generate-notes \
-            release/*.exe release/*.blockmap release/latest.yml "${mac[@]}"
+          gh release upload "$GITHUB_REF_NAME" release/*.dmg release/*.zip release/latest-mac*.yml
