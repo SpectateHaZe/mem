@@ -22,11 +22,6 @@ export type SpendDecision =
       readonly remainingCents: number;
     };
 
-export interface CapRunState {
-  readonly spentUsd: number;
-  readonly parkedTaskIds: ReadonlyArray<string>;
-}
-
 /** Rounds to whole cents. Non-finite input maps to 0 so a broken number reads as "spent nothing". */
 export const toCents = (usd: number): number => {
   if (!Number.isFinite(usd)) return 0;
@@ -93,27 +88,6 @@ export const accrueSpend = (input: {
   const actualCents = toCents(input.actualUsd);
   if (actualCents <= 0) return { spentUsd: spentCents / 100 };
   return { spentUsd: (spentCents + actualCents) / 100 };
-};
-
-export const parkAtCap = (input: {
-  readonly capUsd: number;
-  readonly spentUsd: number;
-  readonly claimedTaskIds: ReadonlyArray<string>;
-}): { readonly shouldPark: boolean; readonly parkedTaskIds: ReadonlyArray<string> } => {
-  const capCents = toCents(input.capUsd);
-  const spentCents = Math.max(0, toCents(input.spentUsd));
-  // A disabled cap has no budget to spend against, so everything claimed parks with it.
-  const reached = capCents <= 0 || spentCents >= capCents;
-  if (!reached) return { shouldPark: false, parkedTaskIds: [] };
-
-  const seen = new Set<string>();
-  const parkedTaskIds: string[] = [];
-  for (const taskId of input.claimedTaskIds) {
-    if (seen.has(taskId)) continue;
-    seen.add(taskId);
-    parkedTaskIds.push(taskId);
-  }
-  return { shouldPark: true, parkedTaskIds };
 };
 
 export const describeCap = (state: {

@@ -5,7 +5,6 @@ import {
   decideSpend,
   describeCap,
   MEM_SPEND_WINDOW_MS,
-  parkAtCap,
   pruneSpendEntries,
   sumSpendInWindow,
   toCents,
@@ -120,45 +119,6 @@ describe("accrueSpend", () => {
     expect(accrueSpend({ spentUsd: 1.5, actualUsd: Number.POSITIVE_INFINITY })).toEqual({
       spentUsd: 1.5,
     });
-  });
-});
-
-describe("parkAtCap", () => {
-  it("parks nothing below the cap", () => {
-    expect(parkAtCap({ capUsd: 5, spentUsd: 4.99, claimedTaskIds: ["a", "b"] })).toEqual({
-      shouldPark: false,
-      parkedTaskIds: [],
-    });
-  });
-
-  it("parks every claimed task at or over the cap", () => {
-    expect(parkAtCap({ capUsd: 5, spentUsd: 5, claimedTaskIds: ["a", "b"] })).toEqual({
-      shouldPark: true,
-      parkedTaskIds: ["a", "b"],
-    });
-    expect(parkAtCap({ capUsd: 5, spentUsd: 6, claimedTaskIds: ["a"] })).toEqual({
-      shouldPark: true,
-      parkedTaskIds: ["a"],
-    });
-  });
-
-  it("parks everything when the cap is disabled", () => {
-    expect(parkAtCap({ capUsd: 0, spentUsd: 0, claimedTaskIds: ["a"] })).toEqual({
-      shouldPark: true,
-      parkedTaskIds: ["a"],
-    });
-  });
-
-  it("is idempotent, keeps order, and drops duplicates", () => {
-    const claimedTaskIds = ["a", "b", "a", "c"];
-    const first = parkAtCap({ capUsd: 5, spentUsd: 5, claimedTaskIds });
-    const second = parkAtCap({ capUsd: 5, spentUsd: 5, claimedTaskIds });
-
-    expect(first.parkedTaskIds).toEqual(["a", "b", "c"]);
-    expect(second).toEqual(first);
-    expect(parkAtCap({ capUsd: 5, spentUsd: 5, claimedTaskIds: first.parkedTaskIds })).toEqual(
-      first,
-    );
   });
 });
 
