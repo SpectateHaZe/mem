@@ -51,6 +51,35 @@ const recordWithApproval = (index: number): MemOverseerTaskRecord => ({
 });
 
 describe("MemOverseerTaskStore", () => {
+  it("keeps a copy of an unreadable state file before starting empty", async () => {
+    await withTempBaseDir(async (baseDir) => {
+      const result = await Effect.gen(function* () {
+        const fs = yield* FileSystem.FileSystem;
+        const config = yield* ServerConfig.ServerConfig;
+        yield* fs.makeDirectory(config.stateDir, { recursive: true });
+        yield* fs.writeFileString(`${config.stateDir}/mem-overseer-tasks.json`, "{not json");
+        const records = yield* Effect.gen(function* () {
+          const store = yield* MemOverseerTaskStoreModule.MemOverseerTaskStore;
+          return yield* store.all();
+        }).pipe(Effect.provide(MemOverseerTaskStoreModule.layer));
+        const backups = (yield* fs.readDirectory(config.stateDir)).filter((name) =>
+          name.startsWith("mem-overseer-tasks.json.corrupt-"),
+        );
+        const backup = yield* fs.readFileString(`${config.stateDir}/${backups[0]}`);
+        return { records, backups, backup };
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(ServerConfig.layerTest(process.cwd(), baseDir), NodeServices.layer),
+        ),
+        Effect.provide(NodeServices.layer),
+        Effect.runPromise,
+      );
+      expect(result.records).toEqual([]);
+      expect(result.backups).toHaveLength(1);
+      expect(result.backup).toBe("{not json");
+    });
+  });
+
   it("reloads delivered instructions and ledger spend after a restart", async () => {
     await withTempBaseDir(async (baseDir) => {
       await Effect.gen(function* () {

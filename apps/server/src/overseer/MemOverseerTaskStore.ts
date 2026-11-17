@@ -248,9 +248,24 @@ const make = Effect.gen(function* () {
   const statePath = path.join(config.stateDir, MEM_TASKS_FILE_NAME);
 
   const load = Effect.gen(function* () {
-    const raw = yield* fileSystem.readFileString(statePath).pipe(Effect.orElseSucceed(() => ""));
+    const exists = yield* fileSystem.exists(statePath).pipe(Effect.orElseSucceed(() => true));
+    const raw = exists
+      ? yield* fileSystem.readFileString(statePath).pipe(Effect.orElseSucceed(() => null))
+      : "";
     const nowMs = yield* Clock.currentTimeMillis;
-    const decoded = decodePersistedMemTasks(raw.trim());
+    const decoded = decodePersistedMemTasks((raw ?? "").trim());
+    if (Option.isNone(decoded) && (raw === null || raw.trim().length > 0)) {
+      // The next write replaces the file, so keep the unreadable copy: it holds the day's spend.
+      const backupPath = `${statePath}.corrupt-${nowMs}`;
+      yield* fileSystem.copyFile(statePath, backupPath).pipe(
+        Effect.andThen(
+          Effect.logWarning("Mem's task state could not be read; starting empty.", { backupPath }),
+        ),
+        Effect.catchCause((cause) =>
+          Effect.logWarning("Mem's task state could not be read or backed up.", { cause }),
+        ),
+      );
+    }
     return Option.match(decoded, {
       onNone: () => ({ records: new Map<string, MemOverseerTaskRecord>(), spend: [] }),
       onSome: (persisted) => ({
