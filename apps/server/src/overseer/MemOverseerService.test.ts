@@ -30,6 +30,7 @@ import {
   MEM_ESTIMATED_REVIEW_USD,
   MEM_ESTIMATED_TURN_USD,
   MemOverseerFailure,
+  readRecentActivity,
   type MemCommitOutcome,
   type MemOverseerPorts,
   type MemOverseerReviewRequest,
@@ -1249,5 +1250,30 @@ describe("blockingUsageWindows", () => {
     expect(blockingUsageWindows(antigravity, "gemini-3.1-pro", NOW).map((w) => w.id)).toStrictEqual(
       ["gemini-pro"],
     );
+  });
+});
+
+describe("readRecentActivity", () => {
+  it("reads the newest items of a thread longer than the read window", async () => {
+    const total = 9_000;
+    const reads: number[] = [];
+    const projections = {
+      getTimelinePage: (
+        _threadId: ThreadId,
+        options: { afterPosition?: number; limit?: number },
+      ) => {
+        const start = (options.afterPosition ?? -1) + 1;
+        reads.push(start);
+        const end = Math.min(total, start + (options.limit ?? 200));
+        const items = Array.from({ length: end - start }, (_, offset) => ({
+          position: start + offset,
+          item: { type: "assistant_message", text: `reply ${start + offset}` },
+        }));
+        return Effect.succeed({ items, totalItems: total, hasMore: end < total });
+      },
+    } as unknown as Parameters<typeof readRecentActivity>[0];
+    const activity = await run(readRecentActivity(projections, ThreadId.make("long-thread")));
+    expect(activity.lastAssistantText).toBe(`reply ${total - 1}`);
+    expect(reads[1]).toBe(total - 8_000);
   });
 });

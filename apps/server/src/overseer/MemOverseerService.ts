@@ -1848,12 +1848,17 @@ const summarizeActivity = (
   }
 };
 
-const readRecentActivity = Effect.fn("MemOverseerService.readRecentActivity")(function* (
-  projections: ProjectionStore.ProjectionStoreV2["Service"],
+/**
+ * The newest stretch of the thread, at most `MEM_TIMELINE_MAX_PAGES` pages. Reading from the start
+ * stopped at that cap, so a long thread's latest reply was never seen and read as a stall.
+ */
+export const readRecentActivity = Effect.fn("MemOverseerService.readRecentActivity")(function* (
+  projections: Pick<ProjectionStore.ProjectionStoreV2["Service"], "getTimelinePage">,
   threadId: ThreadId,
 ) {
   let activity = emptyActivity();
   let afterPosition = -1;
+  let skippedAhead = false;
   for (let page = 0; page < MEM_TIMELINE_MAX_PAGES; page += 1) {
     const result = yield* projections
       .getTimelinePage(threadId, {
@@ -1872,6 +1877,14 @@ const readRecentActivity = Effect.fn("MemOverseerService.readRecentActivity")(fu
         ),
       );
     if (result.items.length === 0) break;
+    const window = MEM_TIMELINE_PAGE_SIZE * MEM_TIMELINE_MAX_PAGES;
+    // Positions run 0..totalItems-1, so the tail starts here; the first page is read again there.
+    if (!skippedAhead && result.totalItems > window) {
+      skippedAhead = true;
+      afterPosition = result.totalItems - window - 1;
+      page = -1;
+      continue;
+    }
     for (const entry of result.items) activity = summarizeActivity(activity, entry);
     const last = result.items[result.items.length - 1];
     if (last === undefined || !result.hasMore) break;
