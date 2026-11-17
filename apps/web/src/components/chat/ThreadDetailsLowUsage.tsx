@@ -36,6 +36,9 @@ export function ThreadDetailsLowUsage(props: {
       : undefined;
   const activeInstanceId = savedInstance?.instanceId ?? fallbackEntry?.instanceId;
   const savedSelection: ModelSelection | null = savedInstance && saved ? saved.subagentModel : null;
+  // Saved, but its provider was removed: the lead is still told to delegate there, so say so.
+  const savedUnavailable =
+    saved !== undefined && providers !== undefined && savedInstance === undefined;
   const modelLabel = (selection: ModelSelection) => {
     const option = modelOptionsByInstance
       .get(selection.instanceId)
@@ -68,7 +71,11 @@ export function ThreadDetailsLowUsage(props: {
             modelOptionsByInstance={modelOptionsByInstance}
             size="sm"
             triggerLabel={
-              savedSelection ? `Subagent: ${modelLabel(savedSelection)}` : "Choose subagent model"
+              savedSelection
+                ? `Subagent: ${modelLabel(savedSelection)}`
+                : savedUnavailable
+                  ? `Unavailable: ${saved.subagentModel.model}. Choose another`
+                  : "Choose subagent model"
             }
             triggerAriaLabel="Subagent model"
             triggerClassName="w-full justify-between rounded-lg border bg-background text-sm font-normal sm:text-xs"
@@ -84,6 +91,12 @@ export function ThreadDetailsLowUsage(props: {
               });
             }}
           />
+        ) : null}
+        {savedUnavailable ? (
+          <p className="text-destructive text-xs" role="alert">
+            The subagent model's provider is gone, so delegations fail. Choose another model or turn
+            this off.
+          </p>
         ) : null}
       </div>
     </ThreadDetailsSection>
