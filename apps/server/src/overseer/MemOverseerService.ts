@@ -116,8 +116,9 @@ const MEM_GUIDE_STALL_MS = 30 * 60_000;
 export const MEM_APPROVAL_TIMEOUT_MS = 120_000;
 
 /** Bounded reads: the review sees the real change set, paged and capped by `MemReviewContext`. */
-const MEM_TIMELINE_PAGE_SIZE = 200;
-const MEM_TIMELINE_MAX_PAGES = 40;
+// Each page call re-reads the thread's whole timeline index, so few large pages beat many small ones.
+const MEM_TIMELINE_PAGE_SIZE = 1_000;
+const MEM_TIMELINE_MAX_PAGES = 8;
 const MEM_EVIDENCE_MAX_LENGTH = 4_000;
 
 const DEFAULT_ACCEPTANCE =
