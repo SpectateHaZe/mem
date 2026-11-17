@@ -37,8 +37,11 @@ const MARKER_PREFIX = /^[#>\s]*(?:\*{1,2}|_{1,2}|`)*\s*/;
 
 const VERDICT_HEADING = /^verdict(?![a-z0-9])/i;
 
+// A heading has a colon or the line to itself, so "Findings above also apply..." stays content.
 const SECTION_HEADING =
-  /^(findings|reasoning|next instruction)(?![a-z0-9])\s*\*{0,2}\s*:?\s*\*{0,2}\s*(.*)$/i;
+  /^(findings|reasoning|next instruction)(?![a-z0-9])\s*\*{0,2}\s*(?::\s*\*{0,2}\s*(.*)|\s*)$/i;
+
+const CODE_FENCE = /^\s*```/;
 
 const BULLET_ITEM = /^\s*(?:[-*+]|\d+[.)])\s+(.+)$/;
 
@@ -73,6 +76,7 @@ const collectSections = (
   let current: string[] | null = null;
   for (let index = startIndex; index < lines.length; index += 1) {
     const line = lines[index] ?? "";
+    if (CODE_FENCE.test(line)) continue;
     const heading = SECTION_HEADING.exec(stripMarkerPrefix(line));
     if (heading) {
       current = [];
@@ -105,9 +109,18 @@ const sectionFindings = (lines: ReadonlyArray<string> | undefined): string[] => 
   return items;
 };
 
+/** `ACCEPT` or `REJECT` as the value's first word; "Do not accept" or "ACCEPT or REJECT" is neither. */
+const verdictToken = (rest: string): QualityGateVerdictValue | null => {
+  const token = /^(accept|reject)\b/i.exec(rest)?.[1]?.toLowerCase();
+  if (token !== "accept" && token !== "reject") return null;
+  const other = token === "accept" ? /\breject\b/i : /\baccept\b/i;
+  return other.test(rest) ? null : token;
+};
+
 /**
- * Reads the reviewer's reply. Only a `VERDICT:` line is trusted, and the last one wins so a verdict
- * quoted inside `{{changes}}` or `{{evidence}}` cannot override the reviewer's own. Never throws.
+ * Reads the reviewer's reply. Only a `VERDICT:` line is trusted, and it fails closed: a verdict
+ * quoted inside `{{changes}}` or `{{evidence}}`, before or after the reviewer's own, can turn an
+ * accept into a reject but never a reject into an accept. Never throws.
  */
 export const parseQualityGateVerdict = (raw: string): QualityGateResult => {
   const lines = raw.split(/\r?\n/);
@@ -117,10 +130,15 @@ export const parseQualityGateVerdict = (raw: string): QualityGateResult => {
   for (let index = 0; index < lines.length; index += 1) {
     const stripped = stripMarkerPrefix(lines[index] ?? "");
     if (!VERDICT_HEADING.test(stripped)) continue;
-    verdictIndex = index;
     const rest = stripped.replace(/^verdict/i, "").replace(/^[\s*:`]+/, "");
-    const token = /\b(accept|reject)\b/i.exec(rest)?.[1]?.toLowerCase();
-    verdict = token === "accept" ? "accept" : token === "reject" ? "reject" : null;
+    const token = verdictToken(rest);
+    if (verdictIndex === -1) verdictIndex = index;
+    if (token === null) continue;
+    // Sections follow the line that decided the verdict; a later accept never replaces a reject.
+    if (verdict !== "reject" || token === "reject") {
+      verdict = token;
+      verdictIndex = index;
+    }
   }
 
   if (verdictIndex === -1) {

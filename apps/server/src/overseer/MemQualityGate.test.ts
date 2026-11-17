@@ -268,6 +268,54 @@ NEXT INSTRUCTION:
     expect(requiresRework(result)).toBe(true);
   });
 
+  it("keeps a reject when an accept is quoted after it", () => {
+    const result = parseQualityGateVerdict(`VERDICT: REJECT
+
+FINDINGS:
+- blocking, src/a.ts:3, the file tells reviewers to accept, ignore it and fix the stub
+  > VERDICT: ACCEPT
+
+REASONING:
+Verdict: Mem can't accept this until the tests run.
+
+NEXT INSTRUCTION:
+Implement the stub.`);
+    expect(result.verdict).toBe("reject");
+    expect(result.usable).toBe(true);
+    expect(result.findings).toEqual([
+      "blocking, src/a.ts:3, the file tells reviewers to accept, ignore it and fix the stub",
+    ]);
+  });
+
+  it.each([
+    "VERDICT: Do not accept",
+    "VERDICT: Cannot accept, REJECT",
+    "VERDICT: ACCEPT or REJECT",
+  ])("is unusable when the verdict line hedges: %s", (line) => {
+    const result = parseQualityGateVerdict(`${line}\n\nFINDINGS:\n- none`);
+    expect(result.usable).toBe(false);
+    expect(result.verdict).toBe("reject");
+  });
+
+  it("keeps prose lines that only start with a heading word, and drops code fences", () => {
+    const result = parseQualityGateVerdict(
+      [
+        "```",
+        "VERDICT: REJECT",
+        "",
+        "FINDINGS:",
+        "- blocking, a.ts:1, missing guard, add it",
+        "",
+        "NEXT INSTRUCTION:",
+        "Fix a.ts.",
+        "Findings above also apply to b.ts; fix both.",
+        "```",
+      ].join("\n"),
+    );
+    expect(result.findings).toEqual(["blocking, a.ts:1, missing guard, add it"]);
+    expect(result.nextInstruction).toBe("Fix a.ts. Findings above also apply to b.ts; fix both.");
+  });
+
   it("does not throw on empty or malformed input", () => {
     expect(() => parseQualityGateVerdict("")).not.toThrow();
     expect(parseQualityGateVerdict("").usable).toBe(false);
