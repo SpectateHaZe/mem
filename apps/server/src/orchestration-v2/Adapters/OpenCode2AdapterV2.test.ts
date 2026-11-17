@@ -1,3 +1,4 @@
+import * as NodePath from "node:path";
 import * as NodeURL from "node:url";
 import { toolOutputImages } from "@t3tools/shared/toolOutput";
 import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
@@ -3058,9 +3059,9 @@ it.layer(McpProviderSessions.layer)("OpenCode2 adapter", (it) => {
           text: [
             index === 0 ? "What is in this image?" : "And this one?",
             `[Attached image "${attachment.name}" is saved at: ${path}]`,
-            `[Attached image "missing.png" is saved at: ${attachmentsDir}/${missing.id}.png]`,
-            `[Attached image "diagram.svg" is saved at: ${attachmentsDir}/${unsupported.id}.svg]`,
-            `[Attached file "requirements.pdf" is saved at: ${attachmentsDir}/${document.id}.pdf]`,
+            `[Attached image "missing.png" is saved at: ${NodePath.join(attachmentsDir, `${missing.id}.png`)}]`,
+            `[Attached image "diagram.svg" is saved at: ${NodePath.join(attachmentsDir, `${unsupported.id}.svg`)}]`,
+            `[Attached file "requirements.pdf" is saved at: ${NodePath.join(attachmentsDir, `${document.id}.pdf`)}]`,
           ].join("\n\n"),
         });
         if (external) {

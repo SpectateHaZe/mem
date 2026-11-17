@@ -21,6 +21,7 @@ import {
   type MuseSdkHost,
   type MuseSdkHostOptions,
 } from "@t3tools/provider-muse/testing";
+import { buildRuntimeInstructions } from "@t3tools/provider-core/server/runtimeInstructions";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
 import * as ProviderAdapterRegistry from "../ProviderAdapterRegistry.ts";
 import * as ProviderContinuationRequests from "@t3tools/provider-core/server/ProviderContinuationRequests";
@@ -454,12 +455,28 @@ export const materializeMuseReplayWorkspace = Effect.fn("materializeMuseReplayWo
         entry.type === "expect_outbound" &&
         isRecord(entry.frame) &&
         entry.frame.method === "turn/start"
-          ? turnStarts.entries[index]!
+          ? withCurrentRuntimeInfoTail(turnStarts.entries[index]!)
           : entry,
       ),
     };
   },
 );
+
+const RECORDED_RUNTIME_INFO_END = "Mem's files viewer.</runtime_info>";
+// What this machine appends after the recorded sentence (its time zone), so a recording made
+// before that line existed, or on another zone, still matches.
+const CURRENT_RUNTIME_INFO_END = (() => {
+  const info = buildRuntimeInstructions({ harness: "replay", pullRequestLinking: false });
+  return info.slice(info.indexOf("Mem's files viewer."));
+})();
+
+function withCurrentRuntimeInfoTail<T extends { readonly frame: unknown }>(entry: T): T {
+  const json = JSON.stringify(entry.frame);
+  const recorded = JSON.stringify(RECORDED_RUNTIME_INFO_END).slice(1, -1);
+  if (!json.includes(recorded)) return entry;
+  const current = JSON.stringify(CURRENT_RUNTIME_INFO_END).slice(1, -1);
+  return { ...entry, frame: JSON.parse(json.replaceAll(recorded, current)) };
+}
 
 export const MuseOrchestratorReplayHarness: OrchestratorV2ProviderReplayHarness<
   MuseReplayTranscript,
