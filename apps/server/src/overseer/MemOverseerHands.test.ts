@@ -450,6 +450,26 @@ describe("MemOverseerService.listWatched", () => {
   });
 });
 
+describe("MemOverseerService.listWatched after a tick", () => {
+  it("leaves out sessions no longer in progress, which keep their records", async () => {
+    const harness = makeHarness({
+      threads: [thread()],
+      store: new Map([
+        ["thread-1", { ...claimedRecord(REJECTED_INSTRUCTION), updatedAtMs: 2 }],
+        ["thread-gone", { ...newTaskRecord("thread-gone", 1), updatedAtMs: 3 }],
+      ]),
+    });
+
+    expect((await run(harness.service.listWatched())).map((entry) => entry.threadId)).toStrictEqual(
+      ["thread-gone", "thread-1"],
+    );
+    await run(harness.service.tick());
+    expect((await run(harness.service.listWatched())).map((entry) => entry.threadId)).toStrictEqual(
+      ["thread-1"],
+    );
+  });
+});
+
 describe("MemOverseerService.setLifecycle", () => {
   it("dispatches the mark and reopens a settled task for a fresh review", async () => {
     const settled: MemOverseerTaskRecord = {

@@ -1227,6 +1227,12 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     return (firstLine ?? "Mem session").slice(0, 80);
   };
 
+  /**
+   * Sessions the last tick found in progress. A record outlives its session's mark (and children
+   * tracked before they were excluded), so the watched list would otherwise count stale sessions.
+   */
+  let listedThreadIds: ReadonlySet<string> | null = null;
+
   const listWatched = Effect.fn("MemOverseerService.listWatched")(function* () {
     const records = yield* ports.store
       .all()
@@ -1235,7 +1241,9 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           refuse("load", "failure", "the watched threads could not be read."),
         ),
       );
+    const listed = listedThreadIds;
     return [...records]
+      .filter((record) => listed === null || listed.has(record.task.threadId))
       .sort((left, right) => right.updatedAtMs - left.updatedAtMs)
       .map((record): MemWatchedThread => ({
         threadId: record.task.threadId,
@@ -1644,15 +1652,16 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     // Nothing answered the last question, so Mem's own recommendation goes out before anything new.
     const settledThreads = yield* actorLock.withPermit(expireApprovals(settings.mem));
 
-    const threads = yield* ports
+    const listed = yield* ports
       .listThreads()
       .pipe(
         Effect.catchCause((cause) =>
-          Effect.logWarning("Mem could not list threads.", { cause }).pipe(
-            Effect.as([] as ReadonlyArray<MemOverseerThread>),
-          ),
+          Effect.logWarning("Mem could not list threads.", { cause }).pipe(Effect.as(null)),
         ),
       );
+    // A failed listing keeps the last known set rather than hiding every session.
+    if (listed !== null) listedThreadIds = new Set(listed.map((thread) => thread.threadId));
+    const threads = listed ?? [];
     if (threads.length === 0) return;
 
     const records = yield* ports.store
