@@ -87,6 +87,8 @@ jobs:
   release:
     name: Publish GitHub release
     needs: [windows, macos]
+    # GitHub's macOS arm64 pool sometimes never picks the job up; Windows users still get the update.
+    if: ${{ !cancelled() && needs.windows.result == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -111,6 +113,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          shopt -s nullglob
+          mac=(release/*.dmg release/*.zip release/latest-mac.yml)
+          if [ ${#mac[@]} -eq 0 ]; then echo "::warning::No macOS build; publishing Windows only."; fi
           gh release create "$GITHUB_REF_NAME" --generate-notes \
-            release/*.exe release/*.blockmap release/latest.yml \
-            release/*.dmg release/*.zip release/latest-mac.yml
+            release/*.exe release/*.blockmap release/latest.yml "${mac[@]}"
