@@ -164,4 +164,18 @@ describe("claudeTaskOutputRoot", () => {
         );
       }).pipe(Effect.provide(NodeServices.layer)),
   );
+
+  it.effect.skipIf(process.getuid !== undefined)(
+    "uses Claude Code's plain claude folder on Windows, which has no uid",
+    () =>
+      Effect.gen(function* () {
+        const path = yield* Path.Path;
+        const temp = path.resolve("C:/Users/owner/AppData/Local/Temp");
+        assert.equal(
+          claudeTaskOutputRoot({ TEMP: temp, TMP: temp }, path, null, "win32"),
+          path.join(temp, "claude"),
+        );
+        assert.isUndefined(claudeTaskOutputRoot({ TMP: temp }, path, null, "linux"));
+      }).pipe(Effect.provide(NodeServices.layer)),
+  );
 });

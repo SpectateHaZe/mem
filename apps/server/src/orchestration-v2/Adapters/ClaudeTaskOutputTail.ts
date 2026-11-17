@@ -13,7 +13,7 @@ const MAX_LOCATE_ATTEMPTS = 40;
 /** Skip ahead of fast writers; only the tail is displayed. */
 const MAX_READ_BYTES = 256 * 1024;
 
-/** Claude Code's per-user temp root, or none where it has no uid (Windows). */
+/** Claude Code's per-user temp root: `claude-<uid>`, or plain `claude` on Windows, which has no uid. */
 export function claudeTaskOutputRoot(
   environment: Readonly<Record<string, string | undefined>> | undefined,
   path: Path.Path,
@@ -21,7 +21,8 @@ export function claudeTaskOutputRoot(
   platform: NodeJS.Platform,
 ): string | undefined {
   const uid = process.getuid?.();
-  if (uid === undefined) return undefined;
+  const dir = uid !== undefined ? `claude-${uid}` : platform === "win32" ? "claude" : undefined;
+  if (dir === undefined) return undefined;
   // Claude Code's macOS build falls back to /tmp and ignores the TMPDIR that
   // launchd always sets. Its other builds use `os.tmpdir()`, which reads these
   // from the environment it was launched with. A relative value is relative
@@ -31,7 +32,7 @@ export function claudeTaskOutputRoot(
       ? "/tmp"
       : environment?.TMPDIR || environment?.TMP || environment?.TEMP || "/tmp";
   const base = environment?.CLAUDE_CODE_TMPDIR?.trim() || fallback;
-  return path.resolve(cwd ?? ".", base, `claude-${uid}`);
+  return path.resolve(cwd ?? ".", base, dir);
 }
 
 const locate = Effect.fn("ClaudeTaskOutputTail.locate")(function* (input: {
