@@ -94,7 +94,7 @@ export function MemThreadPopover(props: {
   };
 
   const answerPendingApproval = async (decision: "approve" | "deny") => {
-    if (busy !== null || pendingApproval === null) return;
+    if (busy !== null || pendingApproval === null || !canOperate) return;
     setBusy("approval");
     setError(null);
     const result = await answer({
@@ -168,14 +168,14 @@ export function MemThreadPopover(props: {
           </pre>
           <div className="flex gap-2">
             <Button
-              disabled={busy !== null}
+              disabled={!canOperate || busy !== null}
               onClick={() => void answerPendingApproval("approve")}
               size="compact"
             >
               Approve
             </Button>
             <Button
-              disabled={busy !== null}
+              disabled={!canOperate || busy !== null}
               onClick={() => void answerPendingApproval("deny")}
               size="compact"
               variant="outline"
