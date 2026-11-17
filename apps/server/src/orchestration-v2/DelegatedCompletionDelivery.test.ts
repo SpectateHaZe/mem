@@ -114,47 +114,45 @@ const layerTestProviderInstanceRegistry = Layer.succeed(
   },
 );
 
-const layerTest = Layer.mergeAll(
-  RuntimeLayer.layer,
-  RuntimeLayer.layerEventSink,
-  ThreadCommandExecutor.layer,
-).pipe(
-  Layer.provideMerge(RuntimeLayer.layerProjectService),
-  Layer.provide(
-    Layer.mock(WorkspacePaths.WorkspacePaths)({
-      normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
-    }),
-  ),
-  Layer.provide(ProviderTurnStartServiceTestkit.layer),
-  Layer.provide(
-    Layer.succeed(ProjectEnrichmentService.ProjectEnrichmentService, {
-      peek: () =>
-        Effect.succeed({
-          repositoryIdentity: null,
-          faviconPath: null,
-          repositoryIdentityResolved: false,
-        }),
-      request: () => Effect.void,
-      readRepositoryIdentity: () => Effect.succeed(null),
-      getAvailable: () =>
-        Effect.succeed({
-          repositoryIdentity: null,
-          faviconPath: null,
-          repositoryIdentityResolved: false,
-        }),
-      invalidate: () => Effect.void,
-      subscribeChanges: Effect.never,
-    }),
-  ),
-  Layer.provide(McpSessionRegistryTestkit.layer),
-  Layer.provide(McpProviderSessions.layer),
-  Layer.provide(SqlitePersistence.layerMemory),
-  Layer.provide(layerCheckpointStoreTest),
-  Layer.provide(layerServerConfig),
-  Layer.provide(ServerSettings.layerTest()),
-  Layer.provide(layerTestProviderInstanceRegistry),
-  Layer.provide(layerPlatformTest),
-);
+const makeLayerTest = (settings: Parameters<typeof ServerSettings.layerTest>[0] = {}) =>
+  Layer.mergeAll(RuntimeLayer.layer, RuntimeLayer.layerEventSink, ThreadCommandExecutor.layer).pipe(
+    Layer.provideMerge(RuntimeLayer.layerProjectService),
+    Layer.provide(
+      Layer.mock(WorkspacePaths.WorkspacePaths)({
+        normalizeWorkspaceRoot: (workspaceRoot) => Effect.succeed(workspaceRoot),
+      }),
+    ),
+    Layer.provide(ProviderTurnStartServiceTestkit.layer),
+    Layer.provide(
+      Layer.succeed(ProjectEnrichmentService.ProjectEnrichmentService, {
+        peek: () =>
+          Effect.succeed({
+            repositoryIdentity: null,
+            faviconPath: null,
+            repositoryIdentityResolved: false,
+          }),
+        request: () => Effect.void,
+        readRepositoryIdentity: () => Effect.succeed(null),
+        getAvailable: () =>
+          Effect.succeed({
+            repositoryIdentity: null,
+            faviconPath: null,
+            repositoryIdentityResolved: false,
+          }),
+        invalidate: () => Effect.void,
+        subscribeChanges: Effect.never,
+      }),
+    ),
+    Layer.provide(McpSessionRegistryTestkit.layer),
+    Layer.provide(McpProviderSessions.layer),
+    Layer.provide(SqlitePersistence.layerMemory),
+    Layer.provide(layerCheckpointStoreTest),
+    Layer.provide(layerServerConfig),
+    Layer.provide(ServerSettings.layerTest(settings)),
+    Layer.provide(layerTestProviderInstanceRegistry),
+    Layer.provide(layerPlatformTest),
+  );
+const layerTest = makeLayerTest();
 
 // ProviderContinuationService consumes the orchestrator's continuation queue, as in production.
 const layerContinuationWorkerTest = ProviderContinuationService.layer.pipe(
@@ -176,6 +174,8 @@ const seedParentWithTerminalTask = (input: {
     readonly id: NodeId;
     readonly deliveryState: "delivered" | "claimed";
   }>;
+  /** Overrides for the main task only. */
+  readonly task?: Record<string, unknown>;
   readonly now: DateTime.Utc;
 }) =>
   Effect.gen(function* () {
@@ -315,6 +315,7 @@ const seedParentWithTerminalTask = (input: {
             startedAt: input.now,
             completedAt: input.now,
             updatedAt: input.now,
+            ...(task.id === input.taskId ? input.task : undefined),
           },
         })),
       ],
@@ -3786,5 +3787,67 @@ it.layer(layerTest)("delegated tasks across a server restart", (it) => {
         assert.equal(finished?.status, "completed");
         assert.notEqual(finished?.completionDelivery?.state, "disposed");
       }),
+  );
+});
+
+const creditFailedTask = {
+  status: "failed",
+  result: "Insufficient Balance (request_id: req_123)",
+  childThreadId: ThreadId.make("thread:credit-held-child"),
+  modelSelection,
+};
+
+const upgradeCreditFailure = (suffix: string) =>
+  Effect.gen(function* () {
+    const orchestrator = yield* Orchestrator.OrchestratorV2;
+    const now = yield* DateTime.now;
+    const threadId = ThreadId.make(`thread:credit-held-${suffix}`);
+    const runId = RunId.make(`run:credit-held-${suffix}`);
+    const taskId = NodeId.make(`node:credit-held-${suffix}-task`);
+    yield* seedParentWithTerminalTask({
+      threadId,
+      projectId: ProjectId.make(`project:credit-held-${suffix}`),
+      runId,
+      rootNodeId: NodeId.make(`node:credit-held-${suffix}-root`),
+      taskId,
+      deliveryState: "pending",
+      completionWake: "settled_only",
+      task: creditFailedTask,
+      now,
+    });
+    // A blocking wait timed out, so the task now wakes its parent on its own.
+    yield* orchestrator.dispatch({
+      type: "delegated_task.wake-policy",
+      commandId: CommandId.make(`command:credit-held-${suffix}:wake-policy`),
+      parentThreadId: threadId,
+      taskId,
+      completionWake: "always",
+    });
+    const projection = yield* orchestrator.getThreadProjection(threadId);
+    return projection.subagents.find((candidate) => candidate.id === taskId)?.completionDelivery;
+  });
+
+it.layer(
+  makeLayerTest({
+    subagentFallbackModelSelection: {
+      instanceId: modelSelection.instanceId,
+      model: "fallback-model",
+    },
+  }),
+)("an out-of-credit fire-and-forget task with a fallback configured", (it) => {
+  it.effect("is held pending for the credit fallback instead of waking the parent", () =>
+    Effect.gen(function* () {
+      const delivery = yield* upgradeCreditFailure("with-fallback");
+      assert.equal(delivery?.state, "pending");
+    }),
+  );
+});
+
+it.layer(layerTest)("an out-of-credit fire-and-forget task without a fallback", (it) => {
+  it.effect("wakes the parent with the failure as before", () =>
+    Effect.gen(function* () {
+      const delivery = yield* upgradeCreditFailure("without-fallback");
+      assert.equal(delivery?.state, "claimed");
+    }),
   );
 });

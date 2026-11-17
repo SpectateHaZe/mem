@@ -263,6 +263,10 @@ const harness = (options: {
   return { layer: composed, dispatched, preparedRuns, receipts } as const;
 };
 
+/** The retry requests, without the delivery commands that settle the held failure. */
+const requests = (commands: ReadonlyArray<OrchestrationV2ServerCommand>) =>
+  commands.filter((command) => command.type === "delegated_task.request");
+
 describe("DelegatedTaskCreditReactor", () => {
   it.effect("retries an out-of-credit task on the configured fallback model", () =>
     Effect.gen(function* () {
@@ -270,7 +274,7 @@ describe("DelegatedTaskCreditReactor", () => {
       yield* Effect.gen(function* () {
         const reactor = yield* DelegatedTaskCreditReactor.DelegatedTaskCreditReactor;
         yield* reactor.handle(terminalEvent(taskRow()));
-        assert.equal(dispatched.length, 1);
+        assert.equal(requests(dispatched).length, 1);
         const request = dispatched[0];
         assert.equal(request?.type, "delegated_task.request");
         if (request?.type !== "delegated_task.request") return;
@@ -290,6 +294,8 @@ describe("DelegatedTaskCreditReactor", () => {
         );
         assert.equal("workspaceStrategy" in request, false);
         assert.equal(preparedRuns.length, 0);
+        // The held failure is dropped: the retry reports back to the parent instead.
+        assert.equal(dispatched[1]?.type, "delegated_task.completion-delivery.dispose");
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -301,7 +307,7 @@ describe("DelegatedTaskCreditReactor", () => {
         const reactor = yield* DelegatedTaskCreditReactor.DelegatedTaskCreditReactor;
         yield* reactor.handle(terminalEvent(taskRow()));
         yield* reactor.handle(terminalEvent(taskRow()));
-        assert.equal(dispatched.length, 1);
+        assert.equal(requests(dispatched).length, 1);
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -312,7 +318,7 @@ describe("DelegatedTaskCreditReactor", () => {
       yield* Effect.gen(function* () {
         const reactor = yield* DelegatedTaskCreditReactor.DelegatedTaskCreditReactor;
         yield* reactor.handle(terminalEvent(taskRow()));
-        assert.equal(dispatched.length, 0);
+        assert.equal(requests(dispatched).length, 0);
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -332,7 +338,7 @@ describe("DelegatedTaskCreditReactor", () => {
             }),
           ),
         );
-        assert.equal(dispatched.length, 0);
+        assert.equal(requests(dispatched).length, 0);
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -343,7 +349,7 @@ describe("DelegatedTaskCreditReactor", () => {
       yield* Effect.gen(function* () {
         const reactor = yield* DelegatedTaskCreditReactor.DelegatedTaskCreditReactor;
         yield* reactor.handle(terminalEvent(taskRow()));
-        assert.equal(dispatched.length, 1);
+        assert.equal(requests(dispatched).length, 1);
         const request = dispatched[0];
         assert.equal(request?.type, "delegated_task.request");
         if (request?.type !== "delegated_task.request") return;
@@ -365,7 +371,13 @@ describe("DelegatedTaskCreditReactor", () => {
       yield* Effect.gen(function* () {
         const reactor = yield* DelegatedTaskCreditReactor.DelegatedTaskCreditReactor;
         yield* reactor.handle(terminalEvent(taskRow()));
-        assert.equal(dispatched.length, 0);
+        assert.equal(requests(dispatched).length, 0);
+        // No retry, so the held failure is released and the parent still hears about it.
+        const release = dispatched[0];
+        assert.equal(release?.type, "delegated_task.completion-delivery.acknowledge");
+        if (release?.type === "delegated_task.completion-delivery.acknowledge") {
+          assert.isNull(release.observedByRunId);
+        }
       }).pipe(Effect.provide(layer));
     }),
   );
@@ -398,7 +410,7 @@ describe("DelegatedTaskCreditReactor", () => {
         yield* reactor.handle(
           terminalEvent(taskRow(testCase.task as Partial<OrchestrationV2Subagent>)),
         );
-        assert.equal(dispatched.length, 0);
+        assert.equal(requests(dispatched).length, 0);
       }).pipe(Effect.provide(layer));
     }),
   );

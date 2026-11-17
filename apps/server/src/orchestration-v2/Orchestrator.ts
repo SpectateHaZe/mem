@@ -195,6 +195,10 @@ import {
 import { planThreadDeletion } from "./ThreadDeletion.ts";
 import type * as ProviderAdapter from "@t3tools/provider-core/server/ProviderAdapter";
 import * as ServerSettings from "../serverSettings.ts";
+import {
+  isCreditExhaustionFailure,
+  isCreditFallbackRetryPrompt,
+} from "../mcp/delegatedTaskCredit.ts";
 
 const isMessageQuestionAnswer = Schema.is(
   Schema.Union([TrimmedNonEmptyString, Schema.NonEmptyArray(TrimmedNonEmptyString)]),
@@ -2785,6 +2789,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         task,
         updatedTask: task,
         now,
+        holdForCreditFallback: false,
       }).pipe(mapDispatchError(command));
       if (plan.task.completionDelivery?.state === "pending") return;
       yield* emitEvent({
@@ -12733,6 +12738,36 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       awaitsRestartContinuation,
     ).pipe(Effect.map((pending) => pending.includes(true)));
 
+  /** The same test DelegatedTaskCreditReactor applies before it retries a fire-and-forget task. */
+  const holdsForCreditFallback = Effect.fn("orchestrationV2.holdsForCreditFallback")(function* (
+    task: OrchestrationV2Subagent,
+  ) {
+    if (
+      task.origin !== "app_owned" ||
+      task.status !== "failed" ||
+      task.result === null ||
+      task.runId === null ||
+      task.childThreadId === null ||
+      task.modelSelection === undefined ||
+      task.completionWake !== "always" ||
+      isCreditFallbackRetryPrompt(task.prompt) ||
+      !isCreditExhaustionFailure(task.result)
+    ) {
+      return false;
+    }
+    const fallback = yield* serverSettings.getSettings.pipe(
+      Effect.map((settings) => settings.subagentFallbackModelSelection),
+      Effect.orElseSucceed(() => null),
+    );
+    return (
+      fallback !== null &&
+      !(
+        fallback.instanceId === task.modelSelection.instanceId &&
+        fallback.model === task.modelSelection.model
+      )
+    );
+  });
+
   const planDelegatedCompletionDelivery = Effect.fn(
     "orchestrationV2.planDelegatedCompletionDelivery",
   )(function* (input: {
@@ -12744,12 +12779,27 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     readonly task: OrchestrationV2Subagent;
     readonly updatedTask: OrchestrationV2Subagent;
     readonly now: DateTime.Utc;
+    /** False when releasing a failure the credit fallback held but could not retry. */
+    readonly holdForCreditFallback?: boolean;
   }) {
     const taskDelivery = input.updatedTask.completionDelivery;
     if (
       taskDelivery?.state === "acknowledged" ||
       taskDelivery?.state === "delivered" ||
       taskDelivery?.state === "disposed"
+    ) {
+      return {
+        task: input.updatedTask,
+        parentRun: undefined,
+        message: undefined,
+        offer: false,
+      };
+    }
+    // Held pending so DelegatedTaskCreditReactor retries it on the fallback model; offering the
+    // failure would wake the parent with it first and mark it claimed, which the reactor skips.
+    if (
+      input.holdForCreditFallback !== false &&
+      (yield* holdsForCreditFallback(input.updatedTask))
     ) {
       return {
         task: input.updatedTask,

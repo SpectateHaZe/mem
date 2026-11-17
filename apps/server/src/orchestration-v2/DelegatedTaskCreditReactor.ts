@@ -55,7 +55,7 @@ const make = Effect.gen(function* () {
     const parentRunId = task.runId;
     if (failedSelection === undefined || parentRunId === null || childThreadId === null) {
       yield* skipLog("task-has-no-completed-structure", task);
-      return;
+      return false;
     }
     const configured = yield* settings.getSettings.pipe(
       Effect.map((rows) => rows.subagentFallbackModelSelection),
@@ -63,14 +63,14 @@ const make = Effect.gen(function* () {
     );
     if (configured === null) {
       yield* skipLog("no-fallback-configured", task);
-      return;
+      return false;
     }
     if (
       configured.instanceId === failedSelection.instanceId &&
       configured.model === failedSelection.model
     ) {
       yield* skipLog("fallback-is-failed-model", task);
-      return;
+      return false;
     }
     const parent = yield* projections
       .getThreadRecords(task.threadId, [])
@@ -86,7 +86,7 @@ const make = Effect.gen(function* () {
       child.thread.deletedAt !== null
     ) {
       yield* skipLog("thread-unavailable", task);
-      return;
+      return false;
     }
     const provider = yield* providerCatalog.getProviders.pipe(
       Effect.map((entries) => entries.find((entry) => entry.instanceId === configured.instanceId)),
@@ -94,14 +94,14 @@ const make = Effect.gen(function* () {
     );
     if (provider === undefined) {
       yield* skipLog("unknown-provider-instance", task);
-      return;
+      return false;
     }
     if (
       provider.models.length > 0 &&
       !provider.models.some((entry) => entry.slug === configured.model)
     ) {
       yield* skipLog("unknown-provider-model", task);
-      return;
+      return false;
     }
     const fallbackModelSelection = {
       instanceId: configured.instanceId,
@@ -128,7 +128,7 @@ const make = Effect.gen(function* () {
         parentThreadId: task.threadId,
         cause: modes.failure,
       });
-      return;
+      return false;
     }
     const [retryRuntimeMode, interactionMode] = modes.success;
     const childWorktreePath = child.thread.worktreePath;
@@ -139,7 +139,7 @@ const make = Effect.gen(function* () {
     const retryCommandId = CommandId.make(`server:delegated-task-credit-fallback:${task.id}`);
     if (yield* threads.hasReceipt(retryCommandId)) {
       yield* skipLog("already-retried", task);
-      return;
+      return false;
     }
     const retryResult = yield* threads.dispatch({
       type: "delegated_task.request",
@@ -170,7 +170,9 @@ const make = Effect.gen(function* () {
         stored.event.payload.origin === "app_owned" &&
         stored.event.payload.id !== task.id,
     );
-    if (retryTaskEvent === undefined || retryTaskEvent.event.type !== "subagent.updated") return;
+    if (retryTaskEvent === undefined || retryTaskEvent.event.type !== "subagent.updated") {
+      return false;
+    }
     const retryChildThreadId = retryTaskEvent.event.payload.childThreadId;
     const retryRunEvent = retryResult.storedEvents.find(
       (stored) =>
@@ -194,6 +196,7 @@ const make = Effect.gen(function* () {
       instanceId: configured.instanceId,
       model: configured.model,
     });
+    return true;
   });
 
   // `settled_only` tasks deliver through the blocking delegateTask call, which
@@ -221,15 +224,47 @@ const make = Effect.gen(function* () {
     function* (event) {
       const task = filterTask(event);
       if (task === undefined) return;
-      yield* retryTask(task).pipe(
+      const started = yield* retryTask(task).pipe(
         Effect.catchCause((cause) =>
           Effect.logWarning("delegated-task-credit-fallback-failed", {
             taskId: task.id,
             parentThreadId: task.threadId,
             cause,
-          }),
+          }).pipe(Effect.as(false)),
         ),
       );
+      // The orchestrator held this failure for the retry. A started retry reports back itself, so
+      // the failure is dropped; without one the failure is released so the parent still hears it.
+      yield* threads
+        .dispatch(
+          started
+            ? {
+                type: "delegated_task.completion-delivery.dispose",
+                commandId: CommandId.make(
+                  `server:delegated-task-credit-fallback:${task.id}:dispose`,
+                ),
+                parentThreadId: task.threadId,
+                taskId: task.id,
+              }
+            : {
+                type: "delegated_task.completion-delivery.acknowledge",
+                commandId: CommandId.make(
+                  `server:delegated-task-credit-fallback:${task.id}:release`,
+                ),
+                parentThreadId: task.threadId,
+                taskId: task.id,
+                observedByRunId: null,
+              },
+        )
+        .pipe(
+          Effect.catchCause((cause) =>
+            Effect.logWarning("delegated-task-credit-fallback-delivery-failed", {
+              taskId: task.id,
+              parentThreadId: task.threadId,
+              cause,
+            }),
+          ),
+        );
     },
   );
 
