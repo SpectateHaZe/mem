@@ -148,8 +148,11 @@ export function MemThreadPopover(props: {
         </p>
       ) : (
         <div className="space-y-1.5 rounded-md border p-2">
-          <Badge size="sm" variant={state.verdict === "accept" ? "success" : "warning"}>
-            {state.verdict === "accept" ? "Accepted" : "Sent back"}
+          <Badge
+            size="sm"
+            variant={state.escalated ? "error" : state.verdict === "accept" ? "success" : "warning"}
+          >
+            {state.escalated ? "Needs you" : state.verdict === "accept" ? "Accepted" : "Sent back"}
           </Badge>
           {state.reason === null ? null : (
             <p className="text-muted-foreground text-xs">{state.reason}</p>

@@ -375,9 +375,35 @@ describe("MemOverseerService.threadState", () => {
     expect(state).toStrictEqual({
       verdict: "reject",
       reason: REJECT.reasoning,
+      escalated: false,
       masterThreadId: null,
     });
     expect(harness.reviews).toHaveLength(1);
+  });
+
+  it("says when Mem stopped on a thread and why", async () => {
+    const harness = makeHarness({
+      store: new Map([
+        [
+          "thread-1",
+          {
+            ...claimedRecord(REJECTED_INSTRUCTION),
+            task: {
+              threadId: "thread-1",
+              phase: "escalated",
+              rejections: 0,
+              lastInstruction: null,
+            },
+            lastReview: { verdict: "reject", reasoning: "Two runs in a row failed." },
+          },
+        ],
+      ]),
+    });
+
+    const state = await run(harness.service.threadState("thread-1"));
+
+    expect(state.escalated).toBe(true);
+    expect(state.reason).toBe("Two runs in a row failed.");
   });
 });
 

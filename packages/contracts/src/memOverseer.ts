@@ -227,6 +227,8 @@ export class MemOverseerRequestError extends Schema.TaggedError<MemOverseerReque
 export const MemThreadState = Schema.Struct({
   verdict: Schema.NullOr(Schema.Literals(["accept", "reject"])),
   reason: Schema.NullOr(Schema.String),
+  /** Mem stopped on this thread and is waiting for the owner; `reason` says why. */
+  escalated: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(false))),
   masterThreadId: Schema.NullOr(Schema.String),
 });
 export type MemThreadState = typeof MemThreadState.Type;

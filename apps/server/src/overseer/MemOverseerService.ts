@@ -578,6 +578,12 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
                 pendingApproval: null,
                 waitingUntilMs: null,
                 waitingFor: null,
+                lastReview: {
+                  verdict: "reject" as const,
+                  reasoning: failedAfterSend
+                    ? "Two runs in a row failed before doing anything, so Mem stopped resending. Check the session's error, then mark it in progress again."
+                    : "Two runs in a row ended without saying anything, so Mem stopped resending. Mark the session in progress again to resume.",
+                },
               }
             : { waitingUntilMs: nowMs + MEM_FAILED_ROUND_BACKOFF_MS, waitingFor: null }),
           updatedAtMs: nowMs,
@@ -725,6 +731,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         task: stalled,
         settledPhase: stalled.phase,
         pendingApproval: null,
+        lastReview: {
+          verdict: "reject",
+          reasoning:
+            "The session never answered Mem's last instruction, so Mem stopped. Mark it in progress again to resume.",
+        },
         updatedAtMs: nowMs,
       });
       return;
@@ -917,7 +928,15 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             const failures = state.rejections + 1;
             if (failures >= MEM_MAX_COMMIT_FAILURES) {
               state = { ...state, phase: "escalated", lastInstruction: null };
-              record = { ...record, settledPhase: "escalated", pendingApproval: null };
+              record = {
+                ...record,
+                settledPhase: "escalated",
+                pendingApproval: null,
+                lastReview: {
+                  verdict: "reject",
+                  reasoning: `Mem could not commit this round ${failures} times in a row. Git last said: ${commit.output.slice(-300)}`,
+                },
+              };
               yield* Effect.logWarning("Mem escalated a thread whose commits keep failing.", {
                 threadId: thread.threadId,
               });
@@ -1276,6 +1295,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     return {
       verdict: review?.verdict ?? null,
       reason: review?.reasoning ?? null,
+      escalated: record?.task.phase === "escalated",
       masterThreadId: masterThreadId ?? null,
     } satisfies MemThreadState;
   });

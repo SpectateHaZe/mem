@@ -14,6 +14,7 @@ import { connectionAtomRuntime } from "../../connection/runtime";
 export const NO_MEM_THREAD_STATE: MemThreadState = {
   verdict: null,
   reason: null,
+  escalated: false,
   masterThreadId: null,
 };
 

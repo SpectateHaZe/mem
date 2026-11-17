@@ -1108,6 +1108,8 @@ describe("MemOverseerService failed rounds", () => {
     expect(harness.spend).toStrictEqual([]);
     expect(store.get("thread-1")?.task.phase).toBe("escalated");
     expect(store.get("thread-1")?.settledPhase).toBe("escalated");
+    // The owner sees why in the session's Mem popover.
+    expect(store.get("thread-1")?.lastReview?.reasoning).toContain("failed before doing anything");
   });
 
   it("treats a finished turn with no assistant output as a failure", async () => {
