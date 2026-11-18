@@ -907,6 +907,30 @@ export function useComposerSend(input: ComposerSendInput) {
       );
       return;
     }
+    // A draft edited since send, or a paste still landing in it, is no longer the message
+    // the user sent.
+    const attachmentIdsAtSend = composerAttachmentsSnapshot.map((attachment) => attachment.id);
+    // A direct annotation send writes its image and reference into the draft as it sends,
+    // so the live draft may still lack them; anything else differing is a real edit.
+    const annotationImageId = directAnnotation?.image?.id;
+    const attachmentIdsBeforeAnnotation = attachmentIdsAtSend.filter(
+      (id) => id !== annotationImageId,
+    );
+    const sameIds = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
+      left.length === right.length && left.every((id, index) => id === right[index]);
+    const draftChangedSinceSend = () => {
+      if (composerRef.current?.hasPendingAttachments() === true) return true;
+      const sendContext = composerRef.current?.getSendContext();
+      const attachmentIds = sendContext
+        ? [...sendContext.images, ...sendContext.files].map((attachment) => attachment.id)
+        : attachmentIdsAtSend;
+      const promptUnchanged =
+        promptRef.current === promptAtSend || promptRef.current === promptForSend;
+      const attachmentsUnchanged =
+        sameIds(attachmentIds, attachmentIdsAtSend) ||
+        (annotationImageId !== undefined && sameIds(attachmentIds, attachmentIdsBeforeAnnotation));
+      return !promptUnchanged || !attachmentsUnchanged;
+    };
     // A message sent while approvals are pending redirects the agent. They are declined only
     // here, after everything above has accepted the send, so local commands and rejected
     // drafts leave them alone. After navigating away during an upload, the shown approvals
@@ -918,31 +942,6 @@ export function useComposerSend(input: ComposerSendInput) {
           )
         : [];
     if (approvalsToDecline.length > 0 || approvalFeedbackTarget !== undefined) {
-      // A draft edited since send, or a paste still landing in it, is no longer the message
-      // the user sent.
-      const attachmentIdsAtSend = composerAttachmentsSnapshot.map((attachment) => attachment.id);
-      // A direct annotation send writes its image and reference into the draft as it sends,
-      // so the live draft may still lack them; anything else differing is a real edit.
-      const annotationImageId = directAnnotation?.image?.id;
-      const attachmentIdsBeforeAnnotation = attachmentIdsAtSend.filter(
-        (id) => id !== annotationImageId,
-      );
-      const sameIds = (left: ReadonlyArray<string>, right: ReadonlyArray<string>) =>
-        left.length === right.length && left.every((id, index) => id === right[index]);
-      const draftChangedSinceSend = () => {
-        if (composerRef.current?.hasPendingAttachments() === true) return true;
-        const sendContext = composerRef.current?.getSendContext();
-        const attachmentIds = sendContext
-          ? [...sendContext.images, ...sendContext.files].map((attachment) => attachment.id)
-          : attachmentIdsAtSend;
-        const promptUnchanged =
-          promptRef.current === promptAtSend || promptRef.current === promptForSend;
-        const attachmentsUnchanged =
-          sameIds(attachmentIds, attachmentIdsAtSend) ||
-          (annotationImageId !== undefined &&
-            sameIds(attachmentIds, attachmentIdsBeforeAnnotation));
-        return !promptUnchanged || !attachmentsUnchanged;
-      };
       const draftBeforeDecline = useComposerDraftStore
         .getState()
         .getComposerDraft(composerDraftTarget);
@@ -1030,6 +1029,25 @@ export function useComposerSend(input: ComposerSendInput) {
         }
         return;
       }
+    }
+    // Clearing the draft below would wipe text or attachments added while uploads finished;
+    // keep the newer draft and let the user send it.
+    if (
+      turnUsesAttachmentUploads &&
+      composerAttachmentsSnapshot.length > 0 &&
+      currentRouteThreadKeyRef.current === routeThreadKey &&
+      draftChangedSinceSend()
+    ) {
+      sendInFlightRef.current = false;
+      setDockedDraftHeroThreadKey((currentThreadKey) =>
+        currentThreadKey === activeThreadKey ? null : currentThreadKey,
+      );
+      toastManager.add({
+        type: "info",
+        title: "The message changed while its attachments uploaded",
+        description: "Send again when it's ready.",
+      });
+      return;
     }
     if (sendQueuesBehindSetup) {
       setSetupQueueSendThreadKey(activeThreadKey);
@@ -1120,9 +1138,12 @@ export function useComposerSend(input: ComposerSendInput) {
       : null;
     // Keep new-thread flows from reusing this draft while attachments and worktree setup settle.
     if (sentDraftThreadRef) markPromotedDraftThreadByRef(sentDraftThreadRef);
-    promptRef.current = "";
+    // After leaving the thread during an upload, the composer shows another thread's draft.
+    if (currentRouteThreadKeyRef.current === routeThreadKey) {
+      promptRef.current = "";
+      composerRef.current?.resetCursorState();
+    }
     clearComposerDraftContent(composerDraftTarget);
-    composerRef.current?.resetCursorState();
 
     const title = deriveThreadTitleSeed({
       text: messageTextForSend,
@@ -1331,17 +1352,18 @@ export function useComposerSend(input: ComposerSendInput) {
         );
         clearBackgroundDraftSubmissionByRef(scopeThreadRef(environmentId, threadIdForSend));
       }
-      if (
+      // The message never reached the server, so it must not stay in the timeline as sent.
+      setOptimisticUserMessages((existing) => {
+        const next = existing.filter((message) => message.id !== messageIdForSend);
+        return next.length === existing.length ? existing : next;
+      });
+      // The restored draft clones its images, so the sent copies are no longer used.
+      optimisticBlobPreviews.release(optimisticMessage);
+      const draftIsEmpty = () =>
         !composerDraftHasUserContent(
           useComposerDraftStore.getState().getComposerDraft(composerDraftTarget),
-        )
-      ) {
-        setOptimisticUserMessages((existing) => {
-          const next = existing.filter((message) => message.id !== messageIdForSend);
-          return next.length === existing.length ? existing : next;
-        });
-        // The restored draft clones its images, so the sent copies are no longer used.
-        optimisticBlobPreviews.release(optimisticMessage);
+        );
+      const restoreFailedSend = () => {
         const retryComposerImages = restoreComposerDraft(composerDraftTarget, sendSnapshot);
         if (currentRouteThreadKeyRef.current === routeThreadKey) {
           promptRef.current = messageTextForSend;
@@ -1354,6 +1376,33 @@ export function useComposerSend(input: ComposerSendInput) {
             detectTrigger: true,
           });
         }
+      };
+      if (draftIsEmpty()) {
+        restoreFailedSend();
+      } else {
+        // The user already started the next message; keep it and offer the failed one back.
+        const recoveryToastId = toastManager.add(
+          stackedThreadToast({
+            type: "error",
+            title: "A message could not be sent",
+            description:
+              "Your newer draft is unchanged. Restore the failed message when the composer is empty.",
+            timeout: 0,
+            actionProps: {
+              children: "Restore message",
+              onClick: () => {
+                if (sendInFlightRef.current || !draftIsEmpty()) {
+                  toastManager.update(recoveryToastId, {
+                    description: "Send or clear the current draft before restoring.",
+                  });
+                  return;
+                }
+                restoreFailedSend();
+                toastManager.close(recoveryToastId);
+              },
+            },
+          }),
+        );
       }
       if (!isAtomCommandInterrupted(failure)) {
         const error = squashAtomCommandFailure(failure);
