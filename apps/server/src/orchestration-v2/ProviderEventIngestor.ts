@@ -270,16 +270,22 @@ export const layer: Layer.Layer<
         if (Option.isNone(serverSettings)) return failure;
         const settings = yield* serverSettings.value.getSettings;
         if (!settings.mem.autonomous) return failure;
+        const fallback = settings.subagentFallbackModelSelection;
+        const delegated = String(input.threadId).startsWith("thread:delegated-task:");
         const runs =
-          input.runId === undefined || failure.resetAt != null
+          input.runId === undefined || (failure.resetAt != null && !(delegated && fallback))
             ? []
             : (yield* projections.getThreadRecords(input.threadId, ["runs"])).runs;
+        const model = runs.find((run) => run.id === input.runId)?.modelSelection;
         return asAutonomousLimitFailure(failure, {
           nowMs: DateTime.toEpochMillis(yield* DateTime.now),
           resumeStreak: input.runId === undefined ? 0 : limitResumeStreak(runs, input.runId),
+          // The credit fallback retries only on a different model; otherwise nobody would.
           creditHandledElsewhere:
-            String(input.threadId).startsWith("thread:delegated-task:") &&
-            settings.subagentFallbackModelSelection !== null,
+            delegated &&
+            fallback !== null &&
+            model !== undefined &&
+            !(fallback.instanceId === model.instanceId && fallback.model === model.model),
         });
       },
       // Failing to read settings or runs must never lose the failure itself.

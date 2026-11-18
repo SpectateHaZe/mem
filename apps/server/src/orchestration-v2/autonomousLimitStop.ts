@@ -38,6 +38,8 @@ export function asAutonomousLimitFailure(
     readonly creditHandledElsewhere: boolean;
   },
 ): OrchestrationV2ProviderFailure {
+  // Checked first: a quota error can also say "429", and the fallback retry must not get a twin.
+  if (input.creditHandledElsewhere && isCreditExhaustionFailure(failure.message)) return failure;
   const reclassifiable =
     failure.class === "provider_error" ||
     failure.class === "transport_error" ||
@@ -45,8 +47,7 @@ export function asAutonomousLimitFailure(
   const limited =
     failure.class === "usage_limit" ||
     (reclassifiable &&
-      (RATE_LIMIT.test(failure.message) ||
-        (!input.creditHandledElsewhere && isCreditExhaustionFailure(failure.message))));
+      (RATE_LIMIT.test(failure.message) || isCreditExhaustionFailure(failure.message)));
   if (!limited) return failure;
   if (failure.resetAt != null) return { ...failure, class: "usage_limit" };
   const waitMs = Math.min(RETRY_MAX_MS, RETRY_BASE_MS * 2 ** Math.min(input.resumeStreak, 10));

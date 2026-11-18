@@ -50,6 +50,14 @@ describe("asAutonomousLimitFailure", () => {
       failure,
     );
     expect(asAutonomousLimitFailure(failure, input).class).toBe("usage_limit");
+    const quota429 = {
+      ...base,
+      class: "provider_error" as const,
+      message: "429 You exceeded your current quota",
+    };
+    expect(asAutonomousLimitFailure(quota429, { ...input, creditHandledElsewhere: true })).toBe(
+      quota429,
+    );
   });
 });
 
