@@ -30,13 +30,13 @@ export function ThreadDetailsLowUsage(props: {
   const entries = deriveProviderInstanceEntries(providers ?? []);
   const modelOptionsByInstance = new Map(entries.map((entry) => [entry.instanceId, entry.models]));
   const fallbackEntry = entries.find(isProviderInstancePickerReady) ?? entries[0];
-  const savedInstance =
-    saved && entries.some((entry) => entry.instanceId === saved.subagentModel.instanceId)
-      ? entries.find((entry) => entry.instanceId === saved.subagentModel.instanceId)
-      : undefined;
+  // A turned-off provider counts as gone: the server pauses low usage mode for it too.
+  const savedInstance = saved
+    ? entries.find((entry) => entry.enabled && entry.instanceId === saved.subagentModel.instanceId)
+    : undefined;
   const activeInstanceId = savedInstance?.instanceId ?? fallbackEntry?.instanceId;
   const savedSelection: ModelSelection | null = savedInstance && saved ? saved.subagentModel : null;
-  // Saved, but its provider was removed: the lead is still told to delegate there, so say so.
+  // Saved, but its provider was removed or turned off: the lead is still told to delegate there, so say so.
   const savedUnavailable =
     saved !== undefined && providers !== undefined && savedInstance === undefined;
   const modelLabel = (selection: ModelSelection) => {
