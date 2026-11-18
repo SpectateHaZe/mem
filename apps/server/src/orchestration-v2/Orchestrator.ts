@@ -4621,7 +4621,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
           id: `effect:${command.commandId}:terminal.cleanup`,
           commandId: command.commandId,
           threadId: command.threadId,
-          request: { type: "terminal.cleanup" },
+          request: { type: "terminal.cleanup", keepHistory: true },
         } satisfies PendingOrchestrationEffectV2,
       ]);
     }

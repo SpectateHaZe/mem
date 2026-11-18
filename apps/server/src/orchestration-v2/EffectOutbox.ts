@@ -100,6 +100,8 @@ export const OrchestrationEffectRequestV2 = Schema.Union([
   }),
   Schema.Struct({
     type: Schema.Literal("terminal.cleanup"),
+    /** Archive keeps the scrollback so an unarchived thread gets it back; delete wipes it. */
+    keepHistory: Schema.optional(Schema.Boolean),
   }),
   Schema.Struct({
     type: Schema.Literal("preview.cleanup"),

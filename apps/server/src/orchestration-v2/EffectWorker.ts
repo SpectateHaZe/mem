@@ -506,16 +506,18 @@ export const layerExecutor: Layer.Layer<
               ),
             );
           case "terminal.cleanup":
-            return resourceCleanup.cleanupTerminals(effect.threadId).pipe(
-              Effect.mapError(
-                (cause) =>
-                  new OrchestrationEffectExecutionError({
-                    effectId: effect.id,
-                    effectType: effect.request.type,
-                    cause,
-                  }),
-              ),
-            );
+            return resourceCleanup
+              .cleanupTerminals(effect.threadId, effect.request.keepHistory !== true)
+              .pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new OrchestrationEffectExecutionError({
+                      effectId: effect.id,
+                      effectType: effect.request.type,
+                      cause,
+                    }),
+                ),
+              );
           case "preview.cleanup":
             return resourceCleanup.cleanupPreviews(effect.threadId).pipe(
               Effect.mapError(
