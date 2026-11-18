@@ -78,6 +78,7 @@ const SHARED_THREAD_REPLIES_LIMIT = 64;
 // How soon an open read notices that its link stopped working, such as Connect no longer serving
 // the host. Closing or replacing the link ends the main stream at once.
 const ACCESS_RECHECK_INTERVAL = Duration.seconds(30);
+const COMMAND_OUTPUT_RECHECK_INTERVAL = Duration.seconds(2);
 
 const GUEST_ACCESS_MESSAGES = {
   ...GUEST_FAILURE,
@@ -476,7 +477,8 @@ const make = Effect.gen(function* () {
   /** Completes once the session no longer opens its share, so open reads end with it. */
   const untilRevoked = (session: string) =>
     authorize(session, "session").pipe(
-      Effect.repeat(Schedule.spaced(ACCESS_RECHECK_INTERVAL)),
+      // Live terminal output can print secrets; stop it soon after the link closes.
+      Effect.repeat(Schedule.spaced(COMMAND_OUTPUT_RECHECK_INTERVAL)),
       Effect.ignore,
     );
 
