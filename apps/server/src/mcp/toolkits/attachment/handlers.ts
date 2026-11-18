@@ -69,7 +69,16 @@ export const layer = McpToolAccess.toLayer(
       t3_attachment_discard: McpToolAccess.writes(
         (input) =>
           Effect.gen(function* () {
-            if (uploadOwners.get(input.attachmentId)?.owner !== (yield* uploadOwner)) {
+            const entry = uploadOwners.get(input.attachmentId);
+            // Owners live in memory, so a restart or a long wait forgets them.
+            if (entry === undefined) {
+              return yield* new OrchestratorMcpFailure({
+                code: "invalid_request",
+                message:
+                  "This upload is not pending here: it was already sent, or prepared before a restart or more than a day ago. Unsent uploads are removed automatically.",
+              });
+            }
+            if (entry.owner !== (yield* uploadOwner)) {
               return yield* new OrchestratorMcpFailure({
                 code: "invalid_request",
                 message: "Only the caller that prepared a pending upload can discard it.",
