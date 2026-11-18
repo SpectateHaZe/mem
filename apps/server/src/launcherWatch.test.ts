@@ -21,3 +21,17 @@ it.effect("notices a launcher that was already gone when the watch began", () =>
     yield* Fiber.join(fiber);
   }),
 );
+
+it.effect("notices a Windows launcher that exited even though the parent id stays the same", () =>
+  Effect.gen(function* () {
+    const fiber = yield* Effect.forkChild(
+      awaitLauncherLoss({
+        launcherPid,
+        getParentPid: () => launcherPid,
+        isProcessAlive: () => false,
+      }).pipe(Effect.provideService(HostProcess.Platform, "win32")),
+    );
+    yield* Effect.yieldNow;
+    yield* Fiber.join(fiber);
+  }),
+);
