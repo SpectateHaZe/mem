@@ -189,6 +189,24 @@ const make = Effect.gen(function* () {
     if (goal === undefined || !firstEnd(run.id)) return;
     const pausedStop = pauseStopped.delete(threadId);
     const heldBack = queue.paused || pausedStop || (yield* Ref.get(currentHit)) !== undefined;
+    // Deleting the thread cancels its run; retrying would send to a thread that is gone.
+    if (run.status === "cancelled") {
+      const deleted = yield* projections.getThreadRecords(threadId, []).pipe(
+        Effect.map(({ thread }) => thread.deletedAt !== null),
+        Effect.orElseSucceed(() => false),
+      );
+      if (deleted) {
+        yield* setQueue(
+          updateGoal(queue, goal.id, (entry) => ({
+            ...entry,
+            status: "failed",
+            note: "Its thread was deleted.",
+          })),
+        );
+        yield* advance;
+        return;
+      }
+    }
     const limit = yield* readLimitStop(projections, settings, threadId, run);
     yield* setQueue(
       updateGoal(queue, goal.id, (entry) => settleGoal(entry, run.status, heldBack, limit)),
