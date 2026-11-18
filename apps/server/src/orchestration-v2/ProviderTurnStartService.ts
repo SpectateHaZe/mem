@@ -30,8 +30,9 @@ import { withWorkspaceLease } from "../workspace/workspaceLease.ts";
 import * as GitWorkflowService from "../git/GitWorkflowService.ts";
 import * as ProjectService from "../project/ProjectService.ts";
 import * as ProviderAuthService from "../provider/ProviderAuthService.ts";
-import { withLowUsageInstructions } from "../rooms/lowUsage.ts";
+import { subagentProviderUsable, withLowUsageInstructions } from "../rooms/lowUsage.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import { makeIsManagedWorktreePath } from "../worktreesDirectory.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProviderUsageAnalytics from "../telemetry/ProviderUsageAnalytics.ts";
@@ -163,6 +164,10 @@ export const layer: Layer.Layer<
     const providerSessions = yield* ProviderSessionManager.ProviderSessionManagerV2;
     const runExecution = yield* RunExecutionService.RunExecutionServiceV2;
     const runtimePolicy = yield* RuntimePolicy.RuntimePolicyV2;
+    // Optional so harnesses without a registry keep low usage mode as saved.
+    const providerInstances = yield* Effect.serviceOption(
+      ProviderInstanceRegistry.ProviderInstanceRegistry,
+    );
     const isManagedWorktreePath = yield* makeIsManagedWorktreePath;
 
     const resolveRecreateBase = Effect.fn("ProviderTurnStartService.resolveRecreateBase")(
@@ -843,12 +848,17 @@ export const layer: Layer.Layer<
         text: message.text,
         records: message.context?.records ?? [],
       });
-      const lowUsage = yield* serverSettings.getSettings.pipe(
+      const savedLowUsage = yield* serverSettings.getSettings.pipe(
         Effect.map(({ lowUsageThreads }) =>
           lowUsageThreads.find((entry) => entry.threadId === run.threadId),
         ),
         Effect.orElseSucceed(() => undefined),
       );
+      const lowUsage =
+        savedLowUsage !== undefined &&
+        (yield* subagentProviderUsable(providerInstances, savedLowUsage.subagentModel.instanceId))
+          ? savedLowUsage
+          : undefined;
       // Slash commands must stay first in the prompt for providers to parse them.
       const userText =
         lowUsage !== undefined && !message.text.trimStart().startsWith("/")

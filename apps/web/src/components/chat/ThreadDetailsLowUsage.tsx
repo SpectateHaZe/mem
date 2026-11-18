@@ -94,8 +94,8 @@ export function ThreadDetailsLowUsage(props: {
         ) : null}
         {savedUnavailable ? (
           <p className="text-destructive text-xs" role="alert">
-            The subagent model's provider is gone, so delegations fail. Choose another model or turn
-            this off.
+            The subagent model's provider is gone, so low usage mode is paused and the lead works
+            normally. Choose another model to turn it back on.
           </p>
         ) : null}
       </div>
