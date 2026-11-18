@@ -51,7 +51,9 @@ export const nextSpeakerIndex = (room: Room, lastIndex: number, text: string) =>
 export const addUserMessage = ({ note: _note, ...room }: Room, text: string, at: string): Room => ({
   ...room,
   transcript: [...room.transcript, { speaker: USER_SPEAKER, text, at }],
-  turnsLeft: room.maxRounds * room.participants.length,
+  // The reply already in flight uses one turn; without it a lead room went idle before the
+  // lead ever saw this message.
+  turnsLeft: room.maxRounds * room.participants.length + (room.status === "running" ? 1 : 0),
   status: "running",
   speakerIndex:
     room.status === "running" ? room.speakerIndex : (mentionedIndex(room, text, null) ?? 0),

@@ -41,6 +41,15 @@ it("gives the user a fresh budget and lets them pick who answers first", () => {
   assert.equal(room.speakerIndex, 1);
 });
 
+it("keeps a full budget for a message sent while an agent is replying", () => {
+  const running = beginTurn(addUserMessage(makeRoom(), "Question", "t"), 0).room;
+  const followUp = addUserMessage(running, "One more thing", "t");
+  // The reply in flight still spends a turn, then every agent gets one to answer the follow-up.
+  const answered = addAgentReply(followUp, 0, "reply", "t");
+  assert.equal(answered.turnsLeft, 3);
+  assert.equal(answered.status, "running");
+});
+
 it("stops after the turn budget and never exceeds it", () => {
   let room = addUserMessage(makeRoom(), "Question", "t");
   for (const speaker of [0, 1]) {
