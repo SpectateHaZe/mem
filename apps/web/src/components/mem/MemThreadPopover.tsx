@@ -117,6 +117,8 @@ export function MemThreadPopover(props: {
       setError(failureMessage(squashAtomCommandFailure(result), "Could not answer Mem."));
     } else if (result._tag === "Success" && result.value.outcome === "failed") {
       setError("Mem could not send that answer. Try again.");
+    } else if (result._tag === "Success" && result.value.outcome === "missing") {
+      setError("That approval was already answered.");
     }
     refresh();
     setBusy(null);
