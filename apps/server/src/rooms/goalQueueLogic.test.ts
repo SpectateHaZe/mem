@@ -34,6 +34,12 @@ it("requeues a goal stopped by a pause or the cap without using up a try", () =>
   assert.equal(held.attempts, 0);
 });
 
+it("picks a goal up again after a restart cancelled its run, without using up a try", () => {
+  const restarted = settleGoal(goal(), "cancelled", false);
+  assert.equal(restarted.status, "pending");
+  assert.equal(restarted.attempts, 0);
+});
+
 it("does not retry a run someone stopped by hand", () => {
   assert.equal(settleGoal(goal(), "interrupted", false).status, "failed");
 });

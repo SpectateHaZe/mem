@@ -42,8 +42,9 @@ export const settleGoal = (
     return { ...goal, note: "Waiting for the usage limit to reset; it continues on its own." };
   }
   if (runStatus === "failed" && limit === "waits") return { ...cleared, status: "pending" };
-  // The run was stopped on purpose, so this isn't a failure to retry.
-  if (heldBack) return { ...cleared, status: "pending" };
+  // The run was stopped on purpose, so this isn't a failure to retry. A restart or shutdown
+  // cancels every live run; the goal picks up again on its own thread, not as a failure.
+  if (heldBack || runStatus === "cancelled") return { ...cleared, status: "pending" };
   if (runStatus === "failed") return recordFailedRun(cleared, "the run failed.");
   return { ...cleared, status: "failed", note: `Stopped (${runStatus}).` };
 };

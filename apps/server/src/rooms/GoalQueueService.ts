@@ -22,6 +22,7 @@ import * as Path from "effect/Path";
 import * as PubSub from "effect/PubSub";
 import * as Ref from "effect/Ref";
 import * as Schema from "effect/Schema";
+import * as Schedule from "effect/Schedule";
 import * as Semaphore from "effect/Semaphore";
 import * as Stream from "effect/Stream";
 
@@ -175,6 +176,8 @@ const make = Effect.gen(function* () {
   });
 
   const firstEnd = makeEndedRunTracker();
+  // Threads stopped by a pause: resuming before the stop lands must not count it as a failure.
+  const pauseStopped = new Set<ThreadId>();
   const handleRunEnded = Effect.fn("GoalQueueService.handleRunEnded")(function* (
     threadId: ThreadId,
     run: OrchestrationV2Run,
@@ -184,7 +187,8 @@ const make = Effect.gen(function* () {
       (candidate) => candidate.status === "running" && candidate.threadId === threadId,
     );
     if (goal === undefined || !firstEnd(run.id)) return;
-    const heldBack = queue.paused || (yield* Ref.get(currentHit)) !== undefined;
+    const pausedStop = pauseStopped.delete(threadId);
+    const heldBack = queue.paused || pausedStop || (yield* Ref.get(currentHit)) !== undefined;
     const limit = yield* readLimitStop(projections, settings, threadId, run);
     yield* setQueue(
       updateGoal(queue, goal.id, (entry) => settleGoal(entry, run.status, heldBack, limit)),
@@ -229,6 +233,10 @@ const make = Effect.gen(function* () {
             : Effect.void,
         ),
       ),
+      // A failed event stream would leave every goal unsettled until a restart; reconnect, and
+      // recover first so a run that ended in the gap is still seen.
+      Effect.tapCause((cause) => Effect.logWarning("goal-queue.stream-failed", { cause })),
+      Effect.retry({ schedule: Schedule.spaced("5 seconds") }),
     ),
   );
 
@@ -262,7 +270,10 @@ const make = Effect.gen(function* () {
       if (input.paused) {
         yield* setQueue({ ...queue, paused: true, note: "Paused." });
         const goal = running();
-        if (goal?.threadId !== undefined) yield* stopThread(goal.threadId, "Queue paused.");
+        if (goal?.threadId !== undefined) {
+          pauseStopped.add(goal.threadId);
+          yield* stopThread(goal.threadId, "Queue paused.");
+        }
         return queue;
       }
       const { note: _note, ...cleared } = queue;
