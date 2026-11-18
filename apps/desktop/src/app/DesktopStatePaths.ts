@@ -16,7 +16,8 @@ export function resolveDesktopBaseDir(input: {
   readonly t3Home: Option.Option<string>;
 }): string {
   return Option.getOrElse(normalizeConfiguredBaseDir(input.t3Home), () =>
-    input.joinPath(input.homeDirectory, ".t3"),
+    // Same default as the server (os-jank resolveBaseDir); ~/.t3 is T3 Code's own data.
+    input.joinPath(input.homeDirectory, ".mem"),
   );
 }
 
