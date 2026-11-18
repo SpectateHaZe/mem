@@ -11572,7 +11572,8 @@ export const makeClaudeAdapterV2 = Effect.fn("makeClaudeAdapterV2")(function* (
               next.add(turnInput.providerTurnId);
               return next;
             });
-            yield* existing.query.interrupt.pipe(Effect.timeoutOption("10 seconds"));
+            // A rejected interrupt still closes the CLI below; returning early would leave it running.
+            yield* existing.query.interrupt.pipe(Effect.ignore, Effect.timeoutOption("10 seconds"));
             yield* existing.query.close.pipe(Effect.ignore);
             const closed = yield* Deferred.await(existing.closed).pipe(
               Effect.timeoutOption(CLAUDE_STOP_CONFIRM_TIMEOUT_MS),
