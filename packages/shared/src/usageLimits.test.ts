@@ -409,6 +409,38 @@ describe("pools", () => {
     expect(account?.environments).toEqual([{ environmentId: "env-a", label: "Laptop" }]);
   });
 
+  it("names a hub account whose read failed instead of dropping it silently", () => {
+    const input = new Map([
+      [
+        EnvironmentId.make("env-a"),
+        {
+          ...laptop,
+          serverConfig: {
+            providers: [],
+            usageLimitSources: [
+              {
+                ...source,
+                accounts: [
+                  {
+                    id: "claude-busy.json",
+                    driver: claude,
+                    usageLimits: {
+                      checkedAt,
+                      windows: [],
+                      unavailable: { reason: "probeFailed" as const, message: "HTTP 429" },
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    ]);
+    expect(collectLimitAccounts(input)).toEqual([]);
+    expect(collectLimitNotices(input)).toEqual([`${source.label} · claude-busy: HTTP 429`]);
+  });
+
   it("redeems through the hub when it holds a credit, even with a fresher native read", () => {
     const native = provider({
       driver: claude,

@@ -417,6 +417,12 @@ export function collectLimitNotices(presentations: LimitPresentations): readonly
       } else if (source.accounts.length === 0) {
         notices.push(`${label(environmentLabel, source.label)}: No accounts reported.`);
       }
+      // An account that failed its read leaves the pools, so say why it is missing.
+      for (const account of source.accounts) {
+        if (account.usageLimits.unavailable?.reason !== "probeFailed") continue;
+        const subject = `${source.label} · ${account.email ?? hubAccountName(account)}`;
+        notices.push(`${label(environmentLabel, subject)}: ${limitsNotice(account.usageLimits)}`);
+      }
     }
   }
   return notices;
