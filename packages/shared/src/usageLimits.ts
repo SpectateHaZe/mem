@@ -946,9 +946,11 @@ const dayPeriodMarker = (now: number) =>
  */
 function usageWindowPeriod(window: ServerProviderUsageWindow, now: number): string | null {
   const resetsAt = resetMillis(window);
-  if (resetsAt !== null) return resetsAt > now ? `iso:${window.resetsAt}` : null;
   // Without a reset time, one warning per calendar day is the closest period we can pin.
-  return dayPeriodMarker(now);
+  if (resetsAt === null) return dayPeriodMarker(now);
+  if (resetsAt <= now) return null;
+  // Two sources report the same reset in different formats and to the second; the minute is the period.
+  return `iso:${DateTime.formatIso(DateTime.makeUnsafe(Math.round(resetsAt / 60_000) * 60_000))}`;
 }
 
 function isLivePeriod(period: string, now: number): boolean {

@@ -1686,6 +1686,24 @@ describe("low usage warnings", () => {
     expect(later.warned).toEqual(first.warned);
   });
 
+  it("does not warn again when another source reports the same reset a few seconds apart", () => {
+    const first = evaluateLowUsageWarnings({
+      accounts: [account()],
+      thresholdPercent: threshold,
+      now,
+      warned: {},
+    });
+    expect(first.warnings).toHaveLength(1);
+    const sameReset = { ...lowWindow, resetsAt: "2026-09-05T14:00:12Z" } as const;
+    const later = evaluateLowUsageWarnings({
+      accounts: [account({ windows: [sameReset] })],
+      thresholdPercent: threshold,
+      now,
+      warned: first.warned,
+    });
+    expect(later.warnings).toHaveLength(0);
+  });
+
   it("re-arms after the window resets and runs low again", () => {
     const first = evaluateLowUsageWarnings({
       accounts: [account()],
