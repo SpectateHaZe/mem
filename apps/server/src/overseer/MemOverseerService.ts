@@ -2329,27 +2329,37 @@ const make = Effect.gen(function* () {
         });
       }
       const files = rootRelativeFiles(path, thread.root, thread.files);
+      // A path outside the root makes git refuse the whole diff; those files are noted, not read.
+      const insidePaths = files
+        .map((file) => file.path)
+        .filter((file) => !path.isAbsolute(file) && !file.startsWith(".."));
       // The uncommitted change itself; a file with no diff here (new, or already committed) is read whole.
-      const diff = yield* git
-        .execute({
-          operation: "MemOverseer.reviewDiff",
-          cwd: thread.root,
-          args: [
-            "diff",
-            "--relative",
-            "--no-color",
-            "--no-ext-diff",
-            "HEAD",
-            "--",
-            ...files.map((file) => file.path),
-          ],
-          timeoutMs: 30_000,
-          maxOutputBytes: 4_000_000,
-        })
-        .pipe(
-          Effect.map((result) => result.stdout),
-          Effect.orElseSucceed(() => ""),
-        );
+      const diff =
+        insidePaths.length === 0
+          ? ""
+          : yield* git
+              .execute({
+                operation: "MemOverseer.reviewDiff",
+                cwd: thread.root,
+                args: [
+                  // Unquoted paths, so a non-ASCII name still matches its file.
+                  "-c",
+                  "core.quotePath=false",
+                  "diff",
+                  "--relative",
+                  "--no-color",
+                  "--no-ext-diff",
+                  "HEAD",
+                  "--",
+                  ...insidePaths,
+                ],
+                timeoutMs: 30_000,
+                maxOutputBytes: 4_000_000,
+              })
+              .pipe(
+                Effect.map((result) => result.stdout),
+                Effect.orElseSucceed(() => ""),
+              );
       const input = { root: thread.root, files, ...(diff.length === 0 ? {} : { diff }) };
       const provided = <A, E>(effect: Effect.Effect<A, E, FileSystem.FileSystem | Path.Path>) =>
         effect.pipe(

@@ -105,6 +105,27 @@ describe("buildReviewContext", () => {
     expect(context.truncated).toBe(false);
   });
 
+  it("keeps a hunk whose added line looks like a +++ header with its own file", async () => {
+    const root = await makeRoot();
+    await writeFiles(root, { "notes.md": "x\n" });
+    const diff = [
+      "diff --git a/notes.md b/notes.md",
+      "--- a/notes.md",
+      "+++ b/notes.md",
+      "@@ -1 +1,2 @@",
+      " x",
+      "+++ b/elsewhere.md",
+      "",
+    ].join("\n");
+
+    const context = await run(
+      buildReviewContext(input({ root, files: [{ path: "notes.md", additions: 1 }], diff })),
+    );
+
+    expect(context.text).toContain("+++ b/elsewhere.md");
+    expect(context.text).not.toContain("\nx\n");
+  });
+
   it("reads the file content when no diff range is available", async () => {
     const root = await makeRoot();
     await writeFiles(root, { "src/only-content.ts": "export const realWork = 'visible';\n" });
@@ -227,13 +248,17 @@ describe("buildReviewContext", () => {
     expect(context.text).toContain("export const fromClaude = true;");
   });
 
-  it("refuses a path that escapes the root", async () => {
+  it("notes a path that escapes the root without reading it and keeps the other files", async () => {
     const root = await makeRoot();
-    const failure = await run(
-      buildReviewContext(input({ root, files: [{ path: "../outside.txt" }] })).pipe(Effect.flip),
+    await writeFiles(root, { "src/kept.ts": "export const kept = true;" });
+    const context = await run(
+      buildReviewContext(
+        input({ root, files: [{ path: "../outside.txt" }, { path: "src/kept.ts" }] }),
+      ),
     );
 
-    expect(failure.reason).toBe("path-escaped");
+    expect(context.text).toContain("outside the project root: not read");
+    expect(context.text).toContain("export const kept = true;");
   });
 
   it("refuses an absolute path into another user's home", async () => {
@@ -246,11 +271,10 @@ describe("buildReviewContext", () => {
           : "/root/.ssh/id_rsa";
       }),
     );
-    const failure = await run(
-      buildReviewContext(input({ root, files: [{ path: escapePath }] })).pipe(Effect.flip),
-    );
+    const context = await run(buildReviewContext(input({ root, files: [{ path: escapePath }] })));
 
-    expect(failure.reason).toBe("path-escaped");
+    expect(context.text).toContain("outside the project root: not read");
+    expect(context.text).not.toContain("PRIVATE KEY");
   });
 
   it("neutralises a verdict and an instruction override written inside the code", async () => {

@@ -251,6 +251,7 @@ const parseUnifiedDiff = (diff: string): ReadonlyMap<string, string> => {
   const blocks = new Map<string, string[]>();
   let currentPath: string | null = null;
   let current: string[] = [];
+  let inHunk = false;
 
   const flush = () => {
     if (currentPath === null) return;
@@ -266,11 +267,14 @@ const parseUnifiedDiff = (diff: string): ReadonlyMap<string, string> => {
       flush();
       current = [line];
       currentPath = gitHeader[2] ?? null;
+      inHunk = false;
       continue;
     }
     if (currentPath === null) continue;
     current.push(line);
-    const plusHeader = DIFF_PLUS_HEADER.exec(line);
+    if (line.startsWith("@@")) inHunk = true;
+    // Inside a hunk, "+++ b/x" is an added line whose text starts with "++", not a header.
+    const plusHeader = inHunk ? null : DIFF_PLUS_HEADER.exec(line);
     if (plusHeader) currentPath = plusHeader[1] ?? currentPath;
   }
   flush();
@@ -403,7 +407,21 @@ const buildSection = Effect.fnUntraced(function* (input: {
     root: input.root,
     rootReal: input.rootReal,
     candidate: input.file.path,
-  });
+  }).pipe(
+    Effect.catchTags({
+      MemReviewContextError: (error) =>
+        error.reason === "path-escaped" ? Effect.succeed(null) : Effect.fail(error),
+    }),
+  );
+  if (contained === null) {
+    // One stray path (a temp file, another checkout) must not sink the review of everything else.
+    const header = `## ${shown} (${counts})`;
+    const body = `${MEM_REVIEW_NEUTRALISED} outside the project root: not read.`;
+    return {
+      section: { path: shown, header, counts, body, characters: header.length + body.length + 3 },
+      deleted: false,
+    };
+  }
 
   const stat = contained.missing
     ? null
@@ -423,16 +441,14 @@ const buildSection = Effect.fnUntraced(function* (input: {
     `## ${shown} (${counts})` +
     (deleted ? " [deleted]" : input.file.status === "added" ? " [new file]" : "");
 
-  const finish = (body: string, isDeleted: boolean) => ({
-    section: {
-      path: shown,
-      header,
-      counts,
-      body: scrubReviewContext(body),
-      characters: header.length + body.length + 2,
-    },
-    deleted: isDeleted,
-  });
+  const finish = (raw: string, isDeleted: boolean) => {
+    const body = scrubReviewContext(raw);
+    // Counted as rendered: header, newline, body, newline, and the joining newline.
+    return {
+      section: { path: shown, header, counts, body, characters: header.length + body.length + 3 },
+      deleted: isDeleted,
+    };
+  };
 
   if (deleted || Option.isNone(info)) {
     return finish(
