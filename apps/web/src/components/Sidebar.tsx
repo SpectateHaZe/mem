@@ -285,6 +285,7 @@ import {
 } from "./sidebar/sidebarSurface";
 import { MemAutonomousToggle } from "./mem/MemAutonomousToggle";
 import { MemMasterCard } from "./mem/MemMasterCard";
+import { describeLimitPause } from "./mem/memLimitPause";
 import { Separator } from "./ui/separator";
 
 function sameSidebarProviderEntries(
@@ -1141,10 +1142,15 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
       !isMemMasterThread(thread.source) &&
       threadRuntimeIsActive(thread.runtime),
   ).length;
+  // A limit stop that will resume by itself is the one thing worth saying over the watch count.
+  const statusNowMinute = useNowMinute();
   const memMasterStatusLine =
-    watchingThreadCount === 0
+    describeLimitPause(threads, new Date(statusNowMinute).getTime(), (ms) =>
+      new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }),
+    ) ??
+    (watchingThreadCount === 0
       ? "your overseer"
-      : `watching ${watchingThreadCount} thread${watchingThreadCount === 1 ? "" : "s"}`;
+      : `watching ${watchingThreadCount} thread${watchingThreadCount === 1 ? "" : "s"}`);
   const routeRowThreadKey =
     routeThreadRef === null
       ? null
