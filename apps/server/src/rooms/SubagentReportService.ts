@@ -22,6 +22,8 @@ import * as Orchestrator from "../orchestration-v2/Orchestrator.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { readLimitStop } from "./limitStops.ts";
 import { ENDED_RUN_STATUSES, subagentFinishedNote, subagentStartedNote } from "./roomModerator.ts";
 
 const ReportsFile = Schema.fromJsonString(Schema.Array(SubagentReportWatchInput));
@@ -46,6 +48,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const filePath = path.join(config.stateDir, "subagent-reports.json");
   const lock = yield* Semaphore.make(1);
 
@@ -88,6 +91,8 @@ const make = Effect.gen(function* () {
     if (!ENDED_RUN_STATUSES.has(run.status)) return;
     const report = reports.get(threadId);
     if (report === undefined) return;
+    // Limit recovery continues this subagent after the reset; its result is that run's result.
+    if ((yield* readLimitStop(projections, settings, threadId, run)) === "resumes") return;
     const records = yield* projections
       .getThreadRecords(threadId, ["messages", "turnItems"])
       .pipe(Effect.mapError(reportError));
