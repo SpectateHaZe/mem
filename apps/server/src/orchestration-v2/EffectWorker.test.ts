@@ -175,14 +175,22 @@ it.effect.each([
   {
     name: "settles a stopped run when its adapter has already lost the native turn",
     unresponsive: false,
+    cause: "Provider turn is not active.",
+    dispatched: ["thread.background-work.settle"],
+  },
+  {
+    name: "settles a stopped run when Claude says the turn is not the active one",
+    unresponsive: false,
+    cause: "Claude provider turn x is not the active turn.",
     dispatched: ["thread.background-work.settle"],
   },
   {
     name: "leaves the run running and flags the Stop when the provider never confirms it",
     unresponsive: true,
+    cause: "Timed out.",
     dispatched: ["thread.interrupt.unresponsive"],
   },
-])("$name", ({ unresponsive, dispatched }) =>
+])("$name", ({ unresponsive, cause, dispatched }) =>
   Effect.gen(function* () {
     const now = yield* DateTime.now;
     const events = yield* Ref.make<ReadonlyArray<string>>([]);
@@ -194,7 +202,7 @@ it.effect.each([
           operation: "interrupt",
           providerTurnId,
           ...(unresponsive ? { unresponsive } : {}),
-          cause: unresponsive ? "Timed out." : "Provider turn is not active.",
+          cause,
         }),
       threads: {
         dispatch: (command) =>
