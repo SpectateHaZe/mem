@@ -4030,6 +4030,14 @@ describe("OrchestratorMcpService thread stop", () => {
             runId: runningRun.id,
             status: "interrupt_requested",
           });
+          // An agent's stop must not read as the user's.
+          const after = yield* orchestrator.getThreadProjection(threadId);
+          assert.deepEqual(
+            after.turnItems.flatMap((item) =>
+              item.type === "run_interrupt_request" ? [item.message] : [],
+            ),
+            ["Stopped by an agent"],
+          );
         }).pipe(Effect.provide(layerTest));
       }),
     ),

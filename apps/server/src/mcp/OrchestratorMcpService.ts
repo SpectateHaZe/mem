@@ -3433,17 +3433,13 @@ ${creditFallbackRetryNote({
               ),
             ),
           );
+        const reason = agentStopReason(input.reason);
         const stopped = yield* threadManagement
-          .dispatch({
-            type: "thread.stop",
-            commandId,
-            threadId: input.threadId,
-            ...(input.reason === undefined ? {} : { reason: input.reason }),
-          })
+          .dispatch({ type: "thread.stop", commandId, threadId: input.threadId, reason })
           .pipe(Effect.catch(stopFailed));
         // A retry with the same clientRequestId repeats only the stops that failed.
         yield* threadManagement
-          .stopDelegatedTasks({ threadId: input.threadId, commandId, reason: input.reason })
+          .stopDelegatedTasks({ threadId: input.threadId, commandId, reason })
           .pipe(Effect.catch(stopFailed));
         // The run this stop interrupted, from its own events, so a retry
         // reports the same run even if another has started since. Stop also
