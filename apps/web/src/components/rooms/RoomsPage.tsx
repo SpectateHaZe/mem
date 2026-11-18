@@ -298,7 +298,10 @@ function RoomView({
     const message = draft.trim();
     if (message === "") return;
     setDraft("");
-    void send({ environmentId, input: { roomId: room.id, message } });
+    void send({ environmentId, input: { roomId: room.id, message } }).then((result) => {
+      // Put a message that did not send back, unless something new was typed meanwhile.
+      if (result._tag !== "Success") setDraft((current) => (current === "" ? message : current));
+    });
   };
 
   return (
