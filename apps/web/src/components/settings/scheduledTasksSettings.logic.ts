@@ -5,6 +5,7 @@ import {
   type ProjectId,
   ScheduledTaskId,
   type ScheduledTask,
+  type ScheduledTaskSchedule,
   type ScheduledTaskThreadMode,
   type ScheduledTaskUpsertSchedule,
   scheduledTaskThreadMode,
@@ -405,4 +406,19 @@ export function defaultScheduledTaskProjectId<
       (scopedToProject ? scopedProjects[0] : undefined)
     )?.id ?? ""
   );
+}
+
+/**
+ * Fixed times follow the server's clock. When the next run lands at a different time on this
+ * device's clock (a remote server in another zone), say so.
+ */
+export function localClockNote(schedule: ScheduledTaskSchedule, nextRunAt: string): string | null {
+  if (schedule.type === "webhook" || schedule.type === "once" || schedule.type === "interval") {
+    return null;
+  }
+  const at = new Date(nextRunAt);
+  if (Number.isNaN(at.getTime())) return null;
+  const pad = (value: number) => String(value).padStart(2, "0");
+  const local = `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+  return local === schedule.timeOfDay.padStart(5, "0") ? null : ` (${local} your time)`;
 }

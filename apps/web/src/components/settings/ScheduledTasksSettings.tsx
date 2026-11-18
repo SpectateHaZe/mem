@@ -101,6 +101,7 @@ import {
   scheduledTaskDestinationThreads,
   toDateTimeLocalValue,
   webhookDeliveryLabel,
+  localClockNote,
   defaultScheduledTaskProjectId,
   matchesScheduledTaskScope,
   scheduleFromDraft,
@@ -805,6 +806,7 @@ function ScheduledTaskRow({
             ) : task.nextRunAt ? (
               <>
                 Next run <ScheduledRelativeLabel value={task.nextRunAt} />
+                {localClockNote(task.schedule, task.nextRunAt)}
               </>
             ) : (
               "Not scheduled"

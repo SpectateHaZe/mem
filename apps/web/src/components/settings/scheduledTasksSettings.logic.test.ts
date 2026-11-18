@@ -23,6 +23,7 @@ import {
   matchesScheduledTaskScope,
   scheduleFromDraft,
   taskToDraft,
+  localClockNote,
   unbindDraftFromThread,
 } from "./scheduledTasksSettings.logic";
 
@@ -396,4 +397,22 @@ it("rejects dedupe templates without a request placeholder", () => {
   const draft = taskToDraft({ ...legacyTask, schedule: { type: "webhook", signature: null } });
   expect(scheduleFromDraft({ ...draft, replayKey: "literal" })).toBeNull();
   expect(scheduleFromDraft({ ...draft, coalesceKey: "{{body.bad" })).toBeNull();
+});
+
+describe("localClockNote", () => {
+  // Built from local fields so the test holds in any time zone.
+  const at = (hour: number) => new Date(2026, 0, 5, hour, 0).toISOString();
+  const fixed = { type: "fixed_time", timeOfDay: "9:00" } as const;
+
+  it("says nothing when the next run matches the schedule on this clock", () => {
+    expect(localClockNote(fixed, at(9))).toBeNull();
+  });
+
+  it("shows this device's time when the server runs in another zone", () => {
+    expect(localClockNote(fixed, at(14))).toBe(" (14:00 your time)");
+  });
+
+  it("ignores schedules that are not fixed times", () => {
+    expect(localClockNote({ type: "interval", everyMs: 60_000 }, at(14))).toBeNull();
+  });
 });
