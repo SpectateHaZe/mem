@@ -1202,10 +1202,12 @@ describe("MemOverseerService autonomous mode", () => {
 });
 
 describe("changedPathsFromPorcelain", () => {
-  it("reads paths and skips a rename's source", () => {
+  it("reads paths and keeps a rename's source so its deletion is committed", () => {
     expect(
-      changedPathsFromPorcelain(" M src/a.ts\0?? new file.ts\0R  b.ts\0old-b.ts\0 D gone.ts\0"),
-    ).toStrictEqual(["src/a.ts", "new file.ts", "b.ts", "gone.ts"]);
+      changedPathsFromPorcelain(
+        " M src/a.ts\0?? new file.ts\0R  b.ts\0old-b.ts\0C  c.ts\0kept.ts\0 D gone.ts\0",
+      ),
+    ).toStrictEqual(["src/a.ts", "new file.ts", "b.ts", "old-b.ts", "c.ts", "gone.ts"]);
   });
 });
 

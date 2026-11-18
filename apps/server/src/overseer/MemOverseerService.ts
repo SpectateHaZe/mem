@@ -2021,7 +2021,11 @@ export const changedPathsFromPorcelain = (output: string): ReadonlyArray<string>
     const entry = fields[index]!;
     if (entry.length < 4) continue;
     paths.push(entry.slice(3));
-    if (entry[0] === "R" || entry[0] === "C") index += 1;
+    // A staged rename's source is its deletion; leaving it out commits only the new copy.
+    if (entry[0] === "R" || entry[0] === "C") {
+      index += 1;
+      if (entry[0] === "R" && fields[index]) paths.push(fields[index]!);
+    }
   }
   return paths;
 };
@@ -2284,7 +2288,16 @@ const make = Effect.gen(function* () {
         .execute({
           operation: "MemOverseer.commitStatus",
           cwd: root,
-          args: ["status", "--porcelain=v1", "-z", "--untracked-files=all", "--", ...touched],
+          // Literal: a name like app/[id]/page.tsx must not match other files as a glob.
+          args: [
+            "--literal-pathspecs",
+            "status",
+            "--porcelain=v1",
+            "-z",
+            "--untracked-files=all",
+            "--",
+            ...touched,
+          ],
           timeoutMs: 30_000,
         })
         .pipe(Effect.mapError(failure));
@@ -2295,7 +2308,7 @@ const make = Effect.gen(function* () {
         .execute({
           operation: "MemOverseer.commitAdd",
           cwd: top,
-          args: ["add", "-A", "--", ...changed],
+          args: ["--literal-pathspecs", "add", "-A", "--", ...changed],
           timeoutMs: 30_000,
         })
         .pipe(Effect.mapError(failure));
@@ -2305,6 +2318,7 @@ const make = Effect.gen(function* () {
           operation: "MemOverseer.commit",
           cwd: top,
           args: [
+            "--literal-pathspecs",
             "commit",
             "--message",
             `${summary}\n\nCommitted by Mem in autonomous mode.`,
@@ -2345,6 +2359,7 @@ const make = Effect.gen(function* () {
                   // Unquoted paths, so a non-ASCII name still matches its file.
                   "-c",
                   "core.quotePath=false",
+                  "--literal-pathspecs",
                   "diff",
                   "--relative",
                   "--no-color",
