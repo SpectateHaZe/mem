@@ -1,7 +1,7 @@
 import { useAtomValue } from "@effect/atom-react";
 import type { EnvironmentId, ProjectId, QueueGoal } from "@t3tools/contracts";
 import { Link } from "@tanstack/react-router";
-import { PauseIcon, PlayIcon, Trash2Icon } from "lucide-react";
+import { PauseIcon, PlayIcon, RotateCcwIcon, Trash2Icon } from "lucide-react";
 import { useState } from "react";
 
 import { useProjects } from "../../state/entities";
@@ -51,6 +51,16 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
       },
     }).then((result) => {
       if (result._tag === "Success") setText("");
+    });
+  };
+
+  // Same goal, project and model, back at the end of the queue with a fresh attempt count.
+  const retry = (goal: QueueGoal) => {
+    void add({
+      environmentId,
+      input: { projectId: goal.projectId, text: goal.text, modelSelection: goal.modelSelection },
+    }).then((result) => {
+      if (result._tag === "Success") void remove({ environmentId, input: { goalId: goal.id } });
     });
   };
 
@@ -117,6 +127,9 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
             Add to queue
           </Button>
         </div>
+        {query.data !== undefined && goals.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No goals yet.</p>
+        ) : null}
         <ul className="flex flex-col gap-2">
           {goals.map((goal) => (
             <li key={goal.id} className="flex items-start gap-3 rounded-md border p-3">
@@ -139,6 +152,17 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
                   ) : null}
                 </p>
               </div>
+              {goal.status === "failed" ? (
+                <Button
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Retry goal"
+                  title="Retry"
+                  onClick={() => retry(goal)}
+                >
+                  <RotateCcwIcon />
+                </Button>
+              ) : null}
               <Button
                 size="icon-sm"
                 variant="ghost"
