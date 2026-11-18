@@ -24,6 +24,7 @@ import {
   changedPathsFromPorcelain,
   isOwnerSession,
   isShellIdle,
+  approvalIdFor,
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_APPROVAL_TIMEOUT_MS,
@@ -245,7 +246,7 @@ const pendingRecord = (
   return {
     ...claimedRecord(instruction),
     pendingApproval: {
-      approvalId: fingerprint,
+      approvalId: approvalIdFor(fingerprint, instruction),
       threadId: "thread-1",
       projectId: "project-1",
       instruction,
@@ -256,7 +257,8 @@ const pendingRecord = (
   };
 };
 
-const pendingApprovalId = () => fingerprintEvidence(thread().evidence);
+const pendingApprovalId = () =>
+  approvalIdFor(fingerprintEvidence(thread().evidence), DESTRUCTIVE_INSTRUCTION);
 
 const run = <A, E>(effect: Effect.Effect<A, E, never>) => effect.pipe(Effect.runPromise);
 
@@ -306,7 +308,7 @@ describe("MemOverseerService.tick", () => {
         threadId: "thread-1",
         instruction: DESTRUCTIVE_INSTRUCTION,
         createdAtMs: expect.any(Number),
-        evidenceFingerprint: pendingApprovalId(),
+        evidenceFingerprint: fingerprintEvidence(thread().evidence),
         blocking: true,
       },
     ]);

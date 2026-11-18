@@ -320,6 +320,13 @@ export interface MemOverseerServiceShape {
 }
 
 /** FNV-1a over the evidence text; short enough to persist, stable across restarts. */
+/**
+ * The instruction is part of the id: a replaced instruction on unchanged evidence must not be
+ * approvable by a click on the one the owner saw before.
+ */
+export const approvalIdFor = (fingerprint: string, instruction: string): string =>
+  `${fingerprint}:${fingerprintEvidence(instruction)}`;
+
 export const fingerprintEvidence = (value: string): string => {
   let hash = 0x811c9dc5;
   for (let index = 0; index < value.length; index += 1) {
@@ -923,7 +930,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           record = {
             ...record,
             pendingApproval: {
-              approvalId: fingerprint,
+              approvalId: approvalIdFor(fingerprint, action.instruction),
               threadId: thread.threadId,
               projectId: thread.projectId,
               instruction: action.instruction,
@@ -1510,7 +1517,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
               // human answer instead of reviewing the thread and replacing it.
               task: { ...record.task, phase: "claimed", lastInstruction: instruction },
               pendingApproval: {
-                approvalId: fingerprint,
+                approvalId: approvalIdFor(fingerprint, instruction),
                 threadId: thread.threadId,
                 projectId: thread.projectId,
                 instruction,

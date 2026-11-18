@@ -14,6 +14,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import type { MemPaceDecision } from "./MemModelPace.ts";
 import {
+  approvalIdFor,
   fingerprintEvidence,
   makeMemOverseerService,
   MEM_ESTIMATED_REVIEW_USD,
@@ -289,7 +290,14 @@ describe("MemOverseerService.sendInstruction", () => {
     const record = harness.store.get("thread-1");
     expect(record?.pendingApproval?.instruction).toBe(DESTRUCTIVE_INSTRUCTION);
     expect(record?.pendingApproval?.blocking).toBe(true);
-    expect(record?.pendingApproval?.approvalId).toBe(fingerprintEvidence(thread().evidence));
+    expect(record?.pendingApproval?.approvalId).toBe(
+      approvalIdFor(fingerprintEvidence(thread().evidence), DESTRUCTIVE_INSTRUCTION),
+    );
+    // A different instruction on the same evidence gets a different id, so an Approve click on
+    // the first cannot send the second.
+    expect(approvalIdFor(fingerprintEvidence(thread().evidence), "rm -rf build")).not.toBe(
+      record?.pendingApproval?.approvalId,
+    );
     expect(record?.spentUsd).toBe(0);
   });
 
