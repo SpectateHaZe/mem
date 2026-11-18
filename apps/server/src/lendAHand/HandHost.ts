@@ -6,6 +6,7 @@ import * as NodeOS from "node:os";
 
 import {
   type ComputerActInput,
+  decodeHandCode,
   decodeInviteCode,
   encodeHandCode,
   HandActInput,
@@ -341,8 +342,12 @@ const make = Effect.gen(function* () {
   const accept = Effect.fn("HandHost.accept")(function* (inviteCode: string) {
     const invite = decodeInviteCode(inviteCode);
     if (invite === null) {
+      // The two boxes sit on opposite sides; a hand code here is the commonest mix-up.
       return yield* new HandError({
-        message: "That isn't an invite code. It starts with mem-invite-.",
+        message:
+          decodeHandCode(inviteCode) !== null
+            ? "That's a hand code, which lets your chat help their PC. Paste it in the chat you'll help from: the hand icon in the chat's header."
+            : "That isn't an invite code. It starts with mem-invite-.",
       });
     }
     const started = yield* start();

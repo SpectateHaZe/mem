@@ -5,6 +5,7 @@ import * as NodeOS from "node:os";
 
 import {
   decodeHandCode,
+  decodeInviteCode,
   encodeInviteCode,
   type HandEndpoint,
   HandError,
@@ -147,7 +148,10 @@ const make = Effect.gen(function* () {
     const endpoint = decodeHandCode(code);
     if (endpoint === null) {
       return yield* new HandError({
-        message: "That isn't a hand code. Ask for a new one: it starts with mem-hand-.",
+        message:
+          decodeInviteCode(code) !== null
+            ? "That's an invite code, which lets someone's chat work on your PC. Paste it in Settings → Connections → Got an invite?"
+            : "That isn't a hand code. Ask for a new one: it starts with mem-hand-.",
       });
     }
     const answer = yield* hello(endpoint);
