@@ -101,9 +101,26 @@ const handlers = {
       { refused: "schedule tasks in this environment" },
     ),
     McpToolAccess.writes(
-      ({ scheduledTaskId, prompt, title, schedule, enabled, bindToCurrentThread, freshSession }) =>
+      ({
+        scheduledTaskId,
+        projectId,
+        prompt,
+        title,
+        schedule,
+        enabled,
+        bindToCurrentThread,
+        freshSession,
+      }) =>
         Effect.gen(function* () {
           if (scheduledTaskId === undefined) return yield* Effect.die("unreachable");
+          // The update keeps the task's project; ignoring projectId would report a move that never happened.
+          if (projectId !== undefined) {
+            return yield* new OrchestratorMcpFailure({
+              code: "invalid_request",
+              message:
+                "A scheduled task's projectId cannot change on update. Delete it and schedule a new one.",
+            });
+          }
           const scope = yield* McpInvocationContext.McpInvocationContext;
           const service = yield* OrchestratorMcpService.OrchestratorMcpService;
           return yield* service.updateScheduledTask(scope, {
