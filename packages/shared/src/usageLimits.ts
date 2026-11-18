@@ -53,6 +53,16 @@ export function exhaustedUsageWindow(
         );
       });
     }
+    case "claudeAgent": {
+      // A full extra-usage budget leaves the plan quota running; a per-model weekly window
+      // (seven_day_opus) only stops that model.
+      const key = model.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+      return exhausted.find((window) => {
+        if (window.kind === "monthly") return false;
+        const scoped = /^seven_day_(.+)$/.exec(window.id)?.[1];
+        return scoped === undefined || key.includes(scoped);
+      });
+    }
     case "opencode":
       return exhausted.find(
         (window) => !window.id.startsWith("go_") || model.startsWith("opencode-go/"),

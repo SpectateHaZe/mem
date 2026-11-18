@@ -138,6 +138,9 @@ describe("new thread model fallback", () => {
     ["antigravity", ["gemini-weekly"], "antigravity-default", true],
     ["opencode", ["go_weekly"], "opencode/big-pickle", false],
     ["opencode", ["go_weekly"], "opencode-go/big-pickle", true],
+    ["claudeAgent", ["seven_day_opus"], "claude-sonnet-5-5", false],
+    ["claudeAgent", ["seven_day_opus"], "claude-opus-5-5", true],
+    ["claudeAgent", ["five_hour"], "claude-sonnet-5-5", true],
   ] as const)("matches %s pools %s to %s", (driver, ids, model, usesFallback) => {
     const defaultSelection = { ...selection, model };
     expect(
@@ -157,6 +160,17 @@ describe("new thread model fallback", () => {
       }).selection,
     ).toEqual(usesFallback ? fallback : defaultSelection);
   });
+});
+
+it("keeps Claude when only its extra-usage budget is spent", () => {
+  const spent = provider({
+    driver: ProviderDriverKind.make("claudeAgent"),
+    usageLimits: {
+      checkedAt: "2026-09-03T11:00:00.000Z",
+      windows: [{ ...window, id: "monthly_spend", kind: "monthly", usedPercent: 100 }],
+    },
+  });
+  expect(exhaustedUsageWindow(spent, now, "claude-sonnet-5-5")).toBeUndefined();
 });
 
 describe("pace", () => {
