@@ -159,6 +159,13 @@ const make = Effect.gen(function* () {
   });
 
   const firstEnd = makeEndedRunTracker();
+  const replyText = (threadId: ThreadId, run: OrchestrationV2Run) =>
+    projections.getThreadRecords(threadId, ["messages", "turnItems"]).pipe(
+      Effect.map((records) => subagentResultForRun(records, run).text.trim() || "(no reply)"),
+      Effect.catchCause((cause) =>
+        Effect.logWarning("rooms.read-reply-failed", { cause }).pipe(Effect.as(null)),
+      ),
+    );
   const handleRunEnded = Effect.fn("RoomService.handleRunEnded")(function* (
     threadId: ThreadId,
     run: OrchestrationV2Run,
@@ -170,14 +177,26 @@ const make = Effect.gen(function* () {
         (candidate.status === "running" &&
           candidate.speakerIndex !== null &&
           candidate.participants[candidate.speakerIndex]?.threadId === threadId) ||
-        // Finished helpers wake the lead for further turns after its first reply.
-        (candidate.status === "idle" &&
+        // Finished helpers wake the lead for further turns after its first reply, paused or not.
+        ((candidate.status === "idle" || candidate.status === "paused") &&
           candidate.mode === "lead" &&
           candidate.participants[0]?.threadId === threadId),
     );
     if (room === undefined || !firstEnd(run.id)) return;
     const speakerIndex = room.speakerIndex ?? 0;
     const speaker = room.participants[speakerIndex]!;
+    if (room.status === "paused") {
+      // A pause stops the lead, not its helpers; a reply their reports woke goes in the
+      // transcript so Resume does not continue without it. The pause itself stays.
+      if (run.status !== "completed") return;
+      const reply = yield* replyText(threadId, run);
+      if (reply === null) return;
+      yield* save({
+        ...room,
+        transcript: [...room.transcript, { speaker: speaker.label, text: reply, at: yield* now }],
+      });
+      return;
+    }
     if (run.status !== "completed") {
       const limit = yield* readLimitStop(projections, settings, threadId, run);
       // Limit recovery continues this turn after the reset; that run's reply is the turn's reply.
@@ -192,13 +211,41 @@ const make = Effect.gen(function* () {
       );
       return;
     }
-    const records = yield* projections
-      .getThreadRecords(threadId, ["messages", "turnItems"])
-      .pipe(Effect.mapError(roomError));
-    const text = subagentResultForRun(records, run).text.trim() || "(no reply)";
+    const text = yield* replyText(threadId, run);
+    // The run is already marked handled, so a failed read would leave the room running forever.
+    if (text === null) {
+      yield* save(pauseWithNote(room, `Could not read ${speaker.label}'s reply. Resume to retry.`));
+      return;
+    }
     const replied = addAgentReply(room, speakerIndex, text, yield* now);
     yield* save(replied.status === "running" ? yield* startTurn(replied) : replied);
   }, lock.withPermit);
+
+  // The tracker is in memory, and the orchestrator re-sends old finished runs when a helper
+  // finishes. Mark every run already in the transcript as handled, so a restart does not
+  // record an old reply again; only a running room's current turn is left to recover.
+  const seedHandledRuns = Effect.forEach(
+    [...rooms.values()],
+    (room) =>
+      Effect.forEach(
+        room.participants,
+        (participant, index) =>
+          Effect.gen(function* () {
+            const { runs } = yield* projections
+              .getThreadRecords(participant.threadId, ["runs"])
+              .pipe(Effect.mapError(roomError));
+            const latest = runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
+            const recovering = room.status === "running" && room.speakerIndex === index;
+            for (const run of runs) {
+              if (!ENDED_RUN_STATUSES.has(run.status)) continue;
+              if (recovering && run.id === latest?.id) continue;
+              firstEnd(run.id);
+            }
+          }).pipe(Effect.catchCause((cause) => Effect.logWarning("rooms.seed-failed", { cause }))),
+        { discard: true },
+      ),
+    { discard: true },
+  );
 
   // A turn that finished while the server was down never produces a live event.
   const recoverRunningRooms = Effect.forEach(
@@ -217,7 +264,8 @@ const make = Effect.gen(function* () {
   );
 
   yield* forkParked(
-    recoverRunningRooms.pipe(
+    seedHandledRuns.pipe(
+      Effect.andThen(recoverRunningRooms),
       Effect.andThen(
         Stream.runForEach(orchestrator.streamDomainEvents, (event) =>
           event.type === "run.updated"
