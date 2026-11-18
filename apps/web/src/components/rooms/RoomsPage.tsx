@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { PauseIcon, PlayIcon, PlusIcon, Trash2Icon, XIcon } from "lucide-react";
 import { useState } from "react";
 
+import { requestConfirmDialog } from "../../confirmDialog";
 import { usePrimarySettings } from "../../hooks/useSettings";
 import { useProjects, useThreadShells } from "../../state/entities";
 import { usePrimaryEnvironmentId } from "../../state/environments";
@@ -340,11 +341,16 @@ function RoomView({
           variant="ghost"
           aria-label="Delete group chat"
           title="Delete group chat (agent threads are kept)"
-          onClick={() =>
-            void remove({ environmentId, input: { roomId: room.id } }).then((result) => {
-              if (result._tag === "Success") onDeleted();
-            })
-          }
+          onClick={async () => {
+            const message = `Delete "${room.title}"?
+Its conversation is lost; the agent threads are kept.`;
+            const confirmed =
+              (await requestConfirmDialog(message, { variant: "destructive" })) ??
+              window.confirm(message);
+            if (!confirmed) return;
+            const result = await remove({ environmentId, input: { roomId: room.id } });
+            if (result._tag === "Success") onDeleted();
+          }}
         >
           <Trash2Icon />
         </Button>
@@ -435,6 +441,9 @@ function ConnectedRooms({ environmentId }: { readonly environmentId: Environment
             }}
           >
             <span className="truncate">{room.title}</span>
+            {room.status === "idle" ? null : (
+              <span className="ms-auto shrink-0 text-xs text-muted-foreground">{room.status}</span>
+            )}
           </Button>
         ))}
         <p className="mt-auto px-2 text-xs text-muted-foreground">
