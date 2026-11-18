@@ -2122,7 +2122,12 @@ const make = Effect.gen(function* () {
               : DateTime.toEpochMillis(DateTime.makeUnsafe(window.resetsAt)),
         }),
       );
-      return { limited, windows } satisfies MemThreadUsage;
+      const resetMs = shell.usageLimitResetAt ? Date.parse(shell.usageLimitResetAt) : Number.NaN;
+      return {
+        limited,
+        windows,
+        limitResetAtMs: limited && Number.isFinite(resetMs) ? resetMs : null,
+      } satisfies MemThreadUsage;
     },
     Effect.catchCause(() => Effect.succeed(NO_USAGE)),
   );

@@ -31,6 +31,8 @@ export interface MemThreadUsage {
   /** The thread's last run failed on a usage limit. */
   readonly limited: boolean;
   readonly windows: ReadonlyArray<MemUsageWindow>;
+  /** When that limit resets, from the provider or limit recovery's estimate; null if unknown. */
+  readonly limitResetAtMs?: number | null;
 }
 
 export const PRIORITY_RANK: Record<MemThreadPriority, number> = { high: 0, normal: 1, low: 2 };
@@ -95,6 +97,11 @@ export const usageWaitUntil = (usage: MemThreadUsage, nowMs: number): number | n
   // Every full window has to reset before a turn can run, so the latest reset decides.
   if (resets.length > 0 && resets.length === full.length) {
     return Math.max(...resets) + MEM_USAGE_RESET_SLACK_MS;
+  }
+  // No full window: the failure's own reset is when limit recovery resumes the session.
+  const failureReset = usage.limitResetAtMs ?? null;
+  if (full.length === 0 && failureReset !== null && failureReset > nowMs) {
+    return failureReset + MEM_USAGE_RESET_SLACK_MS;
   }
   return nowMs + MEM_AUTONOMOUS_RETRY_MS;
 };

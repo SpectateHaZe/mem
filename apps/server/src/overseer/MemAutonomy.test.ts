@@ -45,6 +45,13 @@ describe("MemAutonomy", () => {
     ).toBe(9_000 + MEM_USAGE_RESET_SLACK_MS);
     // A limited run with no known reset retries on the plain interval.
     expect(usageWaitUntil({ limited: true, windows: [] }, now)).toBe(now + MEM_AUTONOMOUS_RETRY_MS);
+    // The failure's own reset is when limit recovery resumes it, so Mem waits for that.
+    expect(usageWaitUntil({ limited: true, windows: [], limitResetAtMs: 4_000 }, now)).toBe(
+      4_000 + MEM_USAGE_RESET_SLACK_MS,
+    );
+    expect(usageWaitUntil({ limited: true, windows: [], limitResetAtMs: 500 }, now)).toBe(
+      now + MEM_AUTONOMOUS_RETRY_MS,
+    );
   });
 
   it("orders high before normal before low, keeping ties in place", () => {
