@@ -12,7 +12,10 @@ import { MemAutonomousStatus } from "./MemAutonomousStatus";
 export function MemAutonomousToggle({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const environment = useEnvironment(environmentId);
   const canWrite = useEnvironmentScope(environmentId, AuthSettingsWriteScope);
-  const update = useAtomCommand(serverEnvironment.updateSettings, "Autonomous mode");
+  const update = useAtomCommand(serverEnvironment.updateSettings, {
+    label: "Autonomous mode",
+    failureTitle: "Couldn't change autonomous mode",
+  });
   const mem = environment?.serverConfig?.settings.mem;
   if (mem === undefined) return null;
   return (

@@ -2,7 +2,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import type { EnvironmentId, HandHostState, ScopedThreadRef } from "@t3tools/contracts";
+import type { EnvironmentId, ScopedThreadRef } from "@t3tools/contracts";
 import { HandIcon } from "lucide-react";
 import { useId, useState } from "react";
 
@@ -11,7 +11,8 @@ import { usePrimaryEnvironmentId } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 import { serverEnvironment } from "~/state/server";
 import { useAtomCommand } from "~/state/use-atom-command";
-import { formatRelativeTimeLabel } from "~/timestampFormat";
+import { formatDuration } from "@t3tools/shared/usageLimits";
+import { useNowMinute } from "~/hooks/useNowMinute";
 
 import { SettingsRow, SettingsSection } from "../settings/settingsLayout";
 import { Button } from "../ui/button";
@@ -49,14 +50,20 @@ function useHandHost(environmentId: EnvironmentId | null) {
     environmentId === null ? null : serverEnvironment.handHostLive({ environmentId, input: {} }),
   );
   const start = useAtomCommand(serverEnvironment.startHandHost, { reportFailure: false });
-  const end = useAtomCommand(serverEnvironment.endHandHost, { label: "end Lend a Hand" });
+  const end = useAtomCommand(serverEnvironment.endHandHost, {
+    label: "end Lend a Hand",
+    failureTitle: "Couldn't end Lend a Hand",
+  });
   return { state: data ?? null, start, end };
 }
 
-const expiresLabel = (state: HandHostState) =>
-  state.expiresAtMs === null
-    ? ""
-    : `ends ${formatRelativeTimeLabel(new Date(state.expiresAtMs).toISOString())}`;
+// The relative-time formatter only handles the past and shows a future time as "just now".
+function EndsIn({ atMs }: { readonly atMs: number | null }) {
+  const nowMinute = useNowMinute();
+  if (atMs === null) return null;
+  const left = atMs - Date.parse(`${nowMinute}:00.000Z`);
+  return <>{left < 60_000 ? "ends in under a minute" : `ends in ${formatDuration(left)}`}</>;
+}
 
 /** Settings → Connections: ask for a hand, share the code, see what the helper does, end it. */
 export function LendAHandSettings() {
@@ -141,9 +148,16 @@ export function LendAHandSettings() {
               : `${state?.helperName ?? "Someone"} is helping you`
           }
           description={
-            status === "waiting"
-              ? `They paste it with Lend a hand in a chat. The code ${expiresLabel(state!)} if unused.`
-              : `Their chat can use this PC. The session ${expiresLabel(state!)}.`
+            status === "waiting" ? (
+              <>
+                They paste it with Lend a hand in a chat. The code{" "}
+                <EndsIn atMs={state!.expiresAtMs} /> if unused.
+              </>
+            ) : (
+              <>
+                Their chat can use this PC. The session <EndsIn atMs={state!.expiresAtMs} />.
+              </>
+            )
           }
           control={
             <Button
@@ -255,6 +269,7 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
   const connect = useAtomCommand(serverEnvironment.connectHand, { reportFailure: false });
   const disconnect = useAtomCommand(serverEnvironment.disconnectHand, {
     label: "disconnect Lend a Hand",
+    failureTitle: "Couldn't disconnect",
   });
   const createInvite = useAtomCommand(serverEnvironment.inviteHand, { reportFailure: false });
   const [open, setOpen] = useState(false);
@@ -341,8 +356,7 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
               <div className="space-y-1.5">
                 <p className="text-muted-foreground text-xs">
                   Send this to them. They paste it in Settings → Connections → Lend a hand, and this
-                  chat connects. It ends{" "}
-                  {formatRelativeTimeLabel(new Date(invite.expiresAtMs).toISOString())}.
+                  chat connects. It <EndsIn atMs={invite.expiresAtMs} />.
                 </p>
                 <div className="flex items-center gap-2">
                   <code className="min-w-0 flex-1 truncate rounded-md border bg-muted/40 px-2 py-1 font-mono text-xs">
@@ -382,6 +396,7 @@ export function LendAHandHeaderControl({ threadRef }: { readonly threadRef: Scop
                 value={code}
                 onChange={(event) => setCode(event.target.value)}
                 placeholder="mem-hand-…"
+                aria-label="Hand code"
                 disabled={busy}
                 autoFocus
                 nativeInput
