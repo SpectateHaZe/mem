@@ -47,7 +47,6 @@ import * as Stream from "effect/Stream";
 
 import {
   byPriority,
-  CONTINUE_AFTER_LIMIT_INSTRUCTION,
   improvementInstruction,
   MEM_AUTONOMOUS_RETRY_MS,
   MEM_FAILED_ROUND_BACKOFF_MS,
@@ -704,12 +703,10 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         return;
       }
       record = { ...record, waitingUntilMs: null, waitingFor: null };
-      if (usage.limited && waitedOutLimit) {
-        // The limit cut the last run short; the reset lets it pick up where it stopped.
-        if (yield* deliver(thread, CONTINUE_AFTER_LIMIT_INSTRUCTION)) {
-          // A fresh stamp, so settling charges this run and not the last completed turn again.
-          record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
-        }
+      if (usage.limited) {
+        // Limit recovery sends the continue at the reset and backs off if it hits the limit again;
+        // a second one from here would double it. Stamp now so settling charges only that run.
+        record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
         yield* persist();
         return;
       }

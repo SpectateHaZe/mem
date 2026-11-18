@@ -4,6 +4,7 @@ import {
   OrchestrationV2DomainEvent,
   OrchestrationV2StoredEvent,
   type OrchestrationV2PlanArtifact,
+  type OrchestrationV2ProviderFailure,
   type OrchestrationV2Run,
   type OrchestrationV2Subagent,
   type OrchestrationV2ThreadProjection,
@@ -21,6 +22,7 @@ import * as Context from "effect/Context";
 import * as DateTime from "effect/DateTime";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
+import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as SqlError from "effect/sql/SqlError";
 
@@ -33,6 +35,8 @@ import {
 } from "../telemetry/ProviderUsageAnalytics.ts";
 import * as GitVcsDriver from "../vcs/GitVcsDriver.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
+import * as ServerSettings from "../serverSettings.ts";
+import { asAutonomousLimitFailure, limitResumeStreak } from "./autonomousLimitStop.ts";
 import * as EventSink from "./EventSink.ts";
 import * as ProjectionStore from "./ProjectionStore.ts";
 import * as IdAllocator from "@t3tools/provider-core/server/IdAllocator";
@@ -255,8 +259,32 @@ export const layer: Layer.Layer<
     const analytics = yield* ProviderTurnAnalytics;
     const agentScope = yield* AgentScope;
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
+    // Optional so harnesses without settings keep the provider's failure as reported.
+    const serverSettings = yield* Effect.serviceOption(ServerSettings.ServerSettingsService);
     const scope = yield* Effect.scope;
     const completedTurnAnalytics = new Set<string>();
+
+    /** Autonomous mode resumes limit stops on its own, so each one needs a reset time. */
+    const autonomousLimitFailure = Effect.fn("ProviderEventIngestor.autonomousLimitFailure")(
+      function* (input: ProviderEventIngestInput, failure: OrchestrationV2ProviderFailure) {
+        if (Option.isNone(serverSettings)) return failure;
+        const settings = yield* serverSettings.value.getSettings;
+        if (!settings.mem.autonomous) return failure;
+        const runs =
+          input.runId === undefined || failure.resetAt != null
+            ? []
+            : (yield* projections.getThreadRecords(input.threadId, ["runs"])).runs;
+        return asAutonomousLimitFailure(failure, {
+          nowMs: DateTime.toEpochMillis(yield* DateTime.now),
+          resumeStreak: input.runId === undefined ? 0 : limitResumeStreak(runs, input.runId),
+          creditHandledElsewhere:
+            String(input.threadId).startsWith("thread:delegated-task:") &&
+            settings.subagentFallbackModelSelection !== null,
+        });
+      },
+      // Failing to read settings or runs must never lose the failure itself.
+      (effect, _input, failure) => effect.pipe(Effect.orElseSucceed(() => failure)),
+    );
 
     const makeDomainEvent =
       /* This helper runs for individual orchestration events; the enclosing operation owns the span. */
@@ -628,9 +656,10 @@ export const layer: Layer.Layer<
                 return dismissed;
               }
               const occurredAt = yield* DateTime.now;
-              const failure = (yield* agentScope.oomKilled(input.threadId))
+              const reported = (yield* agentScope.oomKilled(input.threadId))
                 ? { ...input.event.failure, message: "Killed: out of memory.", code: "oom_kill" }
                 : input.event.failure;
+              const failure = yield* autonomousLimitFailure(input, reported);
               return [
                 ...dismissed,
                 yield* makeDomainEvent(input, {

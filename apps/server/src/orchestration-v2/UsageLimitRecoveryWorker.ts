@@ -19,6 +19,8 @@ export function limitRecoveryCommand(
   autoResume: boolean,
   nowMs: number,
   snooze = false,
+  /** Mem's autonomous mode: always resume, however long the computer was off. */
+  autonomous = false,
 ): OrchestrationV2Command | null {
   if (
     thread.status !== "failed" ||
@@ -40,7 +42,7 @@ export function limitRecoveryCommand(
   const identity = `${thread.id}:${thread.latestRunId}:${resetMs}`;
   const recovery = thread.limitRecovery;
   if (recovery?.runId !== thread.latestRunId || recovery.resetAt !== thread.usageLimitResetAt) {
-    if (nowMs - resetMs > MAX_OVERDUE_ARM_MS) return null;
+    if (!autonomous && nowMs - resetMs > MAX_OVERDUE_ARM_MS) return null;
     if (!autoResume && (!snooze || resetMs <= nowMs)) return null;
     return {
       type: "thread.metadata.update",
@@ -63,7 +65,7 @@ export function limitRecoveryCommand(
     // The sweep fires within seconds of the reset, so a reset expired longer
     // than the arm window means the server was closed past it — too stale to
     // spend the user's usage unattended.
-    nowMs - resetMs > MAX_OVERDUE_ARM_MS ||
+    (!autonomous && nowMs - resetMs > MAX_OVERDUE_ARM_MS) ||
     (thread.snoozedUntil != null && DateTime.toEpochMillis(thread.snoozedUntil) > nowMs)
   )
     return null;
@@ -112,18 +114,21 @@ const makeSweep = Effect.gen(function* () {
     if (yield* due.isIdle(nowMs)) return;
     const readVersion = yield* due.version;
     const preferences = yield* settings.getSettings;
+    const autonomous = preferences.mem.autonomous;
+    const autoResume = preferences.autoResumeLimitedThreads || autonomous;
     const candidates = yield* projections.getLimitRecoveryCandidates({
       now,
-      autoResume: preferences.autoResumeLimitedThreads,
+      autoResume,
       snooze: preferences.snoozeLimitedThreads,
     });
     let acted = false;
     for (const thread of candidates) {
       const command = limitRecoveryCommand(
         thread,
-        preferences.autoResumeLimitedThreads,
+        autoResume,
         nowMs,
         preferences.snoozeLimitedThreads,
+        autonomous,
       );
       if (command === null) continue;
       acted = true;

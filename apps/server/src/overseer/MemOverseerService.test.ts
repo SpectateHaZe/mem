@@ -1036,7 +1036,7 @@ describe("MemOverseerService autonomous mode", () => {
     expect(harness.sent).toStrictEqual([]);
   });
 
-  it("stamps the resume after a limit, so the old turn is not charged again", async () => {
+  it("leaves the resume after a limit to limit recovery, and charges only that turn", async () => {
     const startMs = await run(Clock.currentTimeMillis);
     const store = new Map<string, MemOverseerTaskRecord>([
       [
@@ -1059,7 +1059,7 @@ describe("MemOverseerService autonomous mode", () => {
 
     await run(harness.tick());
 
-    expect(harness.sent).toHaveLength(1);
+    expect(harness.sent).toStrictEqual([]);
     expect(store.get("thread-1")?.pendingCharge).toBe(true);
     expect(store.get("thread-1")?.deliveredAtMs).toBeGreaterThanOrEqual(startMs);
   });

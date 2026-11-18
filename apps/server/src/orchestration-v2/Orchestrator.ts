@@ -5863,7 +5863,12 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       const failure = latestRootProviderFailure(run, projection.turnItems);
       const recovery = projection.thread.limitRecovery;
       const now = yield* DateTime.now;
-      const resumeChain = automaticLimitResumeChain(projection.runs);
+      // Autonomous mode always resumes; its estimated resets already back off between tries.
+      const autonomous = yield* serverSettings.getSettings.pipe(
+        Effect.map((settings) => settings.mem.autonomous),
+        Effect.orElseSucceed(() => false),
+      );
+      const resumeChain = autonomous ? 0 : automaticLimitResumeChain(projection.runs);
       const identityCurrent =
         recovery?.autoResume === true &&
         recovery.requestId === command.usageLimitRecoveryRequestId &&

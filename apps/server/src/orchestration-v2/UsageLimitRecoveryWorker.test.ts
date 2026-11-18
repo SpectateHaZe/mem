@@ -46,6 +46,7 @@ it.effect("idle sweeps skip SQL until the next wake time or a relevant event", (
             getSettings: Effect.succeed({
               autoResumeLimitedThreads: true,
               snoozeLimitedThreads: false,
+              mem: { autonomous: false },
             } as never),
             streamChanges: Stream.never,
           }),
@@ -212,5 +213,39 @@ describe("limitRecoveryCommand firing", () => {
       snoozedUntil: DateTime.makeUnsafe(nowMs + HOUR_MS),
     });
     assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+  });
+});
+
+describe("limitRecoveryCommand in Mem's autonomous mode", () => {
+  it("arms and then resumes a limit stop even with the auto-resume setting off", () => {
+    const arm = limitRecoveryCommand(failedThread(HOUR_MS, -HOUR_MS), true, nowMs, false, true);
+    assert.equal(arm?.type, "thread.metadata.update");
+    const resume = limitRecoveryCommand(
+      armedThread(3 * HOUR_MS, HOUR_MS),
+      true,
+      nowMs,
+      false,
+      true,
+    );
+    assert.equal(resume?.type, "message.dispatch");
+  });
+
+  it("still resumes after the computer was off for days, since the armed resume is stored", () => {
+    const thread = armedThread(5 * 24 * HOUR_MS, 4 * 24 * HOUR_MS);
+    assert.isNull(limitRecoveryCommand(thread, true, nowMs));
+    assert.equal(limitRecoveryCommand(thread, true, nowMs, false, true)?.type, "message.dispatch");
+  });
+
+  it("never resumes a stop that was not a limit", () => {
+    const finished = {
+      ...failedThread(HOUR_MS, -HOUR_MS),
+      lastErrorClass: "provider_error" as const,
+    };
+    assert.isNull(limitRecoveryCommand(finished, true, nowMs, false, true));
+    const waitingOnOwner = {
+      ...armedThread(3 * HOUR_MS, HOUR_MS),
+      pendingRuntimeRequest: {} as never,
+    };
+    assert.isNull(limitRecoveryCommand(waitingOnOwner, true, nowMs, false, true));
   });
 });
