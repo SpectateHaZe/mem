@@ -784,6 +784,17 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     }
 
     let state = record.task;
+    // A chat review's accept does not cover a turn that ended after it: review that work first.
+    const reviewedAtMs = record.lastReview?.atMs;
+    if (
+      state.phase === "accepted" &&
+      record.settledPhase !== "accepted" &&
+      reviewedAtMs !== undefined &&
+      thread.lastTurn !== null &&
+      thread.lastTurn.completedAtMs > reviewedAtMs
+    ) {
+      state = { ...state, phase: "awaitingReview" };
+    }
     if (!isGuidePending(state, record)) {
       // Idle with work means the turn ended; the reducer is the one place that decides what follows.
       state = reduceTask(state, { type: "turnEnded", status: "completed" });
@@ -1430,12 +1441,19 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             return yield* refuse("review", "failure", "the review produced no verdict.");
           }
 
+          const accepted = outcome.result.usable && outcome.result.verdict === "accept";
           yield* ports.store.put({
             ...record,
-            task: reduceTask(record.task, { type: "reviewed", result: outcome.result }),
+            // An accept of a session that is still working covers only part of its work, so the
+            // tick reviews again when the turn ends instead of committing on this verdict.
+            task:
+              accepted && !thread.idle
+                ? record.task
+                : reduceTask(record.task, { type: "reviewed", result: outcome.result }),
             lastReview: {
               verdict: outcome.result.verdict,
               reasoning: outcome.result.reasoning,
+              atMs: nowMs,
             },
             updatedAtMs: nowMs,
           });
@@ -1444,7 +1462,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             findings: outcome.result.findings,
             reasoning: outcome.result.reasoning,
             nextInstruction: outcome.result.nextInstruction,
-            accepted: outcome.result.usable && outcome.result.verdict === "accept",
+            accepted,
           } satisfies MemThreadReview;
         }),
       )

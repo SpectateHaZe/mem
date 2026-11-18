@@ -81,6 +81,8 @@ export interface MemOverseerTaskRecord {
 export interface MemReviewSummary {
   readonly verdict: "accept" | "reject";
   readonly reasoning: string;
+  /** When a review asked for from chat ran; a turn that ends after it is unreviewed work. */
+  readonly atMs?: number;
 }
 
 export const newTaskRecord = (threadId: string, nowMs: number): MemOverseerTaskRecord => ({
@@ -126,6 +128,7 @@ const PersistedTaskRecord = Schema.Struct({
       Schema.Struct({
         verdict: Schema.Literals(["accept", "reject"]),
         reasoning: Schema.String,
+        atMs: Schema.optionalKey(Schema.Int),
       }),
     ),
   ),

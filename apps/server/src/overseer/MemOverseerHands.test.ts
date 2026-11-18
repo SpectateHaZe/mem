@@ -244,6 +244,32 @@ describe("MemOverseerService.reviewThreadNow", () => {
     expect(harness.store.get("thread-1")?.task.phase).toBe("accepted");
   });
 
+  it("does not keep an accept of a session that is still working", async () => {
+    const harness = makeHarness({
+      threads: [thread({ idle: false })],
+      review: () => Effect.succeed(ACCEPT),
+    });
+
+    const review = await run(harness.service.reviewThreadNow("thread-1"));
+
+    expect(review.accepted).toBe(true);
+    // The rest of the turn is unreviewed, so the tick must review again rather than commit.
+    expect(harness.store.get("thread-1")?.task.phase).not.toBe("accepted");
+  });
+
+  it("reviews a turn that ended after a chat accept instead of acting on the old verdict", async () => {
+    const threads = [thread()];
+    const harness = makeHarness({ threads, review: () => Effect.succeed(ACCEPT) });
+    await run(harness.service.reviewThreadNow("thread-1"));
+    expect(harness.store.get("thread-1")?.task.phase).toBe("accepted");
+
+    // The owner sent another message and its turn finished after the review.
+    threads[0] = thread({ lastTurn: { completedAtMs: Number.MAX_SAFE_INTEGER, costUsd: null } });
+    await run(harness.service.tick());
+
+    expect(harness.reviews).toHaveLength(2);
+  });
+
   it("refuses an id it has never seen instead of guessing a thread", async () => {
     const harness = makeHarness();
 
