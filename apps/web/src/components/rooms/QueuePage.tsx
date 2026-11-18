@@ -27,12 +27,23 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const options = modelOptions(providers ?? []);
-  const add = useAtomCommand(serverEnvironment.addQueueGoal, { label: "add goal" });
-  const setPaused = useAtomCommand(serverEnvironment.setQueuePaused, { label: "pause queue" });
-  const remove = useAtomCommand(serverEnvironment.removeQueueGoal, { label: "remove goal" });
+  const add = useAtomCommand(serverEnvironment.addQueueGoal, {
+    label: "add goal",
+    failureTitle: "Couldn't add the goal",
+  });
+  const setPaused = useAtomCommand(serverEnvironment.setQueuePaused, {
+    label: "pause queue",
+    failureTitle: "Couldn't pause or resume the queue",
+  });
+  const remove = useAtomCommand(serverEnvironment.removeQueueGoal, {
+    label: "remove goal",
+    failureTitle: "Couldn't remove the goal",
+  });
   const [text, setText] = useState("");
   const [chosenProject, setProject] = useState<string | null>(null);
   const [chosenModel, setModel] = useState<string | null>(null);
+  // A double click must not queue (and pay for) the same goal twice.
+  const [busy, setBusy] = useState(false);
   const projectId = chosenProject ?? projects[0]?.id ?? "";
   const optionKey = chosenModel ?? options[0]?.key ?? "";
   const option = options.find((candidate) => candidate.key === optionKey);
@@ -41,7 +52,8 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
   const canAdd = text.trim() !== "" && projectId !== "" && option !== undefined;
 
   const submit = () => {
-    if (option === undefined || !canAdd) return;
+    if (option === undefined || !canAdd || busy) return;
+    setBusy(true);
     void add({
       environmentId,
       input: {
@@ -50,17 +62,21 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
         modelSelection: option.modelSelection,
       },
     }).then((result) => {
+      setBusy(false);
       if (result._tag === "Success") setText("");
     });
   };
 
   // Same goal, project and model, back at the end of the queue with a fresh attempt count.
   const retry = (goal: QueueGoal) => {
+    if (busy) return;
+    setBusy(true);
     void add({
       environmentId,
       input: { projectId: goal.projectId, text: goal.text, modelSelection: goal.modelSelection },
-    }).then((result) => {
-      if (result._tag === "Success") void remove({ environmentId, input: { goalId: goal.id } });
+    }).then(async (result) => {
+      if (result._tag === "Success") await remove({ environmentId, input: { goalId: goal.id } });
+      setBusy(false);
     });
   };
 
@@ -123,7 +139,7 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
               </SelectPopup>
             </Select>
           </div>
-          <Button disabled={!canAdd} onClick={submit}>
+          <Button disabled={!canAdd || busy} onClick={submit}>
             Add to queue
           </Button>
         </div>
@@ -158,6 +174,7 @@ function ConnectedQueue({ environmentId }: { readonly environmentId: Environment
                   variant="ghost"
                   aria-label="Retry goal"
                   title="Retry"
+                  disabled={busy}
                   onClick={() => retry(goal)}
                 >
                   <RotateCcwIcon />
