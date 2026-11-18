@@ -11,6 +11,8 @@ describe("parseMemSettingNumber", () => {
 
   it("rounds the idle threshold to whole minutes", () => {
     expect(parseMemSettingNumber("idleThresholdMinutes", "20.6")).toBe(21);
+    expect(parseMemSettingNumber("idleThresholdMinutes", "0")).toBeNull();
+    expect(parseMemSettingNumber("idleThresholdMinutes", "0.3")).toBeNull();
   });
 
   it("ignores empty, non-numeric and negative drafts", () => {

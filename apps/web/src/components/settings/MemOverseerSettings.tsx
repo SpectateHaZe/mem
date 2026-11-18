@@ -215,7 +215,7 @@ export function MemOverseerSettingsSection() {
         serverScoped
         settingKeys={["mem"]}
         {...searchableSetting("mem-idle-threshold")}
-        description="How long this machine must be untouched before Mem treats you as away."
+        description="How long this machine must be untouched before Mem treats you as away. At least 1 minute."
         resetAction={
           mem.idleThresholdMinutes !== DEFAULT_MEM_OVERSEER_SETTINGS.idleThresholdMinutes ? (
             <SettingResetButton

@@ -8,5 +8,8 @@ export const parseMemSettingNumber = (
   const value = Number(trimmed);
   if (!Number.isFinite(value) || value < 0) return null;
   // The cap keeps its cents: rounding 0.4 to 0 would switch the cap off.
-  return key === "spendingCapUsd" ? Math.round(value * 100) / 100 : Math.round(value);
+  if (key === "spendingCapUsd") return Math.round(value * 100) / 100;
+  // The server reads 0 minutes as "never away", so Mem would silently never act.
+  const minutes = Math.round(value);
+  return minutes < 1 ? null : minutes;
 };
