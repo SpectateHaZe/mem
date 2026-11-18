@@ -397,6 +397,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
   ) {
     const deliveredAtMs = record.deliveredAtMs;
     const turn = thread.lastTurn;
+    // No turn has finished since the stamp (a limit wait, or a send still on its way): keep the
+    // charge pending, or every wait would book a turn that never ran.
+    if (deliveredAtMs !== null && (turn === null || turn.completedAtMs < deliveredAtMs)) {
+      return record;
+    }
     const reportedUsd =
       turn !== null && (deliveredAtMs === null || turn.completedAtMs >= deliveredAtMs)
         ? turn.costUsd
@@ -777,11 +782,11 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       state = reduceTask(state, { type: "turnEnded", status: "completed" });
     }
 
-    const inputs = {
+    let inputs = {
       threadIdle: thread.idle,
       ownerAway,
       budgetAllowsTurn: spend.allowed,
-    } as const;
+    };
     let action: MemLoopAction = nextAction(state, inputs);
 
     // Measured deletions from this tick's review, which the destructive gate trusts over guesswork.
@@ -866,6 +871,8 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
           }
         }
       }
+      // The review was just charged; the next turn must fit what is left after it.
+      inputs = { ...inputs, budgetAllowsTurn: (yield* spendForTurn(mem)).spend.allowed };
       action = nextAction(state, inputs);
     }
 
@@ -1010,7 +1017,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
             });
           }
           // The next tick sends it if the budget is out now; the record keeps the instruction.
-          if (spend.allowed && state.lastInstruction !== null) {
+          if (inputs.budgetAllowsTurn && state.lastInstruction !== null) {
             yield* sendGuide(state.lastInstruction);
           }
           break;
@@ -1734,6 +1741,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
     // Nothing answered the last question, so Mem's own recommendation goes out before anything new.
     const settledThreads = yield* actorLock.withPermit(expireApprovals(settings.mem));
 
+    const listedAtMs = yield* Clock.currentTimeMillis;
     const listed = yield* ports
       .listThreads()
       .pipe(
@@ -1766,7 +1774,15 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       byPriority(threads, priorityOf).filter((thread) => !settledThreads.has(thread.threadId)),
       (thread) =>
         actorLock
-          .withPermit(runThread(thread, settings.mem, settings.pace, ownerAway, throttled(thread)))
+          .withPermit(
+            Effect.gen(function* () {
+              // A chat action between threads changed this one after it was read; acting on the
+              // old read would charge or review the wrong turn, so the next tick takes it.
+              const current = yield* ports.store.get(thread.threadId);
+              if (current !== undefined && current.updatedAtMs > listedAtMs) return;
+              yield* runThread(thread, settings.mem, settings.pace, ownerAway, throttled(thread));
+            }),
+          )
           .pipe(
             Effect.catchCause((cause) =>
               Effect.logWarning("Mem skipped a thread after an unexpected failure.", {

@@ -534,7 +534,9 @@ describe("MemOverseerService legacy approval timeout", () => {
 
     expect(harness.sent).toStrictEqual([REJECTED_INSTRUCTION]);
     expect(harness.reviews).toStrictEqual([]);
-    expect(harness.store.get("thread-1")?.spentUsd).toBe(MEM_ESTIMATED_TURN_USD);
+    // No turn has finished since the send, so nothing is booked yet; it waits for that turn.
+    expect(harness.store.get("thread-1")?.spentUsd).toBe(0);
+    expect(harness.store.get("thread-1")?.pendingCharge).toBe(true);
   });
 
   it("parks instead of sending when the cap cannot fund an expired approval", async () => {
@@ -1062,6 +1064,78 @@ describe("MemOverseerService autonomous mode", () => {
     expect(harness.sent).toStrictEqual([]);
     expect(store.get("thread-1")?.pendingCharge).toBe(true);
     expect(store.get("thread-1")?.deliveredAtMs).toBeGreaterThanOrEqual(startMs);
+  });
+
+  it("does not send the next turn when the review itself used up the cap", async () => {
+    const nowMs = await run(Clock.currentTimeMillis);
+    const harness = makeHarness({
+      away: true,
+      mem: { spendingCapUsd: 0.5 },
+      // 0.22 + a 0.25 turn fits; after the 0.05 review it no longer does.
+      spend: [{ atMs: nowMs, usd: 0.22, threadId: "thread-1" }],
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toHaveLength(1);
+    expect(harness.sent).toStrictEqual([]);
+  });
+
+  it("leaves a thread that a chat action changed mid-tick to the next tick", async () => {
+    const store = new Map<string, MemOverseerTaskRecord>();
+    const harness = makeHarness({
+      away: true,
+      store,
+      threads: [
+        thread({ threadId: ThreadId.make("thread-1") }),
+        thread({ threadId: ThreadId.make("thread-2") }),
+      ],
+      // While thread-1 is reviewed, the owner sends thread-2 an instruction from chat.
+      review: () =>
+        Effect.sync(() => {
+          store.set("thread-2", {
+            ...newTaskRecord("thread-2", 1),
+            deliveredInstruction: "From chat.",
+            updatedAtMs: Number.MAX_SAFE_INTEGER,
+          });
+          return REJECT;
+        }),
+    });
+
+    await run(harness.tick());
+
+    expect(harness.reviews).toHaveLength(1);
+    expect(store.get("thread-2")?.deliveredInstruction).toBe("From chat.");
+  });
+
+  it("books nothing for turns that never ran while a limit wait repeats", async () => {
+    const store = new Map<string, MemOverseerTaskRecord>([
+      [
+        "thread-1",
+        {
+          ...newTaskRecord("thread-1", 1),
+          task: { threadId: "thread-1", phase: "claimed", rejections: 0, lastInstruction: null },
+          deliveredInstruction: "Add the guard.",
+          deliveredAtMs: 5,
+          waitingFor: "usage",
+          waitingUntilMs: 1,
+        },
+      ],
+    ]);
+    const harness = makeHarness({
+      mem: autonomous,
+      store,
+      threads: [thread({ usage: { limited: true, windows: [] }, limitResumeArmed: true })],
+    });
+
+    for (let tick = 0; tick < 3; tick += 1) {
+      await run(harness.tick());
+      // Each wait ends at once in this harness, as a 30-minute wait would.
+      store.set("thread-1", { ...store.get("thread-1")!, waitingUntilMs: 1, waitingFor: "usage" });
+    }
+
+    expect(store.get("thread-1")?.spentUsd).toBe(0);
+    expect(store.get("thread-1")?.pendingCharge).toBe(true);
   });
 
   it("continues a limit stop itself when limit recovery could not arm it", async () => {
