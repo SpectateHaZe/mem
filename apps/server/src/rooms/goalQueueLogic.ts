@@ -1,5 +1,7 @@
 import type { GoalQueue, OrchestrationV2Run, QueueGoal, QueueGoalId } from "@t3tools/contracts";
 
+import type { LimitStop } from "./limitStops.ts";
+
 const MAX_FAILED_RUNS = 3;
 
 export const nextPendingGoal = (queue: GoalQueue) =>
@@ -23,14 +25,23 @@ export const recordFailedRun = (goal: QueueGoal, reason: string): QueueGoal => {
     : { ...goal, attempts, status: "pending", note: `Retrying: ${reason}` };
 };
 
+export const LIMIT_WAIT_NOTE =
+  "Paused: a usage limit stopped the goal. Resume the queue after it resets.";
+
 /** What a goal becomes once its run has ended. `heldBack` is a pause or the spending cap. */
 export const settleGoal = (
   goal: QueueGoal,
   runStatus: OrchestrationV2Run["status"],
   heldBack: boolean,
+  limit: LimitStop = null,
 ): QueueGoal => {
   const { note: _note, ...cleared } = goal;
   if (runStatus === "completed") return { ...cleared, status: "done" };
+  // A limit is not the goal's fault: retrying into it would burn every try within seconds.
+  if (runStatus === "failed" && limit === "resumes") {
+    return { ...goal, note: "Waiting for the usage limit to reset; it continues on its own." };
+  }
+  if (runStatus === "failed" && limit === "waits") return { ...cleared, status: "pending" };
   // The run was stopped on purpose, so this isn't a failure to retry.
   if (heldBack) return { ...cleared, status: "pending" };
   if (runStatus === "failed") return recordFailedRun(cleared, "the run failed.");

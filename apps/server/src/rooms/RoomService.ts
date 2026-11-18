@@ -35,8 +35,10 @@ import { lastSpentUsd } from "../orchestration-v2/SpendingCapState.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import { addAgentReply, addUserMessage, beginTurn, ENDED_RUN_STATUSES } from "./roomModerator.ts";
 import { makeEndedRunTracker } from "./endedRuns.ts";
+import { readLimitStop } from "./limitStops.ts";
 
 const RoomsFile = Schema.fromJsonString(Schema.Array(Room));
 const decodeRooms = Schema.decodeUnknownEffect(RoomsFile);
@@ -64,6 +66,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const random = yield* SecureRandom.SecureRandom;
   const filePath = path.join(config.stateDir, "rooms.json");
   const lock = yield* Semaphore.make(1);
@@ -176,7 +179,17 @@ const make = Effect.gen(function* () {
     const speakerIndex = room.speakerIndex ?? 0;
     const speaker = room.participants[speakerIndex]!;
     if (run.status !== "completed") {
-      yield* save(pauseWithNote(room, `${speaker.label}'s turn ended early (${run.status}).`));
+      const limit = yield* readLimitStop(projections, settings, threadId, run);
+      // Limit recovery continues this turn after the reset; that run's reply is the turn's reply.
+      if (limit === "resumes") return;
+      yield* save(
+        pauseWithNote(
+          room,
+          limit === "waits"
+            ? `${speaker.label} hit a usage limit. Resume the chat after it resets.`
+            : `${speaker.label}'s turn ended early (${run.status}).`,
+        ),
+      );
       return;
     }
     const records = yield* projections

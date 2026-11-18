@@ -46,3 +46,15 @@ it("tells a resumed goal to pick up existing work", () => {
   assert.include(goalPrompt(goal()), "unattended");
   assert.include(goalPrompt(goal({ threadId: "t" as QueueGoal["threadId"] })), "previous attempt");
 });
+
+it("keeps a goal stopped by a usage limit running when limit recovery resumes it", () => {
+  const waiting = settleGoal(goal(), "failed", false, "resumes");
+  assert.equal(waiting.status, "running");
+  assert.equal(waiting.attempts, 0);
+});
+
+it("requeues a goal stopped by a usage limit without using up a try", () => {
+  const waiting = settleGoal(goal({ attempts: 2 }), "failed", false, "waits");
+  assert.equal(waiting.status, "pending");
+  assert.equal(waiting.attempts, 2);
+});

@@ -32,8 +32,10 @@ import { currentHit } from "../orchestration-v2/SpendingCapState.ts";
 import * as ThreadLaunch from "../orchestration-v2/ThreadLaunchService.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
+import * as ServerSettings from "../serverSettings.ts";
 import {
   goalPrompt,
+  LIMIT_WAIT_NOTE,
   nextPendingGoal,
   recordFailedRun,
   settleGoal,
@@ -41,6 +43,7 @@ import {
 } from "./goalQueueLogic.ts";
 import { ENDED_RUN_STATUSES } from "./roomModerator.ts";
 import { makeEndedRunTracker } from "./endedRuns.ts";
+import { readLimitStop } from "./limitStops.ts";
 
 const QueueFile = Schema.fromJsonString(GoalQueue);
 const decodeQueue = Schema.decodeUnknownEffect(QueueFile);
@@ -69,6 +72,7 @@ const make = Effect.gen(function* () {
   const threads = yield* ThreadManagement.ThreadManagementService;
   const orchestrator = yield* Orchestrator.OrchestratorV2;
   const projections = yield* ProjectionStore.ProjectionStoreV2;
+  const settings = yield* ServerSettings.ServerSettingsService;
   const random = yield* SecureRandom.SecureRandom;
   const filePath = path.join(config.stateDir, "goal-queue.json");
   const lock = yield* Semaphore.make(1);
@@ -181,7 +185,16 @@ const make = Effect.gen(function* () {
     );
     if (goal === undefined || !firstEnd(run.id)) return;
     const heldBack = queue.paused || (yield* Ref.get(currentHit)) !== undefined;
-    yield* setQueue(updateGoal(queue, goal.id, (entry) => settleGoal(entry, run.status, heldBack)));
+    const limit = yield* readLimitStop(projections, settings, threadId, run);
+    yield* setQueue(
+      updateGoal(queue, goal.id, (entry) => settleGoal(entry, run.status, heldBack, limit)),
+    );
+    // The next goal would hit the same limit, so the queue waits for this one.
+    if (limit === "resumes") return;
+    if (limit === "waits") {
+      yield* setQueue({ ...queue, paused: true, note: LIMIT_WAIT_NOTE });
+      return;
+    }
     yield* advance;
   }, lock.withPermit);
 
