@@ -69,12 +69,16 @@ function NewRoomForm({
 }: {
   readonly environmentId: EnvironmentId;
   readonly onCreated: (roomId: RoomId) => void;
-  readonly onCancel: () => void;
+  /** Absent when there is no chat to go back to. */
+  readonly onCancel: (() => void) | undefined;
 }) {
   const providers = useAtomValue(serverEnvironment.providersValueAtom(environmentId));
   const projects = useProjects().filter((project) => project.environmentId === environmentId);
   const options = modelOptions(providers ?? []);
-  const create = useAtomCommand(serverEnvironment.createRoom, { label: "create group chat" });
+  const create = useAtomCommand(serverEnvironment.createRoom, {
+    label: "create group chat",
+    failureTitle: "Couldn't start the group chat",
+  });
   const [title, setTitle] = useState("");
   const [chosenProjectId, setProjectId] = useState<string | null>(null);
   const projectId = chosenProjectId ?? projects[0]?.id ?? "";
@@ -82,17 +86,23 @@ function NewRoomForm({
   const [mode, setMode] = useState<"discussion" | "lead">("discussion");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
-  const [agents, setAgents] = useState([
-    { key: 0, optionKey: options[0]?.key ?? "", label: options[0]?.label ?? "", role: "" },
-    { key: 1, optionKey: options[1]?.key ?? "", label: options[1]?.label ?? "", role: "Critic" },
+  const [chosenAgents, setAgents] = useState([
+    { key: 0, optionKey: "", label: "", role: "" },
+    { key: 1, optionKey: "", label: "", role: "Critic" },
   ]);
+  // Models load after the page may open; an agent with no pick yet takes its default then.
+  const agents = chosenAgents.map((agent) => {
+    if (agent.optionKey !== "") return agent;
+    const fallback = options[agent.key];
+    return fallback === undefined
+      ? agent
+      : { ...agent, optionKey: fallback.key, label: agent.label || fallback.label };
+  });
   const rounds = Number(maxRounds);
   const problem = validateNewRoom({ title, message, rounds, projectId, agents });
 
   const patchAgent = (key: number, patch: Partial<(typeof agents)[number]>) =>
-    setAgents((current) =>
-      current.map((agent) => (agent.key === key ? { ...agent, ...patch } : agent)),
-    );
+    setAgents(agents.map((agent) => (agent.key === key ? { ...agent, ...patch } : agent)));
 
   const submit = async () => {
     setBusy(true);
@@ -269,9 +279,11 @@ function NewRoomForm({
       </div>
       {problem === null ? null : <p className="text-xs text-muted-foreground">{problem}</p>}
       <div className="flex justify-end gap-2">
-        <Button variant="ghost" onClick={onCancel}>
-          Cancel
-        </Button>
+        {onCancel === undefined ? null : (
+          <Button variant="ghost" onClick={onCancel}>
+            Cancel
+          </Button>
+        )}
         <Button disabled={problem !== null || busy} onClick={() => void submit()}>
           Start discussion
         </Button>
@@ -289,9 +301,18 @@ function RoomView({
   readonly room: Room;
   readonly onDeleted: () => void;
 }) {
-  const send = useAtomCommand(serverEnvironment.sendToRoom, { label: "message group chat" });
-  const setPaused = useAtomCommand(serverEnvironment.setRoomPaused, { label: "pause group chat" });
-  const remove = useAtomCommand(serverEnvironment.deleteRoom, { label: "delete group chat" });
+  const send = useAtomCommand(serverEnvironment.sendToRoom, {
+    label: "message group chat",
+    failureTitle: "Couldn't send the message",
+  });
+  const setPaused = useAtomCommand(serverEnvironment.setRoomPaused, {
+    label: "pause group chat",
+    failureTitle: "Couldn't pause or resume the group chat",
+  });
+  const remove = useAtomCommand(serverEnvironment.deleteRoom, {
+    label: "delete group chat",
+    failureTitle: "Couldn't delete the group chat",
+  });
   const [draft, setDraft] = useState("");
   const speaker = room.speakerIndex === null ? null : room.participants[room.speakerIndex];
 
@@ -393,7 +414,7 @@ Its conversation is lost; the agent threads are kept.`;
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter" && !event.shiftKey) {
+            if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
               event.preventDefault();
               submit();
             }
@@ -450,11 +471,13 @@ function ConnectedRooms({ environmentId }: { readonly environmentId: Environment
           ~${spent.toFixed(2)} {cap === null ? "today" : `of $${cap.toFixed(2)} today`}
         </p>
       </aside>
-      {creating || selected === null ? (
+      {query.data === undefined ? (
+        <p className="p-6 text-sm text-muted-foreground">Loading group chats…</p>
+      ) : creating || selected === null ? (
         <div className="min-h-0 flex-1 overflow-y-auto">
           <NewRoomForm
             environmentId={environmentId}
-            onCancel={() => setCreating(false)}
+            onCancel={selected === null ? undefined : () => setCreating(false)}
             onCreated={(roomId) => {
               setCreating(false);
               setSelectedId(roomId);
