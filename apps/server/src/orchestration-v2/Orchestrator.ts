@@ -12743,6 +12743,32 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       awaitsRestartContinuation,
     ).pipe(Effect.map((pending) => pending.includes(true)));
 
+  /**
+   * Limit recovery will continue this failed run, so a delegated task's result is the
+   * continuation's: settling now would wake the parent with the limit error first.
+   */
+  const awaitsLimitResume = Effect.fn("Orchestrator.awaitsLimitResume")(
+    function* (childThreadId: ThreadId, run: OrchestrationV2Run) {
+      if (run.status !== "failed") return false;
+      const child = yield* projectionStore.getThreadRecords(childThreadId, ["runs", "turnItems"], {
+        turnItemTypes: ["error"],
+      });
+      if (usageLimitBlockedRun(child.runs, child.turnItems, null)?.id !== run.id) return false;
+      // Stopped, disarmed or capped: nothing will continue it.
+      const recovery = child.thread.limitRecovery;
+      if (recovery?.runId === run.id && !recovery.autoResume) return false;
+      if (latestRootProviderFailure(run, child.turnItems)?.resetAt == null) return false;
+      const settings = yield* serverSettings.getSettings;
+      if (settings.mem.autonomous) return true;
+      return (
+        settings.autoResumeLimitedThreads &&
+        automaticLimitResumeChain(child.runs) < MAX_AUTOMATIC_LIMIT_RESUMES
+      );
+    },
+    // Unreadable records settle the task as before rather than holding it.
+    (effect) => effect.pipe(Effect.orElseSucceed(() => false)),
+  );
+
   /** The same test DelegatedTaskCreditReactor applies before it retries a fire-and-forget task. */
   const holdsForCreditFallback = Effect.fn("orchestrationV2.holdsForCreditFallback")(function* (
     task: OrchestrationV2Subagent,
@@ -13068,6 +13094,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       ) {
         return;
       }
+      if (yield* awaitsLimitResume(childThreadId, childRun)) return;
 
       const childResult = yield* projectionStore.getThreadRecords(
         childThreadId,
@@ -14451,6 +14478,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
     const { event } = stored;
     if (event.type === "subagent.updated")
       return !isOrchestrationV2WorkActive(event.payload.status);
+    // A called-off limit resume releases the delegated task it was holding.
+    if (event.type === "thread.metadata-updated")
+      return event.payload.limitRecovery?.autoResume === false;
     if (event.type !== "provider-thread.updated") return false;
     if (backgroundWorkHoldsCompletion(event.payload.pendingBackgroundTasks ?? [])) {
       providerThreadsWithBackgroundWork.add(event.payload.id);
@@ -14463,7 +14493,16 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       afterSequence: terminalEventsAfterSequence,
       eventType: "provider-thread.updated",
     }),
-    eventSink.stream({ afterSequence: terminalEventsAfterSequence, eventType: "subagent.updated" }),
+    Stream.merge(
+      eventSink.stream({
+        afterSequence: terminalEventsAfterSequence,
+        eventType: "subagent.updated",
+      }),
+      eventSink.stream({
+        afterSequence: terminalEventsAfterSequence,
+        eventType: "thread.metadata-updated",
+      }),
+    ),
   ).pipe(
     Stream.filter(settlesChildWork),
     Stream.runForEach((stored) =>
@@ -14591,12 +14630,18 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         const runs = child.runs.filter((run) => run.delegatedTaskId === taskId);
         const run = runs.toSorted((a, b) => b.ordinal - a.ordinal)[0];
         if (run === undefined || delegatedTaskTerminalStatus(run.status) === null) return true;
-        return yield* childAwaitsRestartContinuation(runs, run);
+        return (
+          (yield* childAwaitsRestartContinuation(runs, run)) ||
+          (yield* awaitsLimitResume(childThreadId, run))
+        );
       }
       const progress = delegatedTaskProgress(child);
       if (progress.state !== "result_available") return true;
       if (progress.resultRun === undefined) return false;
-      return yield* childAwaitsRestartContinuation(child.runs, progress.resultRun);
+      return (
+        (yield* childAwaitsRestartContinuation(child.runs, progress.resultRun)) ||
+        (yield* awaitsLimitResume(childThreadId, progress.resultRun))
+      );
     },
     (effect, childThreadId, _taskId?) =>
       effect.pipe(

@@ -60,6 +60,8 @@ type Case = {
   };
   /** Rebuild the recovery worker against the same database before the reset, as a restart does. */
   readonly restart: boolean;
+  /** Stop the limited child before its reset, which calls the resume off. */
+  readonly stopChild?: boolean;
   /** How long after the stop each later sweep runs, and whether the session was resumed by then. */
   readonly checks: ReadonlyArray<{ readonly afterMinutes: number; readonly resumed: boolean }>;
 };
@@ -76,6 +78,14 @@ it.effect.each<Case>([
       { afterMinutes: 4, resumed: false },
       { afterMinutes: 6, resumed: true },
     ],
+  },
+  {
+    name: "a delegated child held for its limit resume still reports when the user stops it",
+    stops: "child",
+    failure: { class: "provider_error", message: "429 Too Many Requests", resetInMinutes: null },
+    restart: false,
+    stopChild: true,
+    checks: [],
   },
   {
     name: "a session stopped by a usage limit resumes at the provider's reset",
@@ -105,7 +115,7 @@ it.effect.each<Case>([
     restart: true,
     checks: [{ afterMinutes: 26 * 60, resumed: true }],
   },
-])("$name", ({ stops, failure, restart, checks }) =>
+])("$name", ({ stops, failure, restart, stopChild, checks }) =>
   Effect.scoped(
     Effect.gen(function* () {
       const cwd = yield* checkpointWorkspace("autonomous-limit-resume");
@@ -364,6 +374,37 @@ it.effect.each<Case>([
         yield* worker.drain();
         // The sweep runs every few seconds, so it arms the stop right away.
         yield* sweep;
+        const parentTask = Effect.map(
+          orchestrator.getThreadProjection(parentThreadId),
+          (projection) => projection.subagents,
+        );
+        if (stops === "child") {
+          // The limit will be resumed, so the parent is not told the task failed.
+          const [held] = yield* parentTask;
+          assert.notEqual(held?.status, "failed");
+          assert.isNull(held?.result ?? null);
+        }
+        const taskSettled = (status: string) =>
+          watch(
+            (event) =>
+              event.type === "subagent.updated" &&
+              event.threadId === parentThreadId &&
+              event.payload.status === status,
+          );
+        if (stopChild) {
+          const failedTask = yield* taskSettled("failed");
+          yield* orchestrator.dispatch({
+            type: "thread.stop",
+            commandId: CommandId.make("stop-child"),
+            threadId: stoppedThreadId,
+            reason: "Stopped by the user.",
+          });
+          yield* worker.drain();
+          yield* Fiber.join(failedTask);
+          const [released] = yield* parentTask;
+          assert.equal(released?.status, "failed");
+          return;
+        }
 
         if (restart) {
           const armed = (yield* orchestrator.getThreadProjection(stoppedThreadId)).thread
@@ -412,6 +453,66 @@ it.effect.each<Case>([
             check.resumed ? [firstPrompt, continuePrompt] : [firstPrompt],
             `after ${check.afterMinutes} minutes`,
           );
+        }
+
+        if (stops === "child") {
+          // The resumed run's end settles the one original task, not a second follow-up task.
+          const resumed = turns.at(-1)!;
+          const resumedTurn = {
+            id: ProviderTurnId.make(`provider-turn:${resumed.turn.attemptId}`),
+            providerThreadId: resumed.turn.providerThread.id,
+            nodeId: resumed.turn.rootNodeId,
+            runAttemptId: resumed.turn.attemptId,
+            nativeTurnRef: null,
+            ordinal: resumed.turn.providerTurnOrdinal,
+            startedAt: yield* DateTime.now,
+          };
+          const resumedRunId = resumed.turn.runId;
+          const runWaiting = yield* watch(
+            (event) =>
+              event.type === "run.updated" &&
+              event.payload.id === resumedRunId &&
+              event.payload.status === "waiting",
+          );
+          const completedTask = yield* taskSettled("completed");
+          const runCompleted = yield* watch(
+            (event) =>
+              event.type === "run.updated" &&
+              event.payload.id === resumedRunId &&
+              event.payload.status === "completed",
+          );
+          const doneAt = yield* DateTime.now;
+          yield* Effect.forEach(
+            [
+              {
+                type: "provider_turn.updated",
+                driver,
+                providerTurn: { ...resumedTurn, status: "completed", completedAt: doneAt },
+              },
+              {
+                type: "turn.terminal",
+                driver,
+                providerThreadId: resumedTurn.providerThreadId,
+                providerTurnId: resumedTurn.id,
+                runOrdinal: resumed.turn.runOrdinal,
+                status: "completed",
+                failure: null,
+                threadDisposition: "reusable",
+              },
+            ] satisfies ReadonlyArray<ProviderAdapter.ProviderAdapterV2Event>,
+            (event) => Queue.offer(resumed.events, event),
+            { discard: true },
+          );
+          // The run waits for its checkpoint capture, which the effect worker runs.
+          yield* Fiber.join(runWaiting);
+          yield* worker.drain();
+          yield* Fiber.join(runCompleted);
+          yield* worker.drain();
+          // The task settles from the run's terminal event stream, a moment after the run.
+          yield* Fiber.join(completedTask);
+          const settled = yield* parentTask;
+          assert.equal(settled.length, 1);
+          assert.equal(settled[0]?.status, "completed");
         }
       }).pipe(Effect.provide(layerTest));
     }),
