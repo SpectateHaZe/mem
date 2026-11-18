@@ -19,6 +19,11 @@ import * as SubscriptionRef from "effect/SubscriptionRef";
 export const COMPUTER_USE_LINGER_MS = 20_000;
 /** An Esc the agent itself typed reaches the global shortcut too; ignore stops this soon after. */
 const OWN_ESCAPE_GRACE_MS = 1_500;
+/**
+ * A stop interrupts the run asynchronously; refuse a stopped thread's actions meanwhile.
+ * shortcut: a fixed hold, not the run's end; tie it to the interrupted run if a slow abort shows up.
+ */
+export const COMPUTER_USE_STOP_HOLD_MS = 15_000;
 
 const HIDDEN: Activity = { state: "hidden", threadId: null, point: null };
 
@@ -49,24 +54,29 @@ export class ComputerUseActivity extends Context.Service<
       caller: { readonly threadId: ThreadId; readonly projectId: ProjectId } | undefined,
       input: ComputerActInput,
     ) => Effect.Effect<void>;
-    /** Clears the glow; returns the thread to interrupt, or null when there is none to stop. */
-    readonly stop: () => Effect.Effect<{
-      readonly threadId: ThreadId;
-      readonly projectId: ProjectId;
-    } | null>;
+    /** Clears the glow; returns every thread to interrupt (none when there is nothing to stop). */
+    readonly stop: () => Effect.Effect<
+      ReadonlyArray<{ readonly threadId: ThreadId; readonly projectId: ProjectId }>
+    >;
+    /** True while a thread Esc just stopped must not act. */
+    readonly stoppedRecently: (threadId: ThreadId) => Effect.Effect<boolean>;
     readonly changes: Stream.Stream<Activity>;
   }
 >()("t3/computer/ComputerUseActivity") {}
 
 const make = Effect.gen(function* () {
   const activity = yield* SubscriptionRef.make<Activity>(HIDDEN);
-  const owner = yield* Ref.make<{ threadId: ThreadId; projectId: ProjectId } | null>(null);
+  // Every thread that used the screen since the glow came on; Esc stops all of them.
+  const owners = yield* Ref.make<
+    ReadonlyMap<ThreadId, { threadId: ThreadId; projectId: ProjectId }>
+  >(new Map());
+  const stoppedAtMs = yield* Ref.make<ReadonlyMap<ThreadId, number>>(new Map());
   const screen = yield* Ref.make<ScreenSize | null>(null);
   const lastOwnEscapeAtMs = yield* Ref.make(Number.NEGATIVE_INFINITY);
   const linger = yield* FiberHandle.make();
 
   const hide = Effect.gen(function* () {
-    yield* Ref.set(owner, null);
+    yield* Ref.set(owners, new Map());
     yield* SubscriptionRef.set(activity, HIDDEN);
   });
 
@@ -74,7 +84,9 @@ const make = Effect.gen(function* () {
     caller: { readonly threadId: ThreadId; readonly projectId: ProjectId } | undefined,
     next: (current: Activity) => Activity,
   ) {
-    if (caller !== undefined) yield* Ref.set(owner, caller);
+    if (caller !== undefined) {
+      yield* Ref.update(owners, (current) => new Map(current).set(caller.threadId, caller));
+    }
     yield* SubscriptionRef.update(activity, next);
     yield* FiberHandle.run(linger, Effect.sleep(COMPUTER_USE_LINGER_MS).pipe(Effect.andThen(hide)));
   });
@@ -107,17 +119,30 @@ const make = Effect.gen(function* () {
 
   const stop = Effect.fn("ComputerUseActivity.stop")(function* () {
     const nowMs = yield* Clock.currentTimeMillis;
-    if (nowMs - (yield* Ref.get(lastOwnEscapeAtMs)) < OWN_ESCAPE_GRACE_MS) return null;
-    const target = yield* Ref.get(owner);
+    if (nowMs - (yield* Ref.get(lastOwnEscapeAtMs)) < OWN_ESCAPE_GRACE_MS) return [];
+    const targets = [...(yield* Ref.get(owners)).values()];
+    yield* Ref.update(stoppedAtMs, (current) => {
+      const next = new Map(current);
+      for (const target of targets) next.set(target.threadId, nowMs);
+      return next;
+    });
     yield* FiberHandle.clear(linger);
     yield* hide;
-    return target;
+    return targets;
+  });
+
+  const stoppedRecently = Effect.fn("ComputerUseActivity.stoppedRecently")(function* (
+    threadId: ThreadId,
+  ) {
+    const at = (yield* Ref.get(stoppedAtMs)).get(threadId);
+    return at !== undefined && (yield* Clock.currentTimeMillis) - at < COMPUTER_USE_STOP_HOLD_MS;
   });
 
   return ComputerUseActivity.of({
     screenshot,
     act,
     stop,
+    stoppedRecently,
     changes: SubscriptionRef.changes(activity),
   });
 });

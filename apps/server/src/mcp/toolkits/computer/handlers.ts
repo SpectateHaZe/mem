@@ -37,8 +37,15 @@ const computer_screenshot = McpToolAccess.readsAsCaller(() =>
 const computer_act = McpToolAccess.actsAsCaller((input: ComputerActInput) =>
   Effect.gen(function* () {
     const caller = yield* requireAllowed(true);
+    const activity = yield* ComputerUseActivity.ComputerUseActivity;
+    if (caller !== undefined && (yield* activity.stoppedRecently(caller.threadId))) {
+      return yield* failure(
+        "The user pressed Esc to stop you using the computer. Stop and wait for their next message.",
+        "capability_denied",
+      );
+    }
     // Shown before the action runs, so the glow and marker lead the real cursor.
-    yield* (yield* ComputerUseActivity.ComputerUseActivity).act(caller, input);
+    yield* activity.act(caller, input);
     return yield* performAct(input);
   }),
 );

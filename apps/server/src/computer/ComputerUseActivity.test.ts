@@ -42,13 +42,13 @@ it.effect("Esc stops the owning thread unless the agent just pressed Esc itself"
   Effect.gen(function* () {
     const activity = yield* ComputerUseActivity.ComputerUseActivity;
     yield* activity.act(caller, { action: "key", text: "escape" });
-    expect(yield* activity.stop()).toBeNull();
+    expect(yield* activity.stop()).toEqual([]);
     expect((yield* current).state).toBe("driving");
 
     yield* TestClock.adjust(2_000);
-    expect(yield* activity.stop()).toEqual(caller);
+    expect(yield* activity.stop()).toEqual([caller]);
     expect((yield* current).state).toBe("hidden");
-    expect(yield* activity.stop()).toBeNull();
+    expect(yield* activity.stop()).toEqual([]);
   }).pipe(Effect.provide(ComputerUseActivity.layer)),
 );
 
@@ -58,3 +58,18 @@ it("recognises the agent's own Esc only for the key action", () => {
   expect(ComputerUseActivity.pressesEscape({ action: "type", text: "esc" })).toBe(false);
   expect(ComputerUseActivity.pressesEscape({ action: "key", text: "escapex" })).toBe(false);
 });
+
+it.effect("Esc stops every thread using the screen, and holds their actions for a while", () =>
+  Effect.gen(function* () {
+    const activity = yield* ComputerUseActivity.ComputerUseActivity;
+    const other = { threadId: ThreadId.make("thread-2"), projectId: ProjectId.make("project-1") };
+    yield* activity.act(caller, { action: "click", x: 1, y: 1 });
+    // A later screenshot from another thread must not take the stop away from the first.
+    yield* activity.screenshot(other, { width: 1000, height: 500 });
+    yield* TestClock.adjust(2_000);
+    expect(yield* activity.stop()).toEqual([caller, other]);
+    expect(yield* activity.stoppedRecently(caller.threadId)).toBe(true);
+    yield* TestClock.adjust(ComputerUseActivity.COMPUTER_USE_STOP_HOLD_MS);
+    expect(yield* activity.stoppedRecently(caller.threadId)).toBe(false);
+  }).pipe(Effect.provide(ComputerUseActivity.layer)),
+);

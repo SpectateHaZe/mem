@@ -2394,20 +2394,22 @@ export const layerWsRpc = (
           providerSessionManager.subscribePromptSuggestion(input.threadId),
         [WS_METHODS.computerUseSubscribe]: (_input) => computerUseActivity.changes,
         [WS_METHODS.computerUseStop]: Effect.fn("ws.computerUseStop")(function* () {
-          const target = yield* computerUseActivity.stop();
-          if (target === null) return { stopped: false };
-          yield* threadManagement
-            .interruptThread({
-              projectId: target.projectId,
-              threadId: target.threadId,
-              commandId: CommandId.make(`computer-use-stop:${yield* random.uuidV4()}`),
-              reason: "Stopped with Esc while the agent was using the computer.",
-            })
-            .pipe(
-              Effect.catchCause((cause) =>
-                Effect.logWarning("Could not stop the thread using the computer.", { cause }),
-              ),
-            );
+          const targets = yield* computerUseActivity.stop();
+          if (targets.length === 0) return { stopped: false };
+          for (const target of targets) {
+            yield* threadManagement
+              .interruptThread({
+                projectId: target.projectId,
+                threadId: target.threadId,
+                commandId: CommandId.make(`computer-use-stop:${yield* random.uuidV4()}`),
+                reason: "Stopped with Esc while the agent was using the computer.",
+              })
+              .pipe(
+                Effect.catchCause((cause) =>
+                  Effect.logWarning("Could not stop the thread using the computer.", { cause }),
+                ),
+              );
+          }
           return { stopped: true };
         }),
         [WS_METHODS.lendAHandHostStart]: (_input) => handHost.start(),
