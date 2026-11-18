@@ -2727,7 +2727,14 @@ it.effect("records a provider's input rejection at turn start in the terminal er
   }),
 );
 
-it.effect.each(["failure", "defect", "interrupt-failure", "ownership-lost"] as const)(
+// "interrupt-cancelled": a session released mid-turn forks its interrupt into a closed scope.
+it.effect.each([
+  "failure",
+  "defect",
+  "interrupt-failure",
+  "interrupt-cancelled",
+  "ownership-lost",
+] as const)(
   "stops the live provider and background work before settling an ingestion %s",
   (failureMode) =>
     Effect.gen(function* () {
@@ -2792,16 +2799,18 @@ it.effect.each(["failure", "defect", "interrupt-failure", "ownership-lost"] as c
             ),
             Effect.andThen(Deferred.succeed(stopped, undefined)),
             Effect.andThen(
-              failureMode === "interrupt-failure"
-                ? Effect.fail(
-                    new ProviderAdapter.ProviderAdapterInterruptError({
-                      driver,
-                      providerThreadId: input.providerThread.id,
-                      providerTurnId: input.providerTurnId,
-                      cause: "provider already exited",
-                    }),
-                  )
-                : Effect.void,
+              failureMode === "interrupt-cancelled"
+                ? Effect.interrupt
+                : failureMode === "interrupt-failure"
+                  ? Effect.fail(
+                      new ProviderAdapter.ProviderAdapterInterruptError({
+                        driver,
+                        providerThreadId: input.providerThread.id,
+                        providerTurnId: input.providerTurnId,
+                        cause: "provider already exited",
+                      }),
+                    )
+                  : Effect.void,
             ),
           ),
         beforeTerminalWrite: () =>
@@ -2826,7 +2835,7 @@ it.effect.each(["failure", "defect", "interrupt-failure", "ownership-lost"] as c
         const error = written.find((item) => item.type === "error");
         assert.include(error?.failure.message ?? "", "(SQLITE_CANTOPEN)");
         const repaired = finalEvents.find((event) => event.type === "provider-turn.updated");
-        if (failureMode === "interrupt-failure") {
+        if (failureMode === "interrupt-failure" || failureMode === "interrupt-cancelled") {
           assert.isUndefined(repaired);
         } else {
           assert.equal(repaired?.payload.id, ids.rootProviderTurnId);

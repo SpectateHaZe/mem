@@ -1574,13 +1574,13 @@ export const layer: Layer.Layer<
                           })
                           .pipe(
                             Effect.as(true),
-                            Effect.catchCauseIf(
-                              (interruptCause) => !Cause.hasInterruptsOnly(interruptCause),
-                              (interruptCause) =>
-                                Effect.logWarning(
-                                  "orchestration V2 failed to interrupt turn after ingestion failure",
-                                  { runId: input.run.id, cause: interruptCause },
-                                ).pipe(Effect.as(false)),
+                            // Interrupt-only too: a session released mid-turn forks the interrupt
+                            // into its closed scope, and escaping here would leave the run running.
+                            Effect.catchCause((interruptCause) =>
+                              Effect.logWarning(
+                                "orchestration V2 failed to interrupt turn after ingestion failure",
+                                { runId: input.run.id, cause: interruptCause },
+                              ).pipe(Effect.as(false)),
                             ),
                             // A failed interrupt leaves the stored turn running so the next start
                             // retries it. The snapshot is cached before it is published, so it may
