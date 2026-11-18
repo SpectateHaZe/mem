@@ -47,6 +47,7 @@ import * as Stream from "effect/Stream";
 
 import {
   byPriority,
+  CONTINUE_AFTER_LIMIT_INSTRUCTION,
   improvementInstruction,
   MEM_AUTONOMOUS_RETRY_MS,
   MEM_FAILED_ROUND_BACKOFF_MS,
@@ -143,6 +144,8 @@ export interface MemOverseerThread {
   readonly usage?: MemThreadUsage;
   /** When the latest run failed for a reason other than a usage limit; absent or null if it didn't. */
   readonly lastRunFailedAtMs?: number | null;
+  /** Limit recovery will resume the latest run on its own; absent reads as not armed. */
+  readonly limitResumeArmed?: boolean;
 }
 
 const NO_USAGE: MemThreadUsage = { limited: false, windows: [] };
@@ -704,9 +707,14 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       }
       record = { ...record, waitingUntilMs: null, waitingFor: null };
       if (usage.limited) {
-        // Limit recovery sends the continue at the reset and backs off if it hits the limit again;
-        // a second one from here would double it. Stamp now so settling charges only that run.
-        record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
+        if (thread.limitResumeArmed === true) {
+          // Limit recovery sends the continue at the reset and backs off if it hits the limit
+          // again; a second one from here would double it. Stamp now so settling charges that run.
+          record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
+        } else if (waitedOutLimit && (yield* deliver(thread, CONTINUE_AFTER_LIMIT_INSTRUCTION))) {
+          // Recovery could not arm this stop (no usable reset time), so Mem continues it itself.
+          record = { ...record, pendingCharge: true, deliveredAtMs: nowMs };
+        }
         yield* persist();
         return;
       }
@@ -2049,6 +2057,8 @@ const toThread = (
     shell.status === "failed" && shell.lastErrorClass !== "usage_limit"
       ? DateTime.toEpochMillis(shell.latestRunCompletedAt ?? shell.updatedAt)
       : null,
+  limitResumeArmed:
+    shell.limitRecovery?.autoResume === true && shell.limitRecovery.runId === shell.latestRunId,
 });
 
 /**

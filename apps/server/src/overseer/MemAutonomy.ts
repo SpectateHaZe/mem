@@ -35,6 +35,9 @@ export interface MemThreadUsage {
 
 export const PRIORITY_RANK: Record<MemThreadPriority, number> = { high: 0, normal: 1, low: 2 };
 
+export const CONTINUE_AFTER_LIMIT_INSTRUCTION =
+  "The usage limit has reset. Continue exactly where you stopped.";
+
 export const improvementInstruction = (summaries: ReadonlyArray<string>): string =>
   [
     "Find the single most valuable improvement to how this app looks or works, the way its owner would want it.",

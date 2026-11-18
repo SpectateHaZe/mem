@@ -1054,12 +1054,40 @@ describe("MemOverseerService autonomous mode", () => {
     const harness = makeHarness({
       mem: autonomous,
       store,
-      threads: [thread({ usage: { limited: true, windows: [] } })],
+      threads: [thread({ usage: { limited: true, windows: [] }, limitResumeArmed: true })],
     });
 
     await run(harness.tick());
 
     expect(harness.sent).toStrictEqual([]);
+    expect(store.get("thread-1")?.pendingCharge).toBe(true);
+    expect(store.get("thread-1")?.deliveredAtMs).toBeGreaterThanOrEqual(startMs);
+  });
+
+  it("continues a limit stop itself when limit recovery could not arm it", async () => {
+    const startMs = await run(Clock.currentTimeMillis);
+    const store = new Map<string, MemOverseerTaskRecord>([
+      [
+        "thread-1",
+        {
+          ...newTaskRecord("thread-1", 1),
+          task: { threadId: "thread-1", phase: "claimed", rejections: 0, lastInstruction: null },
+          deliveredInstruction: "Add the guard.",
+          deliveredAtMs: 5,
+          waitingFor: "usage",
+          waitingUntilMs: 1,
+        },
+      ],
+    ]);
+    const harness = makeHarness({
+      mem: autonomous,
+      store,
+      threads: [thread({ usage: { limited: true, windows: [] } })],
+    });
+
+    await run(harness.tick());
+
+    expect(harness.sent).toHaveLength(1);
     expect(store.get("thread-1")?.pendingCharge).toBe(true);
     expect(store.get("thread-1")?.deliveredAtMs).toBeGreaterThanOrEqual(startMs);
   });
