@@ -1130,6 +1130,8 @@ export const layer = Layer.effect(
             last_run_error = ${MISSED_RUN_ERROR},
             updated_at = ${iso(now)}
         WHERE task_id = ${task.id}
+          -- A "Run now" that started since the due list was read keeps its running row.
+          AND last_run_status <> 'running'
       `.pipe(
         Effect.mapError((cause) =>
           taskError("Could not reschedule missed schedule task run.", { taskId: task.id, cause }),
