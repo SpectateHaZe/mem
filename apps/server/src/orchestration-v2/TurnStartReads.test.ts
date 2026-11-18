@@ -374,7 +374,14 @@ it.effect.each(["sqlite"] as const)(
         threadId,
         runId,
         occurredAt: now,
-        payload: { ...message, attachments: [file] },
+        // Another thread's file: deleting this thread must not take it along.
+        payload: {
+          ...message,
+          attachments: [
+            file,
+            { ...file, id: "someone-else-0b9f6c1e-3c1d-4f7a-9d2e-5a6b7c8d9e0f-pdf" },
+          ],
+        },
       });
       yield* store.apply({
         id: EventId.make("attachment:question-event"),

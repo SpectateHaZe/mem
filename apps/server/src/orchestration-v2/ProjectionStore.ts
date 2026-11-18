@@ -96,7 +96,11 @@ import * as SqlClient from "effect/sql/SqlClient";
 import type * as Statement from "effect/sql/Statement";
 
 import { MCP_APP_OUTPUT_KEY } from "@t3tools/shared/mcpApp";
-import { threadHtmlRenderAttachmentIds } from "../attachmentStore.ts";
+import {
+  parseThreadSegmentFromAttachmentId,
+  threadHtmlRenderAttachmentIds,
+  toSafeThreadAttachmentSegment,
+} from "../attachmentStore.ts";
 import {
   isThreadHistoryUserTurn,
   isConversationHistoryItem,
@@ -5672,23 +5676,31 @@ export const layer: Layer.Layer<ProjectionStoreV2, never, SqlClient.SqlClient> =
         AND json_extract(message.value, '$.status') = 'pending'
     `,
       ]).pipe(
-        Effect.map(([messages, renders, answerFiles, guestFiles]) => [
-          ...new Set([
-            ...messages.map((row) => row.id),
-            ...guestFiles.map((row) => row.id),
-            ...answerFiles.map((row) => row.id),
-            ...threadHtmlRenderAttachmentIds(
-              threadId,
-              renders.map((row) => {
-                const item = parseEncodedPayload(row.payload_json);
-                return {
-                  toolName: typeof item.toolName === "string" ? item.toolName : null,
-                  output: item.output,
-                };
-              }),
-            ),
-          ]),
-        ]),
+        Effect.map(([messages, renders, answerFiles, guestFiles]) => {
+          // Deleting this thread deletes these files, so an id naming another thread is not its own.
+          const segment = toSafeThreadAttachmentSegment(threadId);
+          const owned = (row: { readonly id: string }) => {
+            const owner = parseThreadSegmentFromAttachmentId(row.id);
+            return owner === null || owner === segment;
+          };
+          return [
+            ...new Set([
+              ...messages.filter(owned).map((row) => row.id),
+              ...guestFiles.map((row) => row.id),
+              ...answerFiles.filter(owned).map((row) => row.id),
+              ...threadHtmlRenderAttachmentIds(
+                threadId,
+                renders.map((row) => {
+                  const item = parseEncodedPayload(row.payload_json);
+                  return {
+                    toolName: typeof item.toolName === "string" ? item.toolName : null,
+                    output: item.output,
+                  };
+                }),
+              ),
+            ]),
+          ];
+        }),
         Effect.mapError((cause) => new ProjectionStoreReadError({ threadId, cause })),
       );
 
