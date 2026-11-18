@@ -128,3 +128,37 @@ it.effect("keeps the app running when the overlay cannot create or update its wi
     expect(fake.disposals).toBe(1);
   }),
 );
+
+it.effect("removes the overlay when the window that showed it is closed", () =>
+  Effect.gen(function* () {
+    const handlers: Handlers = new Map();
+    let destroyed: (() => void) | undefined;
+    const closingEvent = {
+      sender: {
+        id: 2,
+        once: (_event: "destroyed", listener: () => void) => {
+          destroyed = listener;
+        },
+      },
+    };
+
+    yield* Effect.scoped(
+      Effect.gen(function* () {
+        yield* installComputerUseOverlay();
+        yield* Effect.promise(() =>
+          Promise.resolve(
+            handlers.get(COMPUTER_USE_OVERLAY_STATE_CHANNEL)!(closingEvent, {
+              state: "driving",
+              point: null,
+            }),
+          ),
+        );
+        expect(fake.constructions).toBe(1);
+        destroyed?.();
+        expect(fake.disposals).toBe(1);
+      }).pipe(Effect.provide(layerTest(handlers))),
+    );
+
+    expect(fake.disposals).toBe(1);
+  }),
+);

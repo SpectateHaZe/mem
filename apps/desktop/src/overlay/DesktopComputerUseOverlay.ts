@@ -39,13 +39,29 @@ export const installComputerUseOverlay = Effect.fn("desktop.ipc.installComputerU
       return failure;
     };
 
+    // The renderer clears the overlay only as it unmounts, which a closed window never does;
+    // the glow, the Esc shortcut and the overlay windows (which keep the app from quitting)
+    // would outlive it.
+    const watchedSenders = new Set<number>();
+    const watchSender = (event: DesktopIpc.DesktopIpcInvokeEvent | undefined) => {
+      if (event === undefined || watchedSenders.has(event.sender.id)) return;
+      watchedSenders.add(event.sender.id);
+      event.sender.once?.("destroyed", () => {
+        watchedSenders.delete(event.sender.id);
+        dispose();
+      });
+    };
+
     yield* ipc.handle(
       DesktopIpc.makeIpcMethod({
         channel: COMPUTER_USE_OVERLAY_STATE_CHANNEL,
         payload: DesktopComputerUseOverlayState,
         result: Schema.Void,
-        handler: (state) =>
-          Effect.sync(() => apply(state)).pipe(
+        handler: (state, event) =>
+          Effect.sync(() => {
+            if (state.state !== "hidden") watchSender(event);
+            return apply(state);
+          }).pipe(
             Effect.flatMap((failure) =>
               failure === undefined
                 ? Effect.void

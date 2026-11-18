@@ -5,7 +5,11 @@ import * as Schema from "effect/Schema";
 import * as Scope from "effect/Scope";
 
 export interface DesktopIpcInvokeEvent {
-  readonly sender: { readonly id: number };
+  readonly sender: {
+    readonly id: number;
+    /** Electron's WebContents; optional so tests can pass a bare id. */
+    readonly once?: (event: "destroyed", listener: () => void) => unknown;
+  };
 }
 
 export interface DesktopIpcSyncEvent {
