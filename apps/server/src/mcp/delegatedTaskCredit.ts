@@ -8,17 +8,25 @@ const CREDIT_EXHAUSTION_PATTERNS: ReadonlyArray<RegExp> = [
   /\bquota (?:has been |is )?(?:exhausted|exceeded)\b/i,
   /\bexceeded (?:your |the )?(?:current )?quota\b/i,
   /\breached (?:your |the |a )?(?:[\w-]+ )*quota\b/i,
-  /\bresource[ _]?exhausted\b/i,
+  // Gemini sends RESOURCE_EXHAUSTED for ordinary rate limits too; only a daily or billing stop is credit.
+  /\bresource[ _]?exhausted\b[\s\S]*\b(?:daily|per ?day|billing|free[ _-]?tier)\b/i,
+  /\b(?:daily|billing|free[ _-]?tier)\b[\s\S]*\bresource[ _]?exhausted\b/i,
+  /\brequires more credits\b|\bcan only afford\b/i,
+  /\bkey limit exceeded\b/i,
+  /\bbilling hard limit\b/i,
+  /\bapi usage limits?\b/i,
   /\bbilling (?:information|details|method|address|status|issue|problem|error|account|section)\b/i,
   /\bpayment required\b/i,
 ];
 
 // Gemini reports a per-minute limit as RESOURCE_EXHAUSTED / quota exceeded; it clears by itself.
 const SHORT_WINDOW_LIMIT = /\bper[ _-]?(?:minute|second)\b|PerMinute|PerSecond/i;
+// One error can list several violations; a daily one among them still means the day is spent.
+const DAY_WINDOW_LIMIT = /\bper[ _-]?day\b|PerDay/i;
 
 /** True only for an account out of credit. A rate limit, a bad request, or a cancel is not one. */
 export function isCreditExhaustionFailure(message: string): boolean {
-  if (SHORT_WINDOW_LIMIT.test(message)) return false;
+  if (SHORT_WINDOW_LIMIT.test(message) && !DAY_WINDOW_LIMIT.test(message)) return false;
   return CREDIT_EXHAUSTION_PATTERNS.some((pattern) => pattern.test(message));
 }
 

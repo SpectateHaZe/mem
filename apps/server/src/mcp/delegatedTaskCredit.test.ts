@@ -20,6 +20,11 @@ describe("isCreditExhaustionFailure", () => {
     "RESOURCE_EXHAUSTED: Exceeded the daily quota for this key.",
     "insufficient_user_quota: the account is capped this month",
     "The request failed: insufficient account funds",
+    "This request requires more credits, or fewer max_tokens. You requested up to 4096 tokens, but can only afford 812.",
+    "Key limit exceeded (total limit)",
+    "Billing hard limit has been reached",
+    "You have reached your specified API usage limits. You will regain access on 2026-12-01.",
+    "Quota exceeded for metric: GenerateRequestsPerDayPerProjectPerModel-FreeTier, and InputTokensPerModelPerMinute-FreeTier",
   ])("detects credit exhaustion in %s", (message) => {
     assert.isTrue(isCreditExhaustionFailure(message));
   });
@@ -41,6 +46,8 @@ describe("isCreditExhaustionFailure", () => {
     "Child task ended with status failed.",
     "RESOURCE_EXHAUSTED: Quota exceeded for quota metric 'Generate requests' and limit 'Generate requests per minute'.",
     "You exceeded your current quota. Quota exceeded for metric: GenerateRequestsPerMinutePerProjectPerModel. Please retry in 21s.",
+    '{"code":429,"message":"Resource has been exhausted (e.g. check quota).","status":"RESOURCE_EXHAUSTED"}',
+    "429 Resource exhausted. Please try again later.",
   ])("ignores non-credit failures in %s", (message) => {
     assert.isFalse(isCreditExhaustionFailure(message));
   });

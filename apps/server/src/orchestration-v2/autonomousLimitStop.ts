@@ -7,7 +7,7 @@ import { isCreditExhaustionFailure } from "../mcp/delegatedTaskCredit.ts";
 const RETRY_BASE_MS = 5 * 60 * 1000;
 const RETRY_MAX_MS = 2 * 60 * 60 * 1000;
 
-const RATE_LIMIT = /\brate[ _-]?limit|\btoo many requests\b|\b429\b|\busage limit\b/i;
+const RATE_LIMIT = /\brate[ _-]?limit|\btoo many requests\b|\b429\b|\busage limits?\b/i;
 
 /** How many automatic limit resumes in a row led to this run; each one doubles the next wait. */
 export function limitResumeStreak(
