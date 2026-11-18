@@ -3,6 +3,7 @@ import type { TimestampFormat } from "@t3tools/contracts/settings";
 import { limitsNotice } from "@t3tools/shared/usageLimits";
 import { GaugeIcon } from "lucide-react";
 
+import { useNowMinute } from "../../hooks/useNowMinute";
 import { ensureLocalApi } from "../../localApi";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
 import { Button } from "../ui/button";
@@ -109,7 +110,9 @@ function UsageLimitsBannerBody({
   readonly report: UsageLimitsReport;
   readonly environmentId: EnvironmentId;
 }) {
-  const now = Date.parse(report.createdAt);
+  // The live clock, not the opening time: countdowns and pace marks stay right while it is open.
+  const nowMinute = useNowMinute();
+  const now = Date.parse(`${nowMinute}:00Z`);
   return (
     <ComposerBanner.Scroll>
       <ComposerBanner.Body className="flex flex-col gap-2 pt-1 pb-1.5 pe-2">
