@@ -892,6 +892,23 @@ export const layer = Layer.effect(
         ) {
           return { task: active, threadId: null, dispatchFailed: false };
         }
+        // Thread deletion removes thread-bound tasks; one that opens new threads would otherwise
+        // fail on every run once its project is deleted, so it goes with the project.
+        const projectGone =
+          (yield* sql`SELECT 1 FROM projection_projects WHERE project_id = ${active.projectId} AND deleted_at IS NOT NULL`.pipe(
+            NodeSqliteClient.readOnly,
+            Effect.orElseSucceed(() => []),
+          )).length > 0;
+        if (projectGone) {
+          yield* deleteRow(active.id).pipe(
+            Effect.andThen(forgetWebhookTask(active.id)),
+            Effect.andThen(notifyChanged),
+          );
+          if (webhook !== undefined) {
+            return yield* new WebhookDeliverySkipped({ reason: "The task's project was deleted." });
+          }
+          return { task: active, threadId: null, dispatchFailed: false };
+        }
         // Reject queued deliveries after pause, same-id recreation or trigger changes.
         if (webhook !== undefined) {
           const reason =

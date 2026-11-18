@@ -685,6 +685,51 @@ it.effect("a first run whose thread was deleted before it bound removes the task
   }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
 );
 
+it.effect("a new-thread task whose project was deleted removes itself instead of failing", () =>
+  Effect.gen(function* () {
+    const layer = ScheduledTaskService.layer.pipe(
+      Layer.provide(
+        Layer.mergeAll(
+          ManagedPolicy.layerTest(),
+          Layer.mock(ThreadLaunchService.ThreadLaunchService)({
+            launch: () => Effect.die("must not launch into a deleted project"),
+          }),
+          Layer.mock(ThreadManagementService.ThreadManagementService)({}),
+          Layer.mock(SecretRequests.SecretRequests)({}),
+          Layer.mock(ManagedProjectFolders.ManagedProjectFolders)({
+            namedProjectsRoot: "/projects",
+            isScratchProject: () => Effect.succeed(false),
+          }),
+          NodeCrypto.layer,
+          Layer.succeed(Scheduler.Scheduler, { register: () => Effect.void }),
+        ),
+      ),
+    );
+    yield* Effect.gen(function* () {
+      const service = yield* ScheduledTaskService.ScheduledTaskService;
+      const { task } = yield* service.upsert({
+        id: ScheduledTaskId.make("task:project-deleted"),
+        title: "Nightly report",
+        prompt: "Write the nightly report",
+        enabled: true,
+        schedule: { type: "interval", everyMs: 60_000 },
+        projectId: ProjectId.make("project:gone"),
+        threadMode: "new_thread",
+        workspaceStrategy: { type: "root" },
+        modelSelection: { instanceId: ProviderInstanceId.make("codex"), model: "gpt-5.4" },
+        runtimeMode: "full-access",
+        interactionMode: "default",
+      });
+      const sql = yield* SqlClient.SqlClient;
+      const at = "2026-11-03T00:00:00.000Z";
+      yield* sql`INSERT INTO projection_projects (project_id, title, workspace_root, scripts_json, created_at, updated_at, deleted_at)
+        VALUES ('project:gone', 'Gone', '/projects/gone', '[]', ${at}, ${at}, ${at})`;
+      yield* service.runNow({ id: task.id }).pipe(Effect.ignore);
+      assert.deepEqual((yield* service.list()).tasks, []);
+    }).pipe(Effect.provide(layer));
+  }).pipe(Effect.provide(SqlitePersistence.layerMemory)),
+);
+
 it.effect.each(["recreated under the same id", "moved to another project"] as const)(
   "a first run never binds its thread to a task %s",
   (change) =>
