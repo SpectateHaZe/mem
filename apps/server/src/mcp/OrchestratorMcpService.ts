@@ -2445,7 +2445,15 @@ const make = Effect.gen(function* () {
       const isRetryOfAcceptedDelegation = yield* threadManagement.hasReceipt(commandId);
       const lowUsage = yield* serverSettings.getSettings.pipe(
         Effect.map(({ lowUsageThreads }) =>
-          lowUsageThreads.find((entry) => entry.threadId === parent.thread.id),
+          lowUsageThreads.find(
+            (entry) =>
+              entry.threadId === parent.thread.id &&
+              // A removed or disabled subagent provider pauses the mode, as for the lead's prompt.
+              providers.some(
+                (provider) =>
+                  provider.instanceId === entry.subagentModel.instanceId && provider.enabled,
+              ),
+          ),
         ),
         Effect.orElseSucceed(() => undefined),
       );
