@@ -26,7 +26,10 @@ export const describeAutonomy = (threads: ReadonlyArray<MemWatchedThread>, nowMs
     ...waiting.map((thread) =>
       thread.waitingFor === "budget"
         ? `One session waits for the spending cap until ${timeLabel(thread.waitingUntilMs!)}.`
-        : `One session waits for its usage limit until ${timeLabel(thread.waitingUntilMs!)}.`,
+        : thread.waitingFor === "usage"
+          ? `One session waits for its usage limit until ${timeLabel(thread.waitingUntilMs!)}.`
+          : // A failed round, a reviewer that did not answer, or no review model: not a limit.
+            `One session is paused until ${timeLabel(thread.waitingUntilMs!)}.`,
     ),
     rounds > 0 ? `${rounds} round${rounds === 1 ? "" : "s"} committed recently.` : null,
     latest === undefined ? null : `Latest: ${latest}`,

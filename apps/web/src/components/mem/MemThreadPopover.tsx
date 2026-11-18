@@ -14,6 +14,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
+import { useEnvironment } from "~/state/environments";
 import { useEnvironmentQuery, useEnvironmentQueryRefresh } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
 import { useAtomCommand } from "~/state/use-atom-command";
@@ -62,6 +63,10 @@ export function MemThreadPopover(props: {
   const [busy, setBusy] = useState<"lifecycle" | "approval" | "priority" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const watching = props.lifecycle === "in_progress";
+  // Marked in progress is not the same as watched: with Mem off, nothing acts on the mark.
+  const memOn =
+    useEnvironment(threadRef.environmentId)?.serverConfig?.settings.mem.enabled === true;
+  const memWatching = watching && memOn;
 
   const mark = async (lifecycle: ThreadLifecycle) => {
     if (busy !== null || !canOperate) return;
@@ -136,8 +141,8 @@ export function MemThreadPopover(props: {
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
         <PopoverTitle>Mem</PopoverTitle>
-        <Badge size="sm" variant={watching ? "info" : "outline"}>
-          {watching ? "Watching" : "Not watching"}
+        <Badge size="sm" variant={memWatching ? "info" : "outline"}>
+          {memWatching ? "Watching" : watching ? "Mem is off" : "Not watching"}
         </Badge>
       </div>
 
@@ -145,9 +150,11 @@ export function MemThreadPopover(props: {
         <p className="text-muted-foreground text-xs">
           {isLoading
             ? "Checking what Mem thinks of this thread."
-            : watching
+            : memWatching
               ? "Mem is watching this thread but has not reviewed it yet."
-              : "Mem has not reviewed this thread."}
+              : watching
+                ? "Turn Mem on in Settings for it to watch this thread."
+                : "Mem has not reviewed this thread."}
         </p>
       ) : (
         <div className="space-y-1.5 rounded-md border p-2">

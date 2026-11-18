@@ -36,4 +36,10 @@ describe("describeAutonomy", () => {
     expect(text).toContain("waits for its usage limit");
     expect(text).toContain("Latest: darker sidebar");
   });
+
+  it("names a usage limit only when that is what Mem waits for", () => {
+    const text = describeAutonomy([watched({ waitingUntilMs: 10, waitingFor: null })], 0);
+    expect(text).toContain("is paused until");
+    expect(text).not.toContain("usage limit");
+  });
 });
