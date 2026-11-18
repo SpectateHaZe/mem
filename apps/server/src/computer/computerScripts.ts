@@ -80,7 +80,11 @@ export const actScript = (
     return { script: `${PRELUDE}[System.Windows.Forms.SendKeys]::SendWait($env:MEM_KEYS)`, keys };
   }
   if (input.x === undefined || input.y === undefined) return `\`${input.action}\` needs x and y.`;
-  const move = `[Mem.U]::SetCursorPos([int](${input.x} / $s), [int](${input.y} / $s)) | Out-Null`;
+  // Cursor positions span every monitor; keep a point past the screenshot's edge on the
+  // primary screen the agent can see instead of another monitor.
+  const axis = (value: number, size: string) =>
+    `[int][Math]::Min(${size} - 1, [Math]::Max(0, ${value} / $s))`;
+  const move = `[Mem.U]::SetCursorPos(${axis(input.x, "$b.Width")}, ${axis(input.y, "$b.Height")}) | Out-Null`;
   if (input.action === "move") return { script: `${PRELUDE}${move}` };
   if (input.action === "scroll") {
     if (input.amount === undefined) return "`scroll` needs amount.";

@@ -31,6 +31,13 @@ it("keeps typed text out of the script source", () => {
   assert.notInclude(result.script, "rm -rf");
 });
 
+it("keeps the cursor on the primary screen the screenshot shows", () => {
+  const result = actScript({ action: "click", x: 1300, y: -5 });
+  if (typeof result === "string") return assert.fail(result);
+  assert.include(result.script, "[Math]::Min($b.Width - 1, [Math]::Max(0, 1300 / $s))");
+  assert.include(result.script, "[Math]::Min($b.Height - 1, [Math]::Max(0, -5 / $s))");
+});
+
 it("explains missing arguments", () => {
   const cases: ReadonlyArray<ComputerActInput> = [
     { action: "click" },
