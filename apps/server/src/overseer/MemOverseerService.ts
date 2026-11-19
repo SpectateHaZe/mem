@@ -92,6 +92,7 @@ import {
 } from "./MemOverseerTaskStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
+import * as SpendingCapState from "../orchestration-v2/SpendingCapState.ts";
 import * as ProviderInstanceRegistry from "../provider/ProviderInstanceRegistry.ts";
 import * as ServerSettings from "../serverSettings.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
@@ -467,6 +468,15 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         ? [MEM_NO_CHANGES_BATCH]
         : plan.batches.slice(0, MEM_REVIEW_MAX_BATCHES);
     for (const batch of batches) {
+      // Reviews make model calls outside any run, so the run-level daily cap never sees them.
+      if ((yield* Ref.get(SpendingCapState.currentHit)) !== undefined) {
+        return {
+          type: "parked",
+          result: null,
+          reason: "the daily spending cap was reached",
+          costUsd,
+        };
+      }
       const budget = decideSpend({
         capUsd: mem.spendingCapUsd,
         spentUsd,

@@ -13,6 +13,7 @@ import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
 import * as Layer from "effect/Layer";
 import * as Path from "effect/Path";
+import * as Ref from "effect/Ref";
 import { describe, expect, it } from "vite-plus/test";
 
 import * as ServerConfig from "../config.ts";
@@ -40,6 +41,7 @@ import {
   type MemOverseerThread,
   type MemReviewPlan,
 } from "./MemOverseerService.ts";
+import * as SpendingCapState from "../orchestration-v2/SpendingCapState.ts";
 import { newTaskRecord, type MemOverseerTaskRecord } from "./MemOverseerTaskStore.ts";
 import { buildReviewContext } from "./MemReviewContext.ts";
 import { sumSpendInWindow, type MemSpendEntry } from "./MemSpendingCap.ts";
@@ -834,6 +836,18 @@ describe("MemOverseerService batched review", () => {
     expect(harness.store.get("thread-1")?.task.phase).toBe("parked");
     expect(harness.store.get("thread-1")?.settledPhase).toBe("parked");
     expect(harness.store.get("thread-1")?.spentUsd).toBe(2 * MEM_ESTIMATED_REVIEW_USD);
+  });
+
+  it("does not review once the daily spending cap is reached", async () => {
+    await run(Ref.set(SpendingCapState.currentHit, { spentUsd: 10, capUsd: 10 }));
+    try {
+      const harness = makeHarness({ reviewResults: [ACCEPT] });
+      await run(harness.tick());
+      expect(harness.reviews).toStrictEqual([]);
+      expect(harness.store.get("thread-1")?.task.phase).toBe("parked");
+    } finally {
+      await run(Ref.set(SpendingCapState.currentHit, undefined));
+    }
   });
 
   it("charges every review batch to the budget", async () => {
