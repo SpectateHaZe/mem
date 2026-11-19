@@ -588,9 +588,13 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
       if (failedAfterSend || silentAfterSend) {
         const failedRounds = record.failedRounds + 1;
         const escalate = failedRounds >= MEM_MAX_FAILED_ROUNDS;
-        // Nothing came of the turn, so nothing is charged for it.
+        // Nothing came of the turn, but a turn that ran still cost money; a run that failed
+        // before any turn finished is not charged (settleTurnCharge keeps that pending).
+        const charged = record.pendingCharge
+          ? yield* settleTurnCharge(record, thread, autonomous)
+          : record;
         yield* ports.store.put({
-          ...record,
+          ...charged,
           failedRounds,
           pendingCharge: false,
           deliveredInstruction: null,

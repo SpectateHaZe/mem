@@ -1355,6 +1355,8 @@ describe("MemOverseerService failed rounds", () => {
     expect(harness.reviews).toStrictEqual([]);
     expect(harness.commits).toStrictEqual([]);
     expect(store.get("thread-1")?.failedRounds).toBe(1);
+    // The turn ran, so it still counts against Mem's cap (at the estimate when no cost is reported).
+    expect(harness.spend.map((entry) => entry.usd)).toStrictEqual([MEM_ESTIMATED_TURN_USD]);
   });
 
   it("does not count a failure from before the instruction was sent", async () => {
