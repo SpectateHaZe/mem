@@ -2,7 +2,12 @@ import { assert, it } from "@effect/vitest";
 import { ProviderDriverKind, ProviderInstanceId, type ServerProvider } from "@t3tools/contracts";
 import { isSubscriptionBilledProvider } from "@t3tools/shared/providerBilling";
 
-import { billableSpendUsd, localUsageDay, subscriptionUsageProviders } from "./SpendingCap.ts";
+import {
+  awaitsLoginCheck,
+  billableSpendUsd,
+  localUsageDay,
+  subscriptionUsageProviders,
+} from "./SpendingCap.ts";
 import { spendingCapHit, startsWork } from "./SpendingCapState.ts";
 
 function provider(
@@ -97,4 +102,15 @@ it("treats only run creation as starting work", () => {
   assert.isTrue(startsWork([event("thread.updated"), event("run.created")]));
   assert.isTrue(startsWork([event("run-attempt.created")]));
   assert.isFalse(startsWork([event("thread.updated")]));
+});
+
+it("waits for an enabled usage provider's first login check", () => {
+  const unchecked = { ...provider("codex", "codex", { status: "unknown" }), enabled: true };
+  const checked = {
+    ...provider("codex", "codex", { status: "authenticated", type: "chatgpt" }),
+    enabled: true,
+  };
+  assert.isTrue(awaitsLoginCheck([checked, unchecked]));
+  assert.isFalse(awaitsLoginCheck([checked]));
+  assert.isFalse(awaitsLoginCheck([{ ...unchecked, enabled: false }]));
 });

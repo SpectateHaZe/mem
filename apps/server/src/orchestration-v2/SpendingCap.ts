@@ -19,6 +19,8 @@ import * as ThreadManagement from "./ThreadManagementService.ts";
 const CHECK_INTERVAL_MS = 60_000;
 // Longer than any local day, so a thread used today is always included.
 const SESSION_LOOKBACK_MS = 48 * 60 * 60 * 1000;
+/** How long after start the cap waits for provider logins to be checked. */
+const STARTUP_LOGIN_WAIT_MS = 3 * 60_000;
 const decodeUsageDay = Schema.decodeSync(UsageDay);
 
 // en-CA formats as YYYY-MM-DD.
@@ -50,6 +52,19 @@ export function subscriptionUsageProviders(
   return new Set([...subscription].filter((kind) => !metered.has(kind)));
 }
 
+/**
+ * A login reads "unknown" until its first status check; counted then, a subscription's usage
+ * would bill at list price and trip the cap for every agent right after a restart.
+ */
+export function awaitsLoginCheck(providers: ReadonlyArray<ServerProvider>): boolean {
+  return providers.some(
+    (provider) =>
+      provider.enabled &&
+      provider.auth.status === "unknown" &&
+      USAGE_PROVIDER_BY_DRIVER.has(provider.driver),
+  );
+}
+
 /** Estimated pay-per-use cost only; subscription plans contribute nothing to the cap. */
 export function billableSpendUsd(
   buckets: ReadonlyArray<{ readonly provider: UsageProviderKind; readonly costUsd: number }>,
@@ -68,6 +83,7 @@ const makeSweep = Effect.gen(function* () {
   const providerInstances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
   let lastCheckMs = 0;
   let lastCap: number | null | undefined;
+  const startedAtMs = DateTime.toEpochMillis(yield* DateTime.now);
 
   return Effect.fn("SpendingCapWorker.sweep")(function* () {
     const { dailySpendCapUsd: capUsd } = yield* settings.getSettings;
@@ -76,8 +92,16 @@ const makeSweep = Effect.gen(function* () {
     if (capUsd === lastCap && nowMs - lastCheckMs < CHECK_INTERVAL_MS) return;
     lastCap = capUsd;
     lastCheckMs = nowMs;
-    if (capUsd === null) {
-      yield* Ref.set(currentHit, undefined);
+    // No early return without a cap: "spent today" is shown either way, and a null cap never hits.
+
+    const providers = yield* Effect.forEach(
+      yield* providerInstances.listInstances,
+      (instance) => instance.snapshot.getSnapshot,
+    );
+    // shortcut: only at startup; a login that falls back to "unknown" mid-day still counts as
+    // metered. Retry on the next tick instead of waiting a minute.
+    if (nowMs - startedAtMs < STARTUP_LOGIN_WAIT_MS && awaitsLoginCheck(providers)) {
+      lastCheckMs = 0;
       return;
     }
 
@@ -93,10 +117,6 @@ const makeSweep = Effect.gen(function* () {
       timeZone,
       sessionIds,
     });
-    const providers = yield* Effect.forEach(
-      yield* providerInstances.listInstances,
-      (instance) => instance.snapshot.getSnapshot,
-    );
     const spentUsd = billableSpendUsd(summary.buckets, subscriptionUsageProviders(providers));
     yield* Ref.set(lastSpentUsd, spentUsd);
     const hit = spendingCapHit(spentUsd, capUsd);
