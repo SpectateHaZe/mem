@@ -365,6 +365,10 @@ function relativeLabel(value: string | null, nowMs: number): string {
 }
 
 // Use the label's minute tick because the compiler caches render-time Date.now() on the timestamp.
+// String(error) reads "Error: …" or "[object Object]".
+const failureText = (failure: unknown) =>
+  failure instanceof Error && failure.message.trim() !== "" ? failure.message : "Try again.";
+
 export function ScheduledRelativeLabel(props: { value: string | null }) {
   const nowMinute = useNowMinute();
   return relativeLabel(props.value, Date.parse(`${nowMinute}:00.000Z`));
@@ -771,6 +775,15 @@ function ScheduledTaskRow({
   });
   const act = async (action: "toggle" | "run" | "delete") => {
     if (busy || !readEnvironmentScope(environmentId, AuthOrchestrationOperateScope)) return;
+    if (action === "delete") {
+      // Delete sits next to Run now in the menu and cannot be undone.
+      const message = `Delete "${task.title}"?
+Its schedule and settings are lost.`;
+      const confirmed =
+        (await requestConfirmDialog(message, { variant: "destructive" })) ??
+        window.confirm(message);
+      if (!confirmed) return;
+    }
     setBusy(true);
     const result =
       action === "toggle"
@@ -784,7 +797,7 @@ function ScheduledTaskRow({
         stackedThreadToast({
           type: "error",
           title: "Could not update scheduled task",
-          description: String(squashAtomCommandFailure(result)),
+          description: failureText(squashAtomCommandFailure(result)),
         }),
       );
     }
@@ -1108,7 +1121,7 @@ function WebhookEndpointField({
         stackedThreadToast({
           type: "error",
           title: "Could not rotate webhook URL",
-          description: String(squashAtomCommandFailure(result)),
+          description: failureText(squashAtomCommandFailure(result)),
         }),
       );
     }
