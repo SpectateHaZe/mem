@@ -22,6 +22,7 @@ import * as ChildProcess from "effect/process/ChildProcess";
 import * as ChildProcessSpawner from "effect/process/ChildProcessSpawner";
 
 import * as AntigravityInstallation from "./AntigravityInstallation.ts";
+import * as ModelManifest from "./ModelManifest.ts";
 import { type AntigravityReleaseAsset } from "./antigravityRelease.ts";
 
 const serverContents = "antigravity runtime\n";
@@ -126,6 +127,8 @@ interface HarnessOptions {
   readonly spawner?: ChildProcessSpawner.ChildProcessSpawner["Service"];
   readonly validate?: AntigravityInstallation.AntigravityInstallationOptions["validate"];
   readonly useDefaultValidation?: boolean;
+  readonly native?: boolean;
+  readonly nativeVersion?: string;
 }
 
 const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
@@ -133,6 +136,7 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
 ) {
   const fs = yield* FileSystem.FileSystem;
   const path = yield* Path.Path;
+  const digest = yield* Digest.Digest;
   const baseDir =
     options.baseDir ?? (yield* fs.makeTempDirectoryScoped({ prefix: "t3-agy-test-" }));
   const platform = options.platform ?? hostPlatform;
@@ -168,7 +172,7 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
   });
   const installation = yield* AntigravityInstallation.makeAntigravityInstallation({
     baseDir,
-    releaseAsset: asset,
+    ...(options.native ? {} : { releaseAsset: asset }),
     ...(options.useDefaultValidation
       ? {}
       : {
@@ -185,11 +189,37 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
     Effect.provideService(HostProcess.Platform, platform),
     Effect.provideService(HostProcess.Architecture, arch),
     Effect.provideService(HostProcess.Environment, { PATH: options.path ?? "" }),
+    Effect.provideService(ModelManifest.ModelManifest, {
+      current: Effect.succeed(ModelManifest.BUNDLED_MODEL_MANIFEST),
+      refresh: Effect.succeed(ModelManifest.BUNDLED_MODEL_MANIFEST),
+      forceRefresh: Effect.succeed(ModelManifest.BUNDLED_MODEL_MANIFEST),
+      refreshInBackground: Effect.void,
+    }),
     Effect.provideService(
       HttpClient.HttpClient,
       HttpClient.make((request) =>
-        Effect.sync(() => {
+        Effect.suspend(() => {
           requests.push(request.url);
+          if (request.url.includes("/manifests/")) {
+            return Effect.gen(function* () {
+              const version = options.nativeVersion ?? "1.5.7";
+              const onWindows = platform === "win32";
+              const folder = onWindows ? "windows-x64" : "linux-x64";
+              const extension = onWindows ? "exe" : "tar.gz";
+              return HttpClientResponse.fromWeb(
+                request,
+                new Response(
+                  JSON.stringify({
+                    version,
+                    url: `https://storage.googleapis.com/antigravity-public/antigravity-cli/${version}-123/${folder}/cli_${onWindows ? "windows" : "linux"}_x64.${extension}`,
+                    sha512: Hex.encode(
+                      yield* digest.digest(Digest.sha512, archive).pipe(Effect.orDie),
+                    ),
+                  }),
+                ),
+              );
+            });
+          }
           const response = HttpClientResponse.fromWeb(
             request,
             new Response(null, {
@@ -203,15 +233,17 @@ const makeHarness = Effect.fn("test.makeAntigravityInstallation")(function* (
               },
             }),
           );
-          return Object.defineProperty(response, "stream", {
-            value:
-              options.body ??
-              Stream.make(
-                archive.subarray(0, 31),
-                archive.subarray(31, 149),
-                archive.subarray(149),
-              ),
-          });
+          return Effect.succeed(
+            Object.defineProperty(response, "stream", {
+              value:
+                options.body ??
+                Stream.make(
+                  archive.subarray(0, 31),
+                  archive.subarray(31, 149),
+                  archive.subarray(149),
+                ),
+            }),
+          );
         }),
       ),
     ),
@@ -242,6 +274,26 @@ const expectPreviousRelease = Effect.fn("test.expectPreviousAntigravityRelease")
 });
 
 it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity installation", (it) => {
+  it.effect("installs the native CLI from Google's channel so newer Gemini models load", () =>
+    Effect.gen(function* () {
+      const { installation, fs, requests, validations } = yield* makeHarness({
+        native: true,
+        platform: "win32",
+        archive: Buffer.from(serverContents),
+      });
+      yield* installation.start;
+      expect(yield* terminalState(installation)).toMatchObject({
+        phase: "succeeded",
+        installedVersion: "1.5.7",
+      });
+      const resolved = yield* installation.resolve();
+      expect(resolved).toMatchObject({ source: "managed", version: "1.5.7", harnessPath: null });
+      expect(validations[0]?.executable.harnessPath).toBeNull();
+      expect(yield* fs.readFileString(resolved.executablePath)).toBe(serverContents);
+      expect(requests.some((url) => url.includes("/manifests/"))).toBe(true);
+    }),
+  );
+
   it.effect("reports missing Node before downloading the standalone provider runtime", () =>
     Effect.gen(function* () {
       const { installation, requests, validations } = yield* makeHarness();
@@ -297,7 +349,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))("Antigravity inst
       expect(yield* fs.readFileString(selected.executablePath)).toBe(serverContents);
       expect(yield* fs.readFileString(selected.harnessPath!)).toBe(harnessContents);
       expect(yield* fs.readDirectory(path.join(installation.managedDirectory, "versions"))).toEqual(
-        expect.arrayContaining([previousReleaseId, (yield* releaseAsset()).sha256]),
+        [(yield* releaseAsset()).sha256],
       );
       expect(requests).toEqual([(yield* releaseAsset()).url]);
     }),

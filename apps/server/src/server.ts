@@ -605,6 +605,8 @@ const layerProviderInstallationRefresh = Layer.effectDiscard(
     const codex = yield* CodexInstallation.CodexInstallation;
     const instances = yield* ProviderInstanceRegistry.ProviderInstanceRegistry;
     const providers = yield* ProviderRegistry.ProviderRegistry;
+    // Google ships new models with new CLI releases, so learn about one without waiting for a click.
+    yield* antigravity.checkForUpdate.pipe(Effect.forkScoped);
     yield* Stream.merge(
       antigravity.changes.pipe(
         Stream.changesWith((a, b) => a.installedVersion === b.installedVersion),

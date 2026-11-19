@@ -22,7 +22,6 @@ import {
   ProviderCompatibilityPolicy,
   resolveProviderCompatibility,
 } from "./providerCompatibility.ts";
-import { resolveAntigravityReleaseAsset } from "./antigravityRelease.ts";
 import bundledManifest from "./model-manifest.json" with { type: "json" };
 
 const decodeCompatibilityPolicies = Schema.decodeUnknownSync(
@@ -137,15 +136,14 @@ describe("provider compatibility", () => {
     ["darwin", "arm64"],
     ["win32", "x64"],
   ] as const)(
-    "supports the managed Antigravity runtime for %s-%s in the bundled manifest",
-    (platform, arch) => {
+    "supports the last pinned Antigravity runtime for %s-%s in the bundled manifest",
+    (_platform, _arch) => {
       const policies = decodeCompatibilityPolicies(bundledManifest.compatibility);
-      const release = resolveAntigravityReleaseAsset(platform, arch);
       assert.strictEqual(
         resolveProviderCompatibility(
           policies,
           ProviderDriverKind.make("antigravity"),
-          `agy_acp_server_${release?.version}`,
+          "agy_acp_server_1.4.5",
         )?.status,
         "supported",
       );
