@@ -588,6 +588,15 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["usage quota rate limit reset recover continue"],
   },
   {
+    id: "mem-approvals",
+    title: "Waiting for your answer",
+    to: "/settings/threads",
+    scope: "environment-defaults",
+    searchTerms: [
+      "approval approve deny queue blocked destructive delete deletion waiting owner mem",
+    ],
+  },
+  {
     id: "mem-overseer",
     title: "Mem overseer",
     to: "/settings/threads",

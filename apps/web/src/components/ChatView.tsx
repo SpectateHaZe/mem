@@ -362,6 +362,7 @@ import { useDraftEnvironmentRouting } from "./chat/useDraftEnvironmentRouting";
 import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/ThreadActivityBanners";
 import { ThreadNow } from "./chat/ThreadNow";
 import { useMemSentMessagesBanner } from "./mem/MemSentMessages";
+import { useMemApprovalBanner } from "./mem/MemApprovalBanner";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useTimelineFollow } from "./chat/useTimelineFollow";
@@ -2552,7 +2553,14 @@ export default function ChatView(props: ChatViewProps) {
     isMemThread: serverThread !== null && isMemMasterThread(serverThread.source),
     onOpenThread: onOpenRelatedThreadStable,
   });
-  const memSentItems = memSentBannerItem === null ? [] : [memSentBannerItem];
+  const memApprovalBannerItem = useMemApprovalBanner({
+    environmentId,
+    isMemThread: serverThread !== null && isMemMasterThread(serverThread.source),
+    onOpenThread: onOpenRelatedThreadStable,
+  });
+  const memSentItems = [memApprovalBannerItem, memSentBannerItem].filter(
+    (item): item is ComposerBannerStackItem => item !== null,
+  );
   const composerBannerItems = (() => {
     const fallbackSelection = draftFallback?.selection;
     const defaultSelection =

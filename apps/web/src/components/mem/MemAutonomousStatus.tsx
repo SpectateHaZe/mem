@@ -4,7 +4,7 @@ import { useNowMinute } from "~/hooks/useNowMinute";
 import { useEnvironment } from "~/state/environments";
 import { useEnvironmentQuery } from "~/state/query";
 
-import { memWatchedThreadsAtom } from "./memOverseer";
+import { memPendingApprovalsAtom, memWatchedThreadsAtom } from "./memOverseer";
 
 const timeLabel = (ms: number) =>
   new Date(ms).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -56,6 +56,7 @@ export const describeAutonomyBrief = (threads: ReadonlyArray<MemWatchedThread>, 
 /**
  * Mem's card sub-line. With autonomous mode on it says what Mem is doing right now, so the owner
  * does not have to open Mem's chat to find out; otherwise it keeps the line the card always had.
+ * A queued instruction wins the line: it is the only thing Mem cannot decide alone.
  */
 export function MemCardStatusLine(props: {
   readonly environmentId: EnvironmentId;
@@ -63,8 +64,11 @@ export function MemCardStatusLine(props: {
 }) {
   const mem = useEnvironment(props.environmentId)?.serverConfig?.settings.mem;
   const { data } = useEnvironmentQuery(memWatchedThreadsAtom(props.environmentId));
+  const { data: approvals } = useEnvironmentQuery(memPendingApprovalsAtom(props.environmentId));
   const nowIso = useNowMinute();
   if (mem?.autonomous !== true || data === null) return <>{props.fallback}</>;
+  const waiting = approvals?.approvals.length ?? 0;
+  if (waiting > 0) return <>{`${waiting} approval${waiting === 1 ? "" : "s"} waiting`}</>;
   return <>{describeAutonomyBrief(data.threads, new Date(nowIso).getTime())}</>;
 }
 

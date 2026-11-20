@@ -110,6 +110,7 @@ import { BackgroundActivitySettingsRow } from "./BackgroundActivitySettings";
 import { AdvancedSettings } from "./AdvancedSettings";
 import { PullRequestLinksOpenInAppSetting } from "./IntegrationsSettings";
 import { StorageCleanupSections } from "./StorageSettings";
+import { MemApprovalsSection } from "./MemApprovalsSection";
 import { MemOverseerSettingsSection } from "./MemOverseerSettings";
 import { UpdateTrackSwitchDialog } from "./UpdateTrackSwitchDialog";
 import { environmentIdsKey } from "~/state/environmentAtomList";
@@ -1903,6 +1904,8 @@ export function ThreadsSettingsPanel() {
           }
         />
       </SettingsSection>
+
+      <MemApprovalsSection />
 
       <MemOverseerSettingsSection />
 
