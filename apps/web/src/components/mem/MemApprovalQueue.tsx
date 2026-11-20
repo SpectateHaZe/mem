@@ -90,6 +90,11 @@ function MemApprovalRow(props: {
           This session is mid-turn; approving now would be refused. Deny or wait for it to finish.
         </p>
       ) : null}
+      {canOperate ? null : (
+        <p className="text-muted-foreground text-xs">
+          You do not have permission to answer Mem on this machine.
+        </p>
+      )}
     </div>
   );
 }
