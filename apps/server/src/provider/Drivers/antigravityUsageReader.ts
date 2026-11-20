@@ -102,9 +102,17 @@ const MODEL_IDS: Record<number, string> = {
   1047: "gemini-3-flash-preview",
 };
 
+// LiteLLM's catalogue spells a few models differently from Antigravity's runtime. Without this the
+// records price at $0, which hides real spend; each target is the same model at its list price.
+const RATE_MODEL_ALIASES: Readonly<Record<string, string>> = {
+  "gemini-2.5-flash-thinking": "gemini/gemini-2.5-flash",
+  "gemini-3.1-pro": "gemini/gemini-3.1-pro-preview",
+};
+
 // ACP slugs append the thinking level, which shares the base model's price.
 function withRateModel(record: UsageRecord): UsageRecord {
-  const rateModel = record.model.replace(/-(?:low|medium|high)$/, "");
+  const base = record.model.replace(/-(?:low|medium|high)$/, "");
+  const rateModel = RATE_MODEL_ALIASES[base] ?? base;
   return rateModel === record.model ? record : { ...record, rateModel };
 }
 

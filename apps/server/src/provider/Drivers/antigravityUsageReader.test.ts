@@ -169,7 +169,12 @@ describe("readAntigravityUsage", () => {
       yield* seedDatabase(path.join(dir, "effort.db"), (db) =>
         Effect.gen(function* () {
           yield* createTables(db);
-          for (const [idx, name] of ["gemini-4-argon-high", "gemini-4-argon"].entries()) {
+          for (const [idx, name] of [
+            "gemini-4-argon-high",
+            "gemini-4-argon",
+            "gemini-3.1-pro-high",
+            "Gemini 2.5 Flash Thinking",
+          ].entries()) {
             yield* db.run("INSERT INTO gen_metadata VALUES (?, ?)", [
               idx,
               new Uint8Array(protoBytes(1, protoText(19, name))),
@@ -187,6 +192,9 @@ describe("readAntigravityUsage", () => {
         [
           ["gemini-4-argon-high", "gemini-4-argon"],
           ["gemini-4-argon", undefined],
+          // The catalogue spells these differently; unaliased they would price at $0.
+          ["gemini-3.1-pro-high", "gemini/gemini-3.1-pro-preview"],
+          ["gemini-2.5-flash-thinking", "gemini/gemini-2.5-flash"],
         ],
       );
     }).pipe(Effect.provide(NodeServices.layer)),
