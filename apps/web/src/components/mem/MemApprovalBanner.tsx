@@ -76,9 +76,11 @@ export function useMemApprovalBanner(input: {
     memPendingApprovalsAtom(input.isMemThread ? input.environmentId : null),
   );
   const { busyApprovalId, error, decide } = useAnswerMemApproval(input.environmentId);
+  // Keyed by the queue entry, not the instruction: Mem can re-queue the same text later, and that
+  // new entry has to show up again.
   const [answered, setAnswered] = useState<ReadonlyArray<string>>([]);
   const approvals = (query.data?.approvals ?? [])
-    .filter((approval) => !answered.includes(approval.approvalId))
+    .filter((approval) => !answered.includes(`${approval.approvalId}:${approval.createdAtMs}`))
     .slice(0, SHOWN);
   if (!input.isMemThread || approvals.length === 0) return null;
   return {
@@ -100,7 +102,10 @@ export function useMemApprovalBanner(input: {
               void decide(target, decision).then((outcome) => {
                 // A failed send leaves the instruction queued, so it has to stay visible.
                 if (outcome === "answered" || outcome === "already-answered") {
-                  setAnswered((current) => [...current, target.approvalId]);
+                  setAnswered((current) => [
+                    ...current,
+                    `${target.approvalId}:${target.createdAtMs}`,
+                  ]);
                 }
                 query.refresh();
               });
