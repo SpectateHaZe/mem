@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import type { ThreadLifecycle } from "@t3tools/client-runtime/state/models";
 import {
   isAtomCommandInterrupted,
@@ -14,6 +15,7 @@ import { useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 
 import { useComposerDraftStore } from "~/composerDraftStore";
+import { useQuietThreadShell } from "~/state/entities";
 import { useEnvironment } from "~/state/environments";
 import { useEnvironmentQuery, useEnvironmentQueryRefresh } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
@@ -62,6 +64,9 @@ export function MemThreadPopover(props: {
     watched?.threads.find((entry) => entry.threadId === threadRef.threadId)?.priority ?? "normal";
   const [busy, setBusy] = useState<"lifecycle" | "approval" | "priority" | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const shell = useQuietThreadShell(threadRef);
+  // Mem refuses to steer a running turn, so the popover does not offer it either.
+  const threadRunning = threadRuntimeIsActive(shell?.runtime);
   const watching = props.lifecycle === "in_progress";
   // Marked in progress is not the same as watched: with Mem off, nothing acts on the mark.
   const memOn =
@@ -186,9 +191,10 @@ export function MemThreadPopover(props: {
           </pre>
           <div className="flex gap-2">
             <Button
-              disabled={!canOperate || busy !== null}
+              disabled={!canOperate || busy !== null || threadRunning}
               onClick={() => void answerPendingApproval("approve")}
               size="compact"
+              title={threadRunning ? "Wait until this session's turn ends." : undefined}
             >
               Approve
             </Button>
@@ -201,6 +207,11 @@ export function MemThreadPopover(props: {
               Deny
             </Button>
           </div>
+          {threadRunning ? (
+            <p className="text-muted-foreground text-xs">
+              This session is mid-turn; Deny works now, Approve waits for it to finish.
+            </p>
+          ) : null}
         </div>
       )}
 

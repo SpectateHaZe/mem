@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import {
   AuthOrchestrationOperateScope,
   ThreadId,
@@ -30,6 +31,8 @@ function ApprovalRow(props: {
   const shell = useQuietThreadShell(
     scopeThreadRef(props.environmentId, ThreadId.make(props.approval.threadId)),
   );
+  // Approving a running turn is always refused, so do not offer it there.
+  const running = threadRuntimeIsActive(shell?.runtime);
   return (
     <li className="flex min-w-0 items-start gap-2">
       <div className="min-w-0 flex-1">
@@ -40,8 +43,9 @@ function ApprovalRow(props: {
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <InlineButton
-          disabled={!canOperate || props.busy}
+          disabled={!canOperate || props.busy || running}
           onClick={() => props.onDecide(props.approval, "approve")}
+          title={running ? "Wait until this session's turn ends." : undefined}
         >
           Approve
         </InlineButton>

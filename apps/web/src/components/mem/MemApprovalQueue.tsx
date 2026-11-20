@@ -1,4 +1,5 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import { threadRuntimeIsActive } from "@t3tools/client-runtime/state/models";
 import {
   AuthOrchestrationOperateScope,
   ThreadId,
@@ -40,6 +41,8 @@ function MemApprovalRow(props: {
     scopeThreadRef(props.environmentId, ThreadId.make(approval.threadId)),
   );
   const nowIso = useNowMinute();
+  // Mem refuses to steer a turn that is already running, so offering Approve there only fails.
+  const running = threadRuntimeIsActive(shell?.runtime);
 
   const openSession = () => {
     void navigate({
@@ -63,9 +66,10 @@ function MemApprovalRow(props: {
       </pre>
       <div className="flex flex-wrap gap-2">
         <Button
-          disabled={!canOperate || props.busy}
+          disabled={!canOperate || props.busy || running}
           onClick={() => props.onDecide(approval, "approve")}
           size="compact"
+          title={running ? "Wait until this session's turn ends." : undefined}
         >
           Approve
         </Button>
@@ -81,6 +85,11 @@ function MemApprovalRow(props: {
           Open session
         </Button>
       </div>
+      {running ? (
+        <p className="text-muted-foreground text-xs">
+          This session is mid-turn; approving now would be refused. Deny or wait for it to finish.
+        </p>
+      ) : null}
     </div>
   );
 }
