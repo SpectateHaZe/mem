@@ -52,8 +52,9 @@ account.
 ## Runtime installation
 
 Managed installation supports Apple Silicon macOS, Linux x64 or ARM64, and Windows
-x64 or ARM64. Intel Macs can connect to a supported remote environment. Allow
-several GB of free disk space, especially on Linux.
+x64 or ARM64. It installs Google's current Antigravity CLI, so new models arrive
+with the runtime rather than waiting for an app update. Allow about 1.5 GB of free
+disk space. Intel Macs can connect to a supported remote environment.
 
 ### Use a manual installation
 
@@ -62,7 +63,11 @@ Extract the ACP executable and its `localharness_external` helper into the same
 directory, at the same version. Make both executable on macOS or Linux; Windows
 uses `.exe` files.
 
-Set **Binary path** to the ACP executable on the environment and update it yourself.
+The Antigravity CLI (1.5.0 and later) serves ACP itself and needs no helper, so a
+bare `agy` executable also works. Google ships new models with new CLI releases,
+so keeping the CLI current is how the model list stays up to date.
+
+Set **Binary path** to either executable on the environment and update it yourself.
 Leave the field blank to use the managed runtime, or a compatible executable on
 `PATH` if no managed runtime is installed.
 
