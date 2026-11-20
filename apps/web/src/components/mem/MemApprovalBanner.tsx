@@ -1,10 +1,16 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { ThreadId, type EnvironmentId, type MemPendingApproval } from "@t3tools/contracts";
+import {
+  AuthOrchestrationOperateScope,
+  ThreadId,
+  type EnvironmentId,
+  type MemPendingApproval,
+} from "@t3tools/contracts";
 import { ShieldAlertIcon } from "lucide-react";
 import { useState } from "react";
 
 import { useQuietThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
+import { useEnvironmentScope } from "~/state/session";
 
 import type { ComposerBannerStackItem } from "../chat/ComposerBannerStack";
 import { InlineButton } from "../ui/button";
@@ -20,6 +26,7 @@ function ApprovalRow(props: {
   readonly onDecide: (approval: MemPendingApproval, decision: "approve" | "deny") => void;
   readonly onOpenThread: (threadId: ThreadId) => void;
 }) {
+  const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
   const shell = useQuietThreadShell(
     scopeThreadRef(props.environmentId, ThreadId.make(props.approval.threadId)),
   );
@@ -33,13 +40,13 @@ function ApprovalRow(props: {
       </div>
       <div className="flex shrink-0 items-center gap-1">
         <InlineButton
-          disabled={props.busy}
+          disabled={!canOperate || props.busy}
           onClick={() => props.onDecide(props.approval, "approve")}
         >
           Approve
         </InlineButton>
         <InlineButton
-          disabled={props.busy}
+          disabled={!canOperate || props.busy}
           onClick={() => props.onDecide(props.approval, "deny")}
           tone="muted"
         >
@@ -90,8 +97,11 @@ export function useMemApprovalBanner(input: {
             environmentId={input.environmentId}
             onOpenThread={input.onOpenThread}
             onDecide={(target, decision) => {
-              void decide(target, decision).then(() => {
-                setAnswered((current) => [...current, target.approvalId]);
+              void decide(target, decision).then((outcome) => {
+                // A failed send leaves the instruction queued, so it has to stay visible.
+                if (outcome === "answered" || outcome === "already-answered") {
+                  setAnswered((current) => [...current, target.approvalId]);
+                }
                 query.refresh();
               });
             }}
