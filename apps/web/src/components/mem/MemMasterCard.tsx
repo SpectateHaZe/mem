@@ -1,21 +1,29 @@
+import type { EnvironmentId } from "@t3tools/contracts";
+
 import { BUILTIN_STICKER_SRC } from "~/lib/memStickers";
 import { cn } from "~/lib/utils";
+import { useEnvironment } from "~/state/environments";
+
+import { Badge } from "../ui/badge";
+import { MemCardStatusLine } from "./MemAutonomousStatus";
 
 /**
  * The Mem master thread as its own card above both sidebar lists. It is not a
  * thread row: it never sorts, drags, or joins a list.
  */
 export function MemMasterCard(props: {
+  readonly environmentId: EnvironmentId;
   readonly isActive: boolean;
   readonly isWatching: boolean;
   readonly statusLine: string;
   readonly onOpen: () => void;
 }) {
+  const autonomous =
+    useEnvironment(props.environmentId)?.serverConfig?.settings.mem.autonomous === true;
   return (
     <button
       type="button"
       aria-current={props.isActive ? "page" : undefined}
-      aria-label={`Open the Mem thread, ${props.statusLine}`}
       data-sidebar-row="mem-master"
       onClick={props.onOpen}
       className={cn(
@@ -32,8 +40,17 @@ export function MemMasterCard(props: {
         src={BUILTIN_STICKER_SRC[props.isWatching ? "mem-in-control" : "mem-happy"]}
       />
       <span className="flex min-w-0 flex-col">
-        <span className="truncate text-sm font-semibold text-sidebar-foreground">Mem</span>
-        <span className="truncate text-xs text-sidebar-muted-foreground">{props.statusLine}</span>
+        <span className="flex min-w-0 items-center gap-1.5">
+          <span className="truncate text-sm font-semibold text-sidebar-foreground">Mem</span>
+          {autonomous ? (
+            <Badge size="sm" variant="outline">
+              Auto
+            </Badge>
+          ) : null}
+        </span>
+        <span className="truncate text-xs text-sidebar-muted-foreground">
+          <MemCardStatusLine environmentId={props.environmentId} fallback={props.statusLine} />
+        </span>
       </span>
     </button>
   );

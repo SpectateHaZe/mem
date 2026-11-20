@@ -3317,6 +3317,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
             {memMasterThread === null ? null : (
               <div className="flex flex-col pt-2">
                 <MemMasterCard
+                  environmentId={memMasterThread.environmentId}
                   isActive={memMasterThreadKey === routeThreadKey}
                   isWatching={watchingThreadCount > 0}
                   statusLine={memMasterStatusLine}
