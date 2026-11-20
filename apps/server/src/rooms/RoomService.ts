@@ -39,6 +39,7 @@ import * as ServerSettings from "../serverSettings.ts";
 import { addAgentReply, addUserMessage, beginTurn, ENDED_RUN_STATUSES } from "./roomModerator.ts";
 import { makeEndedRunTracker } from "./endedRuns.ts";
 import { readLimitStop } from "./limitStops.ts";
+import { distinctBySpend } from "./roomListUpdates.ts";
 
 const RoomsFile = Schema.fromJsonString(Schema.Array(Room));
 const decodeRooms = Schema.decodeUnknownEffect(RoomsFile);
@@ -284,9 +285,18 @@ const make = Effect.gen(function* () {
       Stream.unwrap(
         Effect.gen(function* () {
           const subscription = yield* PubSub.subscribe(changes);
+          // Spend moves on runs, not rooms, so the sidebar's figure needs its own check; the
+          // predicate keeps an unchanged number from resending every transcript.
+          const spendChanges = Stream.tick("30 seconds").pipe(
+            Stream.mapEffect(() => list),
+            distinctBySpend,
+          );
           return Stream.concat(
             Stream.fromEffect(list),
-            Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => list)),
+            Stream.merge(
+              Stream.fromSubscription(subscription).pipe(Stream.mapEffect(() => list)),
+              spendChanges,
+            ),
           );
         }),
       ),
