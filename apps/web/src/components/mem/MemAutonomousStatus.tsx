@@ -20,7 +20,12 @@ export const describeAutonomy = (threads: ReadonlyArray<MemWatchedThread>, nowMs
   );
   const rounds = active.reduce((sum, thread) => sum + thread.roundSummaries.length, 0);
   const latest = active.flatMap((thread) => thread.roundSummaries.slice(-1)).at(-1);
-  if (active.length === 0) return "Mark a session In progress for Mem to start on it.";
+  if (active.length === 0) {
+    const parked = threads.filter((thread) => thread.phase === "parked").length;
+    return parked === 0
+      ? "Mark a session In progress for Mem to start on it."
+      : `${parked} session${parked === 1 ? " is" : "s are"} parked. Open its Mem menu for why.`;
+  }
   const working = active.length - waiting.length;
   const parts = [
     working > 0 ? `Working on ${working} session${working === 1 ? "" : "s"}.` : null,

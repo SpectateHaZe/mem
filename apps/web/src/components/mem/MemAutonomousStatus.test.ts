@@ -42,6 +42,12 @@ describe("describeAutonomy", () => {
     expect(text).toContain("is paused until");
     expect(text).not.toContain("usage limit");
   });
+
+  it("says parked work is parked instead of asking for a session", () => {
+    const text = describeAutonomy([watched({ phase: "parked" })], 0);
+    expect(text).toContain("1 session is parked");
+    expect(text).not.toContain("In progress");
+  });
 });
 
 describe("describeAutonomyBrief", () => {
