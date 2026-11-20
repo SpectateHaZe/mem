@@ -43,7 +43,13 @@ export const describeAutonomyBrief = (threads: ReadonlyArray<MemWatchedThread>, 
   const active = threads.filter(
     (thread) => thread.phase === "claimed" || thread.phase === "awaitingReview",
   );
-  if (active.length === 0) return "mark a session in progress";
+  if (active.length === 0) {
+    // A parked thread is work Mem is holding, not an empty queue; "mark one" would read as idle.
+    const parked = threads.filter((thread) => thread.phase === "parked").length;
+    return parked === 0
+      ? "mark a session in progress"
+      : `${parked} session${parked === 1 ? "" : "s"} parked`;
+  }
   const waiting = active.filter(
     (thread) => thread.waitingUntilMs !== null && thread.waitingUntilMs > nowMs,
   );
@@ -69,6 +75,10 @@ export function MemCardStatusLine(props: {
   if (mem?.autonomous !== true || data === null) return <>{props.fallback}</>;
   const waiting = approvals?.approvals.length ?? 0;
   if (waiting > 0) return <>{`${waiting} approval${waiting === 1 ? "" : "s"} waiting`}</>;
+  // Mem parks every task until it has a model, so an idle-looking card would hide a setup gap.
+  if (mem.premiumModelSelection === null && mem.economyModelSelection === null) {
+    return <>pick a Mem model in Settings</>;
+  }
   return <>{describeAutonomyBrief(data.threads, new Date(nowIso).getTime())}</>;
 }
 

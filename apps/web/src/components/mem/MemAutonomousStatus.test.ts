@@ -72,4 +72,12 @@ describe("describeAutonomyBrief", () => {
       "mark a session in progress",
     );
   });
+
+  it("counts parked sessions instead of claiming the queue is empty", () => {
+    const text = describeAutonomyBrief(
+      [watched({ phase: "parked" }), watched({ threadId: "u", phase: "parked" })],
+      0,
+    );
+    expect(text).toBe("2 sessions parked");
+  });
 });
