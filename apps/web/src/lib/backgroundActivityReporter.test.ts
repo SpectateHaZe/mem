@@ -12,6 +12,8 @@ import {
   layer,
   observeBackgroundActivitySubscription,
   retainedBackgroundScopes,
+  systemInputIsRecent,
+  SYSTEM_INPUT_WINDOW_SECONDS,
 } from "./backgroundActivityReporter.ts";
 
 describe("wasRecentlyInteracted", () => {
@@ -136,4 +138,18 @@ describe("layer", () => {
       expect(calls).toBe(2);
     }).pipe(Effect.scoped),
   );
+});
+
+describe("systemInputIsRecent", () => {
+  it("counts recent input anywhere on the machine as presence", () => {
+    expect(systemInputIsRecent(0)).toBe(true);
+    expect(systemInputIsRecent(SYSTEM_INPUT_WINDOW_SECONDS)).toBe(true);
+  });
+
+  it("does not guess when the machine has been idle or the reading is broken", () => {
+    expect(systemInputIsRecent(SYSTEM_INPUT_WINDOW_SECONDS + 1)).toBe(false);
+    expect(systemInputIsRecent(3_600)).toBe(false);
+    expect(systemInputIsRecent(null)).toBe(false);
+    expect(systemInputIsRecent(Number.NaN)).toBe(false);
+  });
 });

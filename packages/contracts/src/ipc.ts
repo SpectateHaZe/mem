@@ -1073,6 +1073,12 @@ export interface DesktopBridge {
    * regardless of OS settings.
    */
   getSystemLocale: () => string | null;
+  /**
+   * Seconds since the last input anywhere on this computer. Mem's idle clock otherwise only sees
+   * input inside the app window, so working in another app would read as being away. Optional so
+   * an older desktop build keeps working with a newer web bundle.
+   */
+  getSystemIdleSeconds?: () => number;
   /** The OS's preferred languages, most preferred first; `navigator.languages` is pinned like the locale. */
   getPreferredSystemLanguages: () => readonly string[];
   getLocalEnvironmentBootstraps: () => readonly DesktopEnvironmentBootstrap[];

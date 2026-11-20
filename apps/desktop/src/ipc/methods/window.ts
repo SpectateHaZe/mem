@@ -115,6 +115,16 @@ export const getPreferredSystemLanguages = DesktopIpc.makeSyncIpcMethod({
   }),
 });
 
+/**
+ * Seconds since the last input anywhere on this computer. Mem's idle clock otherwise only sees
+ * input inside its own window, so working in another app would read as being away.
+ */
+export const getSystemIdleSeconds = DesktopIpc.makeSyncIpcMethod({
+  channel: IpcChannels.GET_SYSTEM_IDLE_SECONDS_CHANNEL,
+  result: Schema.Number,
+  handler: () => Effect.sync(() => Electron.powerMonitor.getSystemIdleTime()),
+});
+
 export const getWindowFullscreenState = DesktopIpc.makeSyncIpcMethod({
   channel: IpcChannels.GET_WINDOW_FULLSCREEN_STATE_CHANNEL,
   result: Schema.Boolean,

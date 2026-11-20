@@ -27,6 +27,14 @@ const REPORT_INTERVAL_MS = 25_000;
 const REPORT_TIMEOUT_MS = 15_000;
 const LEASE_TTL_MS = 45_000;
 const RECENT_INTERACTION_WINDOW_MS = LEASE_TTL_MS;
+// OS input older than this is the owner being away, even if this window saw nothing.
+export const SYSTEM_INPUT_WINDOW_SECONDS = 60;
+
+/** A missing or broken reading says nothing about the owner, so it never counts as presence. */
+export const systemInputIsRecent = (idleSeconds: number | null): boolean =>
+  idleSeconds !== null &&
+  Number.isFinite(idleSeconds) &&
+  idleSeconds <= SYSTEM_INPUT_WINDOW_SECONDS;
 const BASELINE_SCOPES: ReadonlyArray<BackgroundScope> = [{ type: "provider-status" }];
 
 interface RetainedScope {
@@ -191,9 +199,22 @@ export const layer = Layer.effectDiscard(
         requestReport();
       }
     };
+    // Desktop knows about input outside this window; without it, working elsewhere reads as away.
+    const recordSystemInteraction = () => {
+      const bridge = typeof window === "undefined" ? undefined : window.desktopBridge;
+      const readIdleSeconds = bridge?.getSystemIdleSeconds;
+      if (bridge === undefined || readIdleSeconds === undefined) return;
+      try {
+        if (systemInputIsRecent(readIdleSeconds.call(bridge))) recordInteraction();
+      } catch {
+        // A bridge that fails says nothing about the owner, so the window's own events decide.
+      }
+    };
     const passiveListenerOptions = { passive: true } as const;
 
     const report = Effect.gen(function* () {
+      // Checked before the payload is built, so a report carries the machine's recent use.
+      recordSystemInteraction();
       const observedAtMs = yield* Clock.currentTimeMillis;
       const entries = yield* SubscriptionRef.get(registry.entries);
       yield* Effect.forEach(

@@ -114,6 +114,11 @@ contextBridge.exposeInMainWorld("desktopBridge", {
     const result = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_LOCALE_CHANNEL);
     return typeof result === "string" ? result : null;
   },
+  // Zero keeps Mem from treating the owner as away when the reading fails.
+  getSystemIdleSeconds: () => {
+    const result: unknown = ipcRenderer.sendSync(IpcChannels.GET_SYSTEM_IDLE_SECONDS_CHANNEL);
+    return typeof result === "number" && Number.isFinite(result) && result >= 0 ? result : 0;
+  },
   getPreferredSystemLanguages: () => {
     const result: unknown = ipcRenderer.sendSync(
       IpcChannels.GET_PREFERRED_SYSTEM_LANGUAGES_CHANNEL,
