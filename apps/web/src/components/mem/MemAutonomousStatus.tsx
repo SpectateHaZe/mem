@@ -49,6 +49,11 @@ export const describeAutonomyBrief = (threads: ReadonlyArray<MemWatchedThread>, 
     (thread) => thread.phase === "claimed" || thread.phase === "awaitingReview",
   );
   if (active.length === 0) {
+    // Mem stopped on these, so they need the owner more than an empty queue needs a nudge.
+    const escalated = threads.filter((thread) => thread.phase === "escalated").length;
+    if (escalated > 0) {
+      return `${escalated} session${escalated === 1 ? " needs" : "s need"} you`;
+    }
     // A parked thread is work Mem is holding, not an empty queue; "mark one" would read as idle.
     const parked = threads.filter((thread) => thread.phase === "parked").length;
     return parked === 0

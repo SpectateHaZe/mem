@@ -363,6 +363,7 @@ import { branchMismatchBannerItem, extensionStatusBannerItem } from "./chat/Thre
 import { ThreadNow } from "./chat/ThreadNow";
 import { useMemSentMessagesBanner } from "./mem/MemSentMessages";
 import { useMemApprovalBanner } from "./mem/MemApprovalBanner";
+import { useMemEscalationsBanner } from "./mem/MemEscalations";
 import type { ThreadStructure } from "@t3tools/client-runtime/state/shell";
 import { useDelayedStatus } from "../hooks/useDelayedStatus";
 import { useTimelineFollow } from "./chat/useTimelineFollow";
@@ -2558,7 +2559,12 @@ export default function ChatView(props: ChatViewProps) {
     isMemThread: serverThread !== null && isMemMasterThread(serverThread.source),
     onOpenThread: onOpenRelatedThreadStable,
   });
-  const memSentItems = [memApprovalBannerItem, memSentBannerItem].filter(
+  const memEscalationsBannerItem = useMemEscalationsBanner({
+    environmentId,
+    isMemThread: serverThread !== null && isMemMasterThread(serverThread.source),
+    onOpenThread: onOpenRelatedThreadStable,
+  });
+  const memSentItems = [memApprovalBannerItem, memEscalationsBannerItem, memSentBannerItem].filter(
     (item): item is ComposerBannerStackItem => item !== null,
   );
   const composerBannerItems = (() => {

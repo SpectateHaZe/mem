@@ -86,4 +86,14 @@ describe("describeAutonomyBrief", () => {
     );
     expect(text).toBe("2 sessions parked");
   });
+
+  it("says a stopped session needs the owner", () => {
+    expect(describeAutonomyBrief([watched({ phase: "escalated" })], 0)).toBe("1 session needs you");
+    expect(
+      describeAutonomyBrief(
+        [watched({ phase: "escalated" }), watched({ threadId: "u", phase: "escalated" })],
+        0,
+      ),
+    ).toBe("2 sessions need you");
+  });
 });
