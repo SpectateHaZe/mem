@@ -8,7 +8,7 @@ import {
 import { useNavigate } from "@tanstack/react-router";
 
 import { useNowMinute } from "~/hooks/useNowMinute";
-import { useThreadShell } from "~/state/entities";
+import { useQuietThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 import { useEnvironmentScope } from "~/state/session";
 import { buildThreadRouteParams } from "~/threadRoutes";
@@ -36,7 +36,7 @@ function MemApprovalRow(props: {
   const { approval } = props;
   const navigate = useNavigate();
   const canOperate = useEnvironmentScope(props.environmentId, AuthOrchestrationOperateScope);
-  const shell = useThreadShell(
+  const shell = useQuietThreadShell(
     scopeThreadRef(props.environmentId, ThreadId.make(approval.threadId)),
   );
   const nowIso = useNowMinute();
