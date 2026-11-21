@@ -1,6 +1,6 @@
 import { expect, it } from "vite-plus/test";
 
-import { antigravityCliTarget, parseAntigravityCliRelease } from "./antigravityCliRelease";
+import { antigravityCliTarget, parseAntigravityCliRelease } from "./antigravityCliRelease.ts";
 
 const URL_BASE = "https://storage.googleapis.com/antigravity-public/antigravity-cli";
 const SHA512 = "a".repeat(128);
