@@ -16,6 +16,9 @@
   }
 }
 
+/* Hover-only controls stay visible where the screen cannot hover, so nothing is unreachable. */
+@custom-variant touch (@media (any-pointer: coarse));
+
 /* On mobile, morph the expanded hero composer into the compact docked
    composer while it moves; the rest of the app remains visually stationary. */
 html[data-mobile-composer-route-transition="true"]::view-transition-old(root),

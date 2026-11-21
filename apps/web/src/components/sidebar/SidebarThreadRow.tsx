@@ -165,8 +165,9 @@ const JUMP_HINT_SLOT_CLASS_NAME =
   "[&>:not([data-jump-hint])]:invisible [&>:not([data-jump-hint])]:absolute";
 
 // Secondary icons wait for hover or keyboard focus; opacity keeps their space, so nothing shifts.
+// A touch-primary device has no hover, so there the icons stay visible instead of becoming unreachable.
 const ROW_REVEAL_CLASS_NAME =
-  "pointer-events-none opacity-0 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100";
+  "pointer-events-none opacity-0 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100 touch:pointer-events-auto touch:opacity-100";
 
 function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
@@ -1154,12 +1155,20 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     )
   ) : null;
 
+  // One indicator at rest: when a live run status owns the row, the lifecycle mark waits for hover.
   const lifecycleControl = (
-    <ThreadLifecycleControl
-      lifecycle={threadLifecycleOf(thread)}
-      canOperate={canOperateThread}
-      onOpenMenu={(position) => openLifecycleMenu(threadRef, thread, position)}
-    />
+    <span
+      className={cn(
+        "inline-flex shrink-0 items-center",
+        topStatus !== null && ROW_REVEAL_CLASS_NAME,
+      )}
+    >
+      <ThreadLifecycleControl
+        lifecycle={threadLifecycleOf(thread)}
+        canOperate={canOperateThread}
+        onOpenMenu={(position) => openLifecycleMenu(threadRef, thread, position)}
+      />
+    </span>
   );
 
   const remoteMachineIcon =
