@@ -16,6 +16,7 @@ const thread = (threadId: string, sentAtMs: number | null): MemWatchedThread => 
   roundSummaries: [],
   sentInstruction: sentAtMs === null ? null : `fix ${threadId}`,
   sentAtMs,
+  updatedAtMs: 0,
 });
 
 it("lists the newest sent messages after the dismissal, at most three", () => {

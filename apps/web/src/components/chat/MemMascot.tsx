@@ -17,8 +17,9 @@ import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 
 const MASCOT_CLASS_NAME =
   // Only wide windows leave room beside the max-width chat lane and its
-  // composer; below xl the mascot stays out of the layout entirely.
-  "pointer-events-none absolute bottom-2 left-3 z-0 hidden select-none xl:block";
+  // composer; below xl the mascot stays out of the layout entirely. It sits above
+  // the sidebar's bottom toolbar row and inset from its edge, so neither crowds the other.
+  "pointer-events-none absolute bottom-14 left-6 z-0 hidden select-none xl:block";
 
 // The corner mascot. Its bob is one composited transform that observeVisibleAnimation pauses while
 // hidden; on a saved thread the sprite is a button onto the thread's Mem status.

@@ -124,6 +124,8 @@ export const MemWatchedThread = Schema.Struct({
   /** The last message Mem actually posted in the thread, and when. */
   sentInstruction: Schema.NullOr(Schema.String),
   sentAtMs: Schema.NullOr(Schema.Number),
+  /** When Mem last changed this record; a banner lets stale escalations age out by it. */
+  updatedAtMs: Schema.Number.pipe(Schema.withDecodingDefault(Effect.succeed(0))),
   priority: MemThreadPriority,
   /** Autonomous mode is waiting out a usage limit or the spending cap until then. */
   waitingUntilMs: Schema.NullOr(Schema.Number),

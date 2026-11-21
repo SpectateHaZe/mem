@@ -1,7 +1,9 @@
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
 import { ThreadId, type EnvironmentId, type MemWatchedThread } from "@t3tools/contracts";
 import { CircleAlertIcon } from "lucide-react";
+import { useState } from "react";
 
+import { useNowMinute } from "~/hooks/useNowMinute";
 import { useQuietThreadShell } from "~/state/entities";
 import { useEnvironmentQuery } from "~/state/query";
 
@@ -11,12 +13,25 @@ import { memWatchedThreadsAtom } from "./memOverseer";
 
 const SHOWN = 3;
 
-/** Threads Mem gave up on, newest rejection count first, capped for the banner. */
-export const escalatedThreads = (
+/** An escalation older than this is stale enough that the owner has moved on. */
+export const RECENT_ESCALATION_MS = 12 * 60 * 60_000;
+
+/** A queue entry, not just the thread: a second escalation has to be able to appear again. */
+const escalationKey = (thread: MemWatchedThread) => `${thread.threadId}:${thread.updatedAtMs}`;
+
+/** Threads Mem gave up on recently, newest rejection count first, capped for the banner. */
+export const recentEscalations = (
   threads: ReadonlyArray<MemWatchedThread>,
+  nowMs: number,
+  dismissed: ReadonlyArray<string> = [],
 ): ReadonlyArray<MemWatchedThread> =>
   threads
     .filter((thread) => thread.phase === "escalated")
+    // A record written before the timestamp existed has 0; showing it beats hiding a real stop.
+    .filter(
+      (thread) => thread.updatedAtMs === 0 || nowMs - thread.updatedAtMs <= RECENT_ESCALATION_MS,
+    )
+    .filter((thread) => !dismissed.includes(escalationKey(thread)))
     .toSorted((left, right) => right.rejections - left.rejections)
     .slice(0, SHOWN);
 
@@ -60,7 +75,13 @@ export function useMemEscalationsBanner(input: {
   const query = useEnvironmentQuery(
     memWatchedThreadsAtom(input.isMemThread ? input.environmentId : null),
   );
-  const escalated = escalatedThreads(query.data?.threads ?? []);
+  const nowIso = useNowMinute();
+  const [dismissed, setDismissed] = useState<ReadonlyArray<string>>([]);
+  const escalated = recentEscalations(
+    query.data?.threads ?? [],
+    new Date(nowIso).getTime(),
+    dismissed,
+  );
   if (!input.isMemThread || escalated.length === 0) return null;
   return {
     id: "mem-escalations",
@@ -80,5 +101,7 @@ export function useMemEscalationsBanner(input: {
         ))}
       </ul>
     ),
+    dismissLabel: "Dismiss",
+    onDismiss: () => setDismissed((current) => [...current, ...escalated.map(escalationKey)]),
   };
 }

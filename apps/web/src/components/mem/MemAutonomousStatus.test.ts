@@ -12,6 +12,7 @@ const watched = (overrides: Partial<MemWatchedThread>): MemWatchedThread => ({
   pendingApproval: false,
   sentInstruction: null,
   sentAtMs: null,
+  updatedAtMs: 0,
   priority: "normal",
   waitingUntilMs: null,
   waitingFor: null,

@@ -1368,6 +1368,7 @@ export const makeMemOverseerService = (ports: MemOverseerPorts): MemOverseerServ
         pendingApproval: record.pendingApproval !== null,
         sentInstruction: record.deliveredInstruction,
         sentAtMs: record.deliveredAtMs,
+        updatedAtMs: record.updatedAtMs,
         priority: record.priority,
         waitingUntilMs: record.waitingUntilMs,
         waitingFor: record.waitingFor,
