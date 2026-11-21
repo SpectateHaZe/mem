@@ -110,38 +110,39 @@ export function SidebarDragBoundary(props: {
   );
 }
 
-export function SidebarSectionHeader(props: {
-  marker: "working-header" | "snoozed-header" | "settled-header";
-  label: string;
+export function SidebarSnoozedHeader(props: {
   /** A muted trailing count. */
   count: number;
-  className?: string;
-  dragging?: boolean;
-  isDropTarget?: boolean;
-  toggle: { expanded: boolean; onToggle: () => void };
+  expanded: boolean;
+  onToggle: () => void;
 }) {
-  const shelf =
-    props.marker === "working-header"
-      ? "working"
-      : props.marker === "snoozed-header"
-        ? "snoozed"
-        : "settled";
   return (
     <SortableSidebarMarker
-      marker={props.marker}
-      data-testid={`sidebar-${props.marker}`}
-      className={cn("relative mx-0.5 h-8", props.className)}
+      marker="snoozed-header"
+      data-testid="sidebar-snoozed-header"
+      className="relative mx-0.5 h-8"
     >
       <CollapsibleSectionHeader
-        data-sidebar-row={`shelf:${shelf}`}
-        onClick={props.toggle.onToggle}
-        expanded={props.toggle.expanded}
-        tone={props.isDropTarget ? "accent" : props.dragging ? "emphasized" : "muted"}
-        data-testid={`sidebar-${shelf}-shelf-toggle`}
+        data-sidebar-row="shelf:snoozed"
+        onClick={props.onToggle}
+        expanded={props.expanded}
+        data-testid="sidebar-snoozed-shelf-toggle"
         accessory={<span className="font-normal tabular-nums">{props.count}</span>}
       >
-        {props.label}
+        Snoozed
       </CollapsibleSectionHeader>
     </SortableSidebarMarker>
+  );
+}
+
+// Settled rows continue the main list without a header; this empty marker still starts their
+// drop section. Its zero height keeps drag projection exact.
+export function SidebarSettledBoundary() {
+  return (
+    <SortableSidebarMarker
+      marker="settled-header"
+      data-testid="sidebar-settled-header"
+      className="pointer-events-none h-0"
+    />
   );
 }

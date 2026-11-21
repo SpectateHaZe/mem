@@ -90,10 +90,11 @@ Pinning does not prevent automatic settlement. Settling a thread removes its pin
 
 On web and desktop, drag a thread between sections to change its state. Drag a thread up into
 the pinned section to pin it at the spot you drop it; drag a pinned thread down into the active
-list to unpin it. Dragging a thread onto the **Settled** header settles it, and dragging a settled
-thread into the active list un-settles it. A snoozed thread can be dragged out of the snoozed
-shelf, which wakes it, but threads cannot be dragged into the shelf because snoozing needs a wake
-time. Dragging a pinned thread out of the pinned section does not ask for unpin confirmation.
+list to unpin it. Settled threads end the list; dragging a thread among them settles it, and
+dragging a settled thread into the active list un-settles it. A snoozed thread can be dragged out
+of the snoozed shelf, which wakes it, but threads cannot be dragged into the shelf because
+snoozing needs a wake time. Dragging a pinned thread out of the pinned section does not ask for
+unpin confirmation.
 Pinned and active boundary labels appear only while dragging, without moving the rows. The
 other rows slide aside to show where the thread will land. When you cross into another section,
 the dragged thread shows the action the drop performs, with its icon: **Pin**, **Unpin**,
@@ -102,7 +103,7 @@ thread keeps its pin only while it stays in the pinned section; once it leaves, 
 over. Reordering within the same section shows no badge. When there are no pins, drag to the top
 edge to pin a thread. Section labels stay readable for the whole drag, and the section the
 thread is over takes the accent color. Section labels also
-identify empty sections and a collapsed settled shelf.
+identify empty sections.
 
 Drag within the pinned or active section to change its order. Other rows slide aside to show the
 spot where the thread will land. Drops into either section keep the position you choose. On
@@ -120,8 +121,8 @@ after the drop.
 
 New threads appear above the active threads you have arranged. Settling clears a thread's active
 position, so using **Un-settle** returns it to the top. Pinning and snoozing preserve its active
-position until you move it again. Thread activity does not change the order. The settled shelf
-continues to use settlement time.
+position until you move it again. Thread activity does not change the order. Settled threads
+continue to sort by settlement time.
 
 If dragging is unavailable for one environment, update the T3 Code server running in that
 environment. Pinned and active reordering require server support. Threads from older servers keep
@@ -142,20 +143,22 @@ open.
 
 ### Fold working threads (beta)
 
-Threads that are working or waiting on work they will resume from move into a collapsed
-**Working** section below the active list.
+On iOS and Android, threads that are working or waiting on work they will resume from move into
+a collapsed **Working** section below the active list.
 That includes subagents, watched pull requests, and background commands or monitors the agent
 says it is waiting on. A dev server or other process an agent leaves running does not keep a thread
 there. A thread returns to the top of the active list when it finishes, fails, or needs an approval or
 answer. The Working section lists the thread you last sent work to first. Pinned threads stay in
 the pinned section.
 
-This is on by default. Turn it off with **Settings → General → Working section** on web and desktop,
-or **Settings → General → Working section** on iOS and Android. Each device keeps its own
-choice.
+This is on by default. Turn it off with **Settings → General → Working section**. Each device
+keeps its own choice.
 
 While this is on, the active list is ordered by when each thread last came back to you, so you
 cannot drag or move threads within it. Your saved order returns when you turn it off.
+
+On web and desktop, working threads stay in the active list, which is always ordered by when each
+thread last came back to you.
 
 ### Group threads by project (beta)
 
@@ -166,8 +169,8 @@ project's folder comes last and shows only while it has active threads. Click a 
 close it. A closed folder shows how many threads it holds, and a dot when one of them
 needs you. Use the pen button on a folder, or right-click it, to start a thread in that project.
 Pinned threads stay above the folders, and Snoozed and Settled stay below them. In this mode you
-can drag a thread onto the composer to mention it, but not within the sidebar, and the Working
-section is off. Each device keeps its own choice.
+can drag a thread onto the composer to mention it, but not within the sidebar. Each device keeps
+its own choice.
 
 ## Settle finished work
 

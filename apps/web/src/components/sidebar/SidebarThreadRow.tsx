@@ -164,6 +164,10 @@ function JumpHintBadge(props: { label: string }) {
 const JUMP_HINT_SLOT_CLASS_NAME =
   "[&>:not([data-jump-hint])]:invisible [&>:not([data-jump-hint])]:absolute";
 
+// Secondary icons wait for hover or keyboard focus; opacity keeps their space, so nothing shifts.
+const ROW_REVEAL_CLASS_NAME =
+  "pointer-events-none opacity-0 group-any-hover/sidebar-row:pointer-events-auto group-any-hover/sidebar-row:opacity-100 group-focus-within/sidebar-row:pointer-events-auto group-focus-within/sidebar-row:opacity-100";
+
 function WorkingDuration(props: { startedAt: string | null }) {
   const startedMs = props.startedAt !== null ? Date.parse(props.startedAt) : Number.NaN;
   if (Number.isNaN(startedMs)) return null;
@@ -1166,13 +1170,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
     ) : null;
   const diff = isChatSurface ? null : latestRunDiff(thread);
   const showsBranch = !isChatSurface && thread.branch !== null;
-  // Only the trailing icons would remain, so the row moves them to the title line instead.
-  const metaLineEmpty =
-    !showsBranch &&
-    !showsScratchMachine &&
-    prBadge === null &&
-    diff === null &&
-    runningTerminalIds.length === 0;
+  // Hidden icons alone would leave a blank line at rest, so they ride the title line instead.
+  const metaLineEmpty = !showsBranch && !showsScratchMachine && diff === null;
+  const secondaryIcons = (
+    <span className={cn("inline-flex shrink-0 items-center gap-1.5", ROW_REVEAL_CLASS_NAME)}>
+      {terminalStatusIcon}
+      {prBadge}
+      <span aria-hidden className="pointer-events-none inline-flex shrink-0 items-center gap-1">
+        {remoteMachineIcon}
+        <SidebarProviderStack
+          thread={thread}
+          providerEntryByInstanceId={props.providerEntryByInstanceId}
+        />
+      </span>
+    </span>
+  );
   const metaLine = metaLineEmpty ? null : (
     <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-secondary-label text-xs">
       {showsBranch ? (
@@ -1194,39 +1206,21 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
       ) : (
         <span className="flex-1" />
       )}
-      {terminalStatusIcon}
-      {prBadge}
       {diff ? (
         <span className="shrink-0 font-mono">
           <span className="text-diff-addition-foreground">+{formatDiffCount(diff.insertions)}</span>{" "}
           <span className="text-diff-deletion-foreground">−{formatDiffCount(diff.deletions)}</span>
         </span>
       ) : null}
-      <span
-        aria-hidden
-        className="pointer-events-none ml-auto inline-flex shrink-0 items-center gap-1"
-      >
-        {remoteMachineIcon}
-        <SidebarProviderStack
-          thread={thread}
-          providerEntryByInstanceId={props.providerEntryByInstanceId}
-        />
-      </span>
+      {secondaryIcons}
     </div>
   );
-  const titleLineIcons = metaLineEmpty ? (
-    <span aria-hidden className="inline-flex shrink-0 items-center gap-1">
-      {remoteMachineIcon}
-      <SidebarProviderStack
-        thread={thread}
-        providerEntryByInstanceId={props.providerEntryByInstanceId}
-      />
-    </span>
-  ) : null;
+  const titleLineIcons = metaLineEmpty ? secondaryIcons : null;
 
   if (variant !== "card") {
     const multiline = variant === "folder-multiline";
     const inFolder = variant === "folder" || multiline;
+    const showsTerminalInline = !multiline && runningTerminalIds.length > 0;
     return (
       <li
         data-thread-item={threadKey}
@@ -1282,12 +1276,18 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                   ) : null}
                 </span>
               )}
-              {draftIndicator}
               {title}
               {lifecycleControl}
               {multiline ? titleLineIcons : null}
-              {pinIndicator}
-              {multiline ? null : terminalStatusIcon}
+              {hasUnsentDraft || showPin || showsTerminalInline ? (
+                <span
+                  className={cn("inline-flex shrink-0 items-center gap-2.5", ROW_REVEAL_CLASS_NAME)}
+                >
+                  {draftIndicator}
+                  {pinIndicator}
+                  {showsTerminalInline ? terminalStatusIcon : null}
+                </span>
+              ) : null}
               {isRegeneratingTitle ? (
                 <span role="status" className="sr-only">
                   Regenerating title
@@ -1464,13 +1464,9 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
             )}
           >
             <div className="flex h-5 min-w-0 items-center gap-1.5">
-              {draftIndicator}
               {props.project ? (
                 <ProjectFavicon project={props.project} className="size-4 shrink-0" />
               ) : null}
-              {/* Left of the status slot, the pin would slide when hover swaps the
-                label for the wider row controls. */}
-              {pinIndicator}
               {props.projectDisplayName ? (
                 <span
                   className={cn("min-w-0 flex-1 truncate font-normal text-secondary-label text-xs")}
@@ -1481,7 +1477,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                 <span className="flex-1" />
               )}
               {sortable?.isDragging ? (
-                dragDestination
+                (dragDestination ?? pinIndicator)
               ) : (
                 <span
                   className={cn(
@@ -1547,7 +1543,7 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                       <RelativeTimeLabel timestamp={resolveThreadActivityTimestamp(thread)} />
                     )}
                   </span>
-                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft ? (
+                  {props.settlementSupported || showSnoozeButton || hasUnsentDraft || showPin ? (
                     <span
                       className={cn(
                         // Mouse clicks leave Settle focused; focus-within would pin controls over
@@ -1556,6 +1552,12 @@ const SidebarThreadRow = memo(function SidebarThreadRow(props: SidebarThreadRowP
                         snoozeMenuOpen && "pointer-events-auto static opacity-100",
                       )}
                     >
+                      {hasUnsentDraft || showPin ? (
+                        <span className="flex items-center gap-1.5 px-1">
+                          {draftIndicator}
+                          {pinIndicator}
+                        </span>
+                      ) : null}
                       {hasUnsentDraft ? (
                         <Tooltip>
                           <TooltipTrigger

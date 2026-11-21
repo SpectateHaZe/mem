@@ -2,6 +2,7 @@ import {
   ArrowLeftIcon,
   ArrowRightIcon,
   ChartNoAxesColumnIcon,
+  EllipsisIcon,
   HandIcon,
   ListTodoIcon,
   MessagesSquareIcon,
@@ -32,6 +33,7 @@ import {
 import { LendAHandDialog } from "../lendAHand/LendAHand";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import {
   SidebarFooter,
   SidebarMenu,
@@ -292,32 +294,49 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
             label="Settings"
             onClick={handleSettingsClick}
           />
-          {pullRequestsSupported ? (
-            <SidebarUtilityItem
-              icon={<PullRequestGlyph.pullRequest />}
-              label="Pull requests"
-              onClick={handlePullRequestsClick}
-            />
-          ) : null}
-          <SidebarUtilityItem
-            icon={<MessagesSquareIcon />}
-            label="Group chats"
-            onClick={handleRoomsClick}
-          />
-          <SidebarUtilityItem icon={<ListTodoIcon />} label="Queue" onClick={handleQueueClick} />
-          <SidebarUtilityItem
-            icon={<ChartNoAxesColumnIcon />}
-            label="Usage"
-            onClick={handleUsageClick}
-          />
-          <SidebarUtilityItem
-            icon={<HandIcon />}
-            label="Lend a hand"
-            onClick={() => {
-              closeMobileSidebar();
-              setHandOpen(true);
-            }}
-          />
+          <SidebarMenuItem className="shrink-0">
+            <Menu>
+              <Tooltip>
+                <TooltipTrigger
+                  render={
+                    <MenuTrigger render={<SidebarMenuButton aria-label="More" size="icon" />} />
+                  }
+                >
+                  <EllipsisIcon />
+                </TooltipTrigger>
+                <TooltipPopup side="top">More</TooltipPopup>
+              </Tooltip>
+              <MenuPopup side="top" align="start">
+                {pullRequestsSupported ? (
+                  <MenuItem onClick={handlePullRequestsClick}>
+                    <PullRequestGlyph.pullRequest />
+                    Pull requests
+                  </MenuItem>
+                ) : null}
+                <MenuItem onClick={handleRoomsClick}>
+                  <MessagesSquareIcon />
+                  Group chats
+                </MenuItem>
+                <MenuItem onClick={handleQueueClick}>
+                  <ListTodoIcon />
+                  Queue
+                </MenuItem>
+                <MenuItem onClick={handleUsageClick}>
+                  <ChartNoAxesColumnIcon />
+                  Usage
+                </MenuItem>
+                <MenuItem
+                  onClick={() => {
+                    closeMobileSidebar();
+                    setHandOpen(true);
+                  }}
+                >
+                  <HandIcon />
+                  Lend a hand
+                </MenuItem>
+              </MenuPopup>
+            </Menu>
+          </SidebarMenuItem>
           <LendAHandDialog open={handOpen} onOpenChange={setHandOpen} />
         </>
       )}
