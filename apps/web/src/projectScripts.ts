@@ -106,3 +106,29 @@ export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): Pro
   const regular = scripts.find((script) => !script.runOnWorktreeCreate && !script.runOnSettle);
   return regular ?? scripts.find((script) => !script.runOnSettle) ?? null;
 }
+
+const RUN_SCRIPT_NAMES = ["dev", "start", "serve", "preview"] as const;
+
+/** A one-click Run for a project with no saved scripts, read from its package.json. */
+export function detectedRunScript(packageJson: string | null): ProjectScript | null {
+  if (packageJson === null) return null;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(packageJson);
+  } catch {
+    return null;
+  }
+  if (typeof parsed !== "object" || parsed === null) return null;
+  const { scripts, packageManager } = parsed as { scripts?: unknown; packageManager?: unknown };
+  if (typeof scripts !== "object" || scripts === null) return null;
+  const name = RUN_SCRIPT_NAMES.find(
+    (candidate) => typeof (scripts as Record<string, unknown>)[candidate] === "string",
+  );
+  if (name === undefined) return null;
+  const manager = typeof packageManager === "string" ? packageManager.split("@")[0] : "npm";
+  const command =
+    manager === "pnpm" || manager === "yarn"
+      ? `${manager} ${name}`
+      : `${manager === "bun" ? "bun" : "npm"} run ${name}`;
+  return { id: "detected-run", name: "Run", command, icon: "play", runOnWorktreeCreate: false };
+}

@@ -9,6 +9,8 @@ import type {
 
 import type { DraftId } from "../../composerDraftStore";
 import { useT3ProjectFileScripts } from "../../hooks/useT3ProjectFileScripts";
+import { detectedRunScript } from "../../projectScripts";
+import { useProjectFileQuery } from "../files/projectFilesQueryState";
 import { type EnvMode, type EnvironmentOption } from "../BranchToolbar.logic";
 import { BranchToolbar } from "../BranchToolbar";
 import BaseGitActionsControl from "../GitActionsControl";
@@ -95,6 +97,15 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
   const fileScripts = useT3ProjectFileScripts(
     props.environmentId,
     props.activeProjectScripts && visible.scripts ? props.gitCwd : null,
+  );
+  const packageJson = useProjectFileQuery(
+    props.environmentId,
+    props.gitCwd ?? "",
+    "package.json",
+    props.gitCwd !== null && visible.scripts && props.activeProjectScripts?.length === 0,
+  ).data;
+  const detectedScript = detectedRunScript(
+    packageJson && !packageJson.truncated ? packageJson.contents : null,
   );
   const activeThreadRef = { environmentId: props.environmentId, threadId: props.threadId };
   const branchToolbarProps = {
@@ -205,6 +216,7 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                         scripts={props.activeProjectScripts}
                         fileScripts={fileScripts}
                         preferredScriptId={props.preferredScriptId}
+                        detectedScript={detectedScript}
                         onRunScript={props.onRunProjectScript}
                         onAddScript={props.onAddProjectScript}
                         onUpdateScript={props.onUpdateProjectScript}

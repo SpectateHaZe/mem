@@ -66,6 +66,8 @@ interface ProjectScriptsControlProps {
   scripts: ReadonlyArray<ProjectScript>;
   fileScripts?: ReadonlyArray<T3ProjectFileScript>;
   preferredScriptId?: string | null;
+  /** Offered as the Run button while the project has no saved scripts. */
+  detectedScript?: ProjectScript | null;
   onRunScript?: ((script: ProjectScript) => void) | undefined;
   onAddScript: (input: NewProjectScriptInput) => Promise<ProjectScriptActionResult>;
   onUpdateScript: (
@@ -83,6 +85,7 @@ export default function ProjectScriptsControl({
   scripts,
   fileScripts = NO_FILE_SCRIPTS,
   preferredScriptId = null,
+  detectedScript = null,
   onRunScript,
   onAddScript,
   onUpdateScript,
@@ -106,7 +109,8 @@ export default function ProjectScriptsControl({
 
   const primaryScript =
     (preferredScriptId ? scripts.find((script) => script.id === preferredScriptId) : undefined) ??
-    primaryProjectScript(scripts);
+    primaryProjectScript(scripts) ??
+    (scripts.length === 0 ? detectedScript : null);
   const importableScripts = fileScripts.filter(
     (fileScript) =>
       !scripts.some(
@@ -315,7 +319,9 @@ export default function ProjectScriptsControl({
             </TooltipTrigger>
             <TooltipPopup side="top">
               {onRunScript
-                ? `Run ${primaryScript.name}`
+                ? primaryScript === detectedScript
+                  ? `Run ${primaryScript.command} in this thread's folder`
+                  : `Run ${primaryScript.name}`
                 : "Pair this client again with permission to run terminal commands."}
             </TooltipPopup>
           </Tooltip>

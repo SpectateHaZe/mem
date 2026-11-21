@@ -4,6 +4,7 @@ import { settleProjectScript, setupProjectScript } from "@t3tools/shared/project
 
 import {
   commandForProjectScript,
+  detectedRunScript,
   nextProjectScriptId,
   primaryProjectScript,
   releaseClaimedRoles,
@@ -88,5 +89,23 @@ describe("projectScripts helpers", () => {
     expect(
       releaseClaimedRoles(holder, { ...input, runOnWorktreeCreate: false, runOnSettle: false }),
     ).toBe(holder);
+  });
+});
+
+describe("detectedRunScript", () => {
+  it("prefers dev and uses the declared package manager", () => {
+    const pkg = (body: object) => JSON.stringify(body);
+    expect(detectedRunScript(pkg({ scripts: { start: "x", dev: "y" } }))?.command).toBe(
+      "npm run dev",
+    );
+    expect(
+      detectedRunScript(pkg({ packageManager: "pnpm@9.0.0", scripts: { start: "x" } }))?.command,
+    ).toBe("pnpm start");
+    expect(
+      detectedRunScript(pkg({ packageManager: "bun@1.1.0", scripts: { preview: "x" } }))?.command,
+    ).toBe("bun run preview");
+    expect(detectedRunScript(pkg({ scripts: { build: "x" } }))).toBeNull();
+    expect(detectedRunScript("{not json")).toBeNull();
+    expect(detectedRunScript(null)).toBeNull();
   });
 });
