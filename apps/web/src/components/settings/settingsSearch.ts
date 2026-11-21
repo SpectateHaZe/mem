@@ -542,11 +542,11 @@ export const SETTINGS_SEARCH_ITEMS = [
     searchTerms: ["discord rich presence rpc elapsed timer duration clock time"],
   },
   {
-    id: "discord-idle-text",
-    title: "Idle text",
+    id: "discord-autonomous-text",
+    title: "Autonomous text",
     to: "/settings/discord",
     scope: "environment-defaults",
-    searchTerms: ["discord rich presence rpc idle mem in control no agents waiting"],
+    searchTerms: ["discord rich presence rpc autonomous working mem driving text agents"],
   },
   {
     id: "import-conversations",
@@ -560,6 +560,13 @@ export const SETTINGS_SEARCH_ITEMS = [
     to: "/settings/discord",
     scope: "environment-defaults",
     searchTerms: ["discord rich presence project name privacy share status"],
+  },
+  {
+    id: "discord-website-button",
+    title: "Mem website button",
+    to: "/settings/discord",
+    scope: "environment-defaults",
+    searchTerms: ["discord rich presence rpc button link website site mem docs"],
   },
   {
     id: "discord-github-button",

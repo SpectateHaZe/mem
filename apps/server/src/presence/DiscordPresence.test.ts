@@ -2,6 +2,7 @@ import { assert, it } from "@effect/vitest";
 import {
   DEFAULT_DISCORD_PRESENCE_SETTINGS,
   DISCORD_GITHUB_BUTTON,
+  DISCORD_WEBSITE_BUTTON,
 } from "@t3tools/contracts/settings";
 
 import {
@@ -10,8 +11,14 @@ import {
   encodeDiscordFrame,
   presenceActivity,
   renderDiscordTemplate,
+  resolvePresenceState,
   shouldOpenDiscordConnection,
 } from "./DiscordPresence.ts";
+
+const agents = (liveAgents: number) =>
+  resolvePresenceState({ liveAgents, autonomous: false, autonomousSessions: 0 });
+const autonomous = (liveAgents: number, autonomousSessions = 1) =>
+  resolvePresenceState({ liveAgents, autonomous: true, autonomousSessions });
 
 it("frames messages with a little-endian opcode and length", () => {
   const frame = encodeDiscordFrame(1, { a: 1 });
@@ -80,24 +87,71 @@ it("falls back through the Unix runtime directories", () => {
 });
 
 it("clears the status when no agent is working", () => {
-  assert.isNull(presenceActivity(0, 1_700_000_000_000));
-  assert.equal(presenceActivity(1, 1_700_000_000_000)?.details, "1 agent working");
-  assert.equal(presenceActivity(3, 1_700_000_000_000)?.details, "3 agents working");
+  assert.isNull(presenceActivity(agents(0), 1_700_000_000_000));
+  assert.equal(presenceActivity(agents(1), 1_700_000_000_000)?.details, "1 agent working");
+  assert.equal(presenceActivity(agents(3), 1_700_000_000_000)?.details, "3 agents working");
 });
 
-it("says Mem is in control while the overseer is on, even with no thread running", () => {
-  assert.isNull(presenceActivity(0, 1_700_000_000_000));
-  const idle = presenceActivity(0, 1_700_000_000_000, { overseerInControl: true });
-  // The idle text replaces the count, which would otherwise claim zero agents are working.
-  assert.equal(idle?.details, "mem in control");
-  assert.notProperty(idle, "state");
+it("picks autonomous, active, or no presence from what is actually happening", () => {
+  // Mem is driving a claimed session: autonomous, whether or not a turn is running right now.
+  assert.deepEqual(
+    resolvePresenceState({ liveAgents: 2, autonomous: true, autonomousSessions: 3 }),
+    { kind: "autonomous", agents: 2 },
+  );
+  assert.deepEqual(
+    resolvePresenceState({ liveAgents: 0, autonomous: true, autonomousSessions: 1 }),
+    { kind: "autonomous", agents: 0 },
+  );
+  // Autonomous mode with nothing claimed is idle, even if a watching thread keeps the count high.
+  assert.deepEqual(
+    resolvePresenceState({ liveAgents: 4, autonomous: true, autonomousSessions: 0 }),
+    { kind: "agents", agents: 4 },
+  );
+  // Without autonomous mode, only running agents matter.
+  assert.deepEqual(
+    resolvePresenceState({ liveAgents: 2, autonomous: false, autonomousSessions: 3 }),
+    { kind: "agents", agents: 2 },
+  );
+  // Nothing running and nothing claimed clears the card.
+  assert.deepEqual(
+    resolvePresenceState({ liveAgents: 0, autonomous: false, autonomousSessions: 0 }),
+    { kind: "none", agents: 0 },
+  );
+  assert.isNull(
+    presenceActivity(
+      resolvePresenceState({
+        liveAgents: 0,
+        autonomous: true,
+        autonomousSessions: 0,
+      }),
+      1_700_000_000_000,
+    ),
+  );
+});
 
-  const busy = presenceActivity(2, 1_700_000_000_000, {
-    overseerInControl: true,
+it("says Mem is working autonomously, with the live agent count", () => {
+  const busy = presenceActivity(autonomous(2), 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
+  assert.equal(busy?.details, "Working autonomously · 2 agents");
+  assert.equal(busy?.state, "gpt-5.4");
+
+  // Between turns Mem still owns claimed sessions, so the line stands without claiming agents.
+  const betweenTurns = presenceActivity(autonomous(0), 1_700_000_000_000, {
     modelNames: ["gpt-5.4"],
   });
-  assert.equal(busy?.details, "2 agents working");
-  assert.equal(busy?.state, "gpt-5.4");
+  assert.equal(betweenTurns?.details, "Working autonomously");
+
+  // The owner's own words replace the default.
+  const custom = presenceActivity(autonomous(1), 1_700_000_000_000, {
+    presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, autonomousText: "Heads down" },
+  });
+  assert.equal(custom?.details, "Heads down · 1 agent");
+
+  // A template that showed the owner's AFK state keeps showing it.
+  const away = presenceActivity(autonomous(1), 1_700_000_000_000, { ownerAfk: true });
+  assert.equal(away?.details, "Working autonomously · 1 agent · user is afk");
+
+  // Active work that is not autonomous keeps the template.
+  assert.equal(presenceActivity(agents(2), 1_700_000_000_000)?.details, "2 agents working");
 });
 
 it("claims the owner is away only when idle detection says so", () => {
@@ -105,39 +159,37 @@ it("claims the owner is away only when idle detection says so", () => {
     ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
     detailsTemplate: "{mode} · {agents} working",
   };
-  const away = presenceActivity(1, 1_700_000_000_000, {
-    overseerInControl: true,
+  const away = presenceActivity(agents(1), 1_700_000_000_000, {
     ownerAfk: true,
     presence,
   });
-  assert.equal(away?.details, "user is afk · mem in control · 1 agent working");
+  assert.equal(away?.details, "user is afk · 1 agent working");
 
-  const present = presenceActivity(1, 1_700_000_000_000, {
-    overseerInControl: true,
+  const present = presenceActivity(agents(1), 1_700_000_000_000, {
     ownerAfk: false,
     presence,
   });
-  assert.equal(present?.details, "mem in control · 1 agent working");
+  assert.equal(present?.details, "1 agent working");
 });
 
 it("keeps the details count and shows one model in state", () => {
-  const activity = presenceActivity(2, 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
+  const activity = presenceActivity(agents(2), 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
   assert.equal(activity?.details, "2 agents working");
   assert.equal(activity?.state, "gpt-5.4");
 });
 
 it("summarizes several distinct models as first with n more", () => {
-  const activity = presenceActivity(3, 1_700_000_000_000, {
+  const activity = presenceActivity(agents(3), 1_700_000_000_000, {
     modelNames: ["gpt-5.4", "claude-sonnet-4", "gpt-5.4"],
   });
   assert.equal(activity?.state, "gpt-5.4 +1 more");
 });
 
 it("shows the project name only when the caller passes it", () => {
-  const hidden = presenceActivity(1, 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
+  const hidden = presenceActivity(agents(1), 1_700_000_000_000, { modelNames: ["gpt-5.4"] });
   assert.equal(hidden?.state, "gpt-5.4");
 
-  const shown = presenceActivity(1, 1_700_000_000_000, {
+  const shown = presenceActivity(agents(1), 1_700_000_000_000, {
     modelNames: ["gpt-5.4"],
     projectNames: ["My Private Project"],
   });
@@ -145,7 +197,7 @@ it("shows the project name only when the caller passes it", () => {
 });
 
 it("summarizes several distinct projects as first with n more", () => {
-  const activity = presenceActivity(2, 1_700_000_000_000, {
+  const activity = presenceActivity(agents(2), 1_700_000_000_000, {
     projectNames: ["Alpha", "Beta", "Alpha"],
   });
   assert.equal(activity?.state, "Alpha +1 more");
@@ -154,11 +206,11 @@ it("summarizes several distinct projects as first with n more", () => {
 it("truncates long model and project names to Discord's limits", () => {
   const longModel = "b".repeat(500);
   const longProject = "p".repeat(500);
-  const one = presenceActivity(1, 1_700_000_000_000, { modelNames: [longModel] });
+  const one = presenceActivity(agents(1), 1_700_000_000_000, { modelNames: [longModel] });
   assert.equal(one?.state, `${"b".repeat(59)}…`);
   assert.equal(one?.state?.length, 60);
 
-  const both = presenceActivity(1, 1_700_000_000_000, {
+  const both = presenceActivity(agents(1), 1_700_000_000_000, {
     modelNames: [longModel],
     projectNames: [longProject],
   });
@@ -168,7 +220,7 @@ it("truncates long model and project names to Discord's limits", () => {
   assert.isTrue(state.startsWith(`${"p".repeat(59)}… · ${"b".repeat(59)}…`));
 
   // Two "+n more" parts overflow the composed field, so its own truncation kicks in.
-  const maximal = presenceActivity(1, 1_700_000_000_000, {
+  const maximal = presenceActivity(agents(1), 1_700_000_000_000, {
     modelNames: [longModel, "m"],
     projectNames: [longProject, "q"],
   });
@@ -179,11 +231,11 @@ it("truncates long model and project names to Discord's limits", () => {
 
 it("truncates astral names on a whole character", () => {
   const emoji = "🐈";
-  const one = presenceActivity(1, 1_700_000_000_000, { modelNames: [emoji.repeat(500)] });
+  const one = presenceActivity(agents(1), 1_700_000_000_000, { modelNames: [emoji.repeat(500)] });
   assert.equal(one?.state, `${emoji.repeat(29)}…`);
 
   // Overflow past the composed field also lands mid-pair, so both cuts stay whole.
-  const maximal = presenceActivity(1, 1_700_000_000_000, {
+  const maximal = presenceActivity(agents(1), 1_700_000_000_000, {
     modelNames: [emoji.repeat(500), "m"],
     projectNames: [emoji.repeat(500), "q"],
   });
@@ -194,51 +246,54 @@ it("truncates astral names on a whole character", () => {
 });
 
 it("omits state when the composed text is too short for Discord", () => {
-  const empty = presenceActivity(1, 1_700_000_000_000, {});
+  const empty = presenceActivity(agents(1), 1_700_000_000_000, {});
   assert.notProperty(empty, "state");
 
-  const tooShort = presenceActivity(1, 1_700_000_000_000, { modelNames: ["x"] });
+  const tooShort = presenceActivity(agents(1), 1_700_000_000_000, { modelNames: ["x"] });
   assert.notProperty(tooShort, "state");
 
-  const blankIgnored = presenceActivity(1, 1_700_000_000_000, {
+  const blankIgnored = presenceActivity(agents(1), 1_700_000_000_000, {
     modelNames: ["  "],
     projectNames: ["My Project"],
   });
   assert.equal(blankIgnored?.state, "My Project");
 
   // Two short parts together are long enough to keep.
-  const pair = presenceActivity(1, 1_700_000_000_000, { modelNames: ["x"], projectNames: ["x"] });
+  const pair = presenceActivity(agents(1), 1_700_000_000_000, {
+    modelNames: ["x"],
+    projectNames: ["x"],
+  });
   assert.equal(pair?.state, "x · x");
 });
 
 it("builds a public activity with a stable start time", () => {
   const startedAt = 1_700_000_000_123;
-  const activity = presenceActivity(2, startedAt);
+  const activity = presenceActivity(agents(2), startedAt);
   assert.deepEqual(activity, {
     details: "2 agents working",
     timestamps: { start: startedAt },
-    buttons: [DISCORD_GITHUB_BUTTON],
+    buttons: [DISCORD_WEBSITE_BUTTON, DISCORD_GITHUB_BUTTON],
   });
   assert.deepEqual(Object.keys(activity!).sort(), ["buttons", "details", "timestamps"]);
 });
 
 it("only adds an image when one is configured", () => {
-  assert.notProperty(presenceActivity(2, 5), "assets");
+  assert.notProperty(presenceActivity(agents(2), 5), "assets");
   assert.deepEqual(
-    presenceActivity(2, 5, {
+    presenceActivity(agents(2), 5, {
       presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, largeImageKey: "mem" },
     }),
     {
       details: "2 agents working",
       timestamps: { start: 5 },
-      buttons: [DISCORD_GITHUB_BUTTON],
+      buttons: [DISCORD_WEBSITE_BUTTON, DISCORD_GITHUB_BUTTON],
       assets: { large_image: "mem", large_text: "Mem" },
     },
   );
 });
 
 it("keeps every configured image and its own text", () => {
-  const activity = presenceActivity(1, 5, {
+  const activity = presenceActivity(agents(1), 5, {
     presence: {
       ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
       largeImageKey: "mem",
@@ -262,47 +317,67 @@ it("drops a line the owner emptied and hides the timer when asked", () => {
     stateTemplate: "   ",
     showElapsedTimer: false,
   };
-  assert.isNull(presenceActivity(2, 5, { presence }));
-  assert.deepEqual(presenceActivity(2, 5, { presence: { ...presence, detailsTemplate: "Busy" } }), {
-    details: "Busy",
-    buttons: [DISCORD_GITHUB_BUTTON],
-  });
+  assert.isNull(presenceActivity(agents(2), 5, { presence }));
+  assert.deepEqual(
+    presenceActivity(agents(2), 5, { presence: { ...presence, detailsTemplate: "Busy" } }),
+    {
+      details: "Busy",
+      buttons: [DISCORD_WEBSITE_BUTTON, DISCORD_GITHUB_BUTTON],
+    },
+  );
 });
 
-it("links to the Mem repository by default and stops when the owner hides it", () => {
-  assert.deepEqual(presenceActivity(1, 5)?.buttons, [
+it("links to the Mem website and repository by default, and drops each when hidden", () => {
+  assert.deepEqual(presenceActivity(agents(1), 5)?.buttons, [
+    { label: "Mem website", url: "https://spectatehaze.github.io/mem-site/" },
     { label: "Mem on GitHub", url: "https://github.com/SpectateHaZe/mem" },
   ]);
-  assert.notProperty(
-    presenceActivity(1, 5, {
+  assert.deepEqual(
+    presenceActivity(agents(1), 5, {
       presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, showGithubButton: false },
+    })?.buttons,
+    [DISCORD_WEBSITE_BUTTON],
+  );
+  assert.deepEqual(
+    presenceActivity(agents(1), 5, {
+      presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, showWebsiteButton: false },
+    })?.buttons,
+    [DISCORD_GITHUB_BUTTON],
+  );
+  assert.notProperty(
+    presenceActivity(agents(1), 5, {
+      presence: {
+        ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
+        showGithubButton: false,
+        showWebsiteButton: false,
+      },
     })!,
     "buttons",
   );
 });
 
-it("adds a custom button beside the GitHub one once its label and https URL are valid", () => {
+it("gives a custom button the website's slot so both built-ins stay visible", () => {
   const base = {
     ...DEFAULT_DISCORD_PRESENCE_SETTINGS,
     customButtonUrl: "https://mem.example/docs",
   };
   assert.deepEqual(
-    presenceActivity(1, 5, {
+    presenceActivity(agents(1), 5, {
       presence: { ...base, customButtonLabel: "  Docs  " },
     })?.buttons,
-    [DISCORD_GITHUB_BUTTON, { label: "Docs", url: "https://mem.example/docs" }],
+    [{ label: "Docs", url: "https://mem.example/docs" }, DISCORD_GITHUB_BUTTON],
   );
   // 32 characters is Discord's ceiling for a label, not one past it.
   const longest = "l".repeat(32);
   assert.deepEqual(
-    presenceActivity(1, 5, {
+    presenceActivity(agents(1), 5, {
       presence: { ...base, customButtonLabel: longest },
     })?.buttons,
-    [DISCORD_GITHUB_BUTTON, { label: longest, url: "https://mem.example/docs" }],
+    [{ label: longest, url: "https://mem.example/docs" }, DISCORD_GITHUB_BUTTON],
   );
   // The custom button stands alone when the GitHub one is hidden.
   assert.deepEqual(
-    presenceActivity(1, 5, {
+    presenceActivity(agents(1), 5, {
       presence: { ...base, customButtonLabel: "Docs", showGithubButton: false },
     })?.buttons,
     [{ label: "Docs", url: "https://mem.example/docs" }],
@@ -316,21 +391,21 @@ it("drops an invalid custom button instead of the whole card", () => {
     customButtonUrl: "https://mem.example",
   };
   for (const customButtonUrl of ["", "http://mem.example", "mem.example", "javascript:alert(1)"]) {
-    const activity = presenceActivity(1, 5, { presence: { ...base, customButtonUrl } });
-    assert.deepEqual(activity?.buttons, [DISCORD_GITHUB_BUTTON]);
+    const activity = presenceActivity(agents(1), 5, { presence: { ...base, customButtonUrl } });
+    assert.deepEqual(activity?.buttons, [DISCORD_WEBSITE_BUTTON, DISCORD_GITHUB_BUTTON]);
     assert.equal(activity?.details, "1 agent working");
   }
   for (const customButtonLabel of ["", "   ", "l".repeat(33)]) {
     assert.deepEqual(
-      presenceActivity(1, 5, { presence: { ...base, customButtonLabel } })?.buttons,
-      [DISCORD_GITHUB_BUTTON],
+      presenceActivity(agents(1), 5, { presence: { ...base, customButtonLabel } })?.buttons,
+      [DISCORD_WEBSITE_BUTTON, DISCORD_GITHUB_BUTTON],
     );
   }
 });
 
 it("clears the card when the owner turns presence off", () => {
   assert.isNull(
-    presenceActivity(2, 5, {
+    presenceActivity(agents(2), 5, {
       presence: { ...DEFAULT_DISCORD_PRESENCE_SETTINGS, enabled: false },
     }),
   );
@@ -379,5 +454,5 @@ it("truncates a rendered template to Discord's limit", () => {
 it("only opens a socket when there is a client and something to show", () => {
   assert.isFalse(shouldOpenDiscordConnection("", null));
   assert.isFalse(shouldOpenDiscordConnection("123", null));
-  assert.isTrue(shouldOpenDiscordConnection("123", presenceActivity(1, 5)));
+  assert.isTrue(shouldOpenDiscordConnection("123", presenceActivity(agents(1), 5)));
 });

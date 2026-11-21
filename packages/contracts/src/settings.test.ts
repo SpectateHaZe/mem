@@ -584,8 +584,9 @@ describe("Discord presence settings", () => {
     smallImageKey: "",
     smallImageText: "",
     showElapsedTimer: true,
-    idleText: "mem in control",
+    autonomousText: "Working autonomously",
     showGithubButton: true,
+    showWebsiteButton: true,
     customButtonLabel: "",
     customButtonUrl: "",
   };

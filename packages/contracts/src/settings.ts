@@ -1326,10 +1326,13 @@ export const DiscordPresenceSettings = Schema.Struct({
   showElapsedTimer: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
   /** Absent falls back to the retired `discordPresenceShowProjectName`; see the resolver below. */
   showProjectName: Schema.optionalKey(Schema.Boolean),
-  /** Shown instead of the templates while Mem is in control and no agent is live. */
-  idleText: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed("mem in control"))),
+  /** Replaces the details line while autonomous mode is driving sessions. */
+  autonomousText: Schema.String.pipe(
+    Schema.withDecodingDefault(Effect.succeed("Working autonomously")),
+  ),
   showGithubButton: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
-  /** Both parts are needed for the optional second button; see the resolver below. */
+  showWebsiteButton: Schema.Boolean.pipe(Schema.withDecodingDefault(Effect.succeed(true))),
+  /** Both parts are needed for the optional button; see the resolver below. */
   customButtonLabel: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
   customButtonUrl: Schema.String.pipe(Schema.withDecodingDefault(Effect.succeed(""))),
 });
@@ -1348,25 +1351,33 @@ export const DISCORD_GITHUB_BUTTON: DiscordActivityButton = {
   url: "https://github.com/SpectateHaZe/mem",
 };
 
+/** The public site for Mem, published from the mem-site project. */
+export const DISCORD_WEBSITE_BUTTON: DiscordActivityButton = {
+  label: "Mem website",
+  url: "https://spectatehaze.github.io/mem-site/",
+};
+
 const DISCORD_BUTTON_LABEL_MAX_LENGTH = 32;
 const isHttpsUrl = (value: string): boolean => /^https:\/\/\S+$/i.test(value);
 
 /**
- * Discord draws up to two buttons under the activity, which is exactly what this can return.
- * The GitHub button is on unless the owner hides it; a custom button needs a 1–32 character label
- * and an https URL, and drops whole when either part is missing, so a half-filled form never
- * breaks the card.
+ * Discord shows at most two buttons. A custom button takes the website's slot rather than becoming
+ * a third, so setting one never silently drops a button the owner turned on. A half-filled pair
+ * drops whole, so an unfinished form never breaks the card.
  */
 export const resolveDiscordActivityButtons = (
   presence: DiscordPresenceSettings,
 ): ReadonlyArray<DiscordActivityButton> => {
-  const buttons: DiscordActivityButton[] = presence.showGithubButton ? [DISCORD_GITHUB_BUTTON] : [];
   const label = presence.customButtonLabel.trim();
   const url = presence.customButtonUrl.trim();
-  if (label !== "" && label.length <= DISCORD_BUTTON_LABEL_MAX_LENGTH && isHttpsUrl(url)) {
-    buttons.push({ label, url });
-  }
-  return buttons;
+  const custom =
+    label !== "" && label.length <= DISCORD_BUTTON_LABEL_MAX_LENGTH && isHttpsUrl(url)
+      ? [{ label, url }]
+      : [];
+  const primary =
+    custom.length > 0 ? custom : presence.showWebsiteButton ? [DISCORD_WEBSITE_BUTTON] : [];
+  const buttons = [...primary, ...(presence.showGithubButton ? [DISCORD_GITHUB_BUTTON] : [])];
+  return buttons.slice(0, 2);
 };
 
 /** A thread whose main agent only leads subagents, and the model they run on. */
@@ -2021,8 +2032,9 @@ export const ServerSettingsPatch = Schema.Struct({
       smallImageText: Schema.optionalKey(Schema.String),
       showElapsedTimer: Schema.optionalKey(Schema.Boolean),
       showProjectName: Schema.optionalKey(Schema.Boolean),
-      idleText: Schema.optionalKey(Schema.String),
+      autonomousText: Schema.optionalKey(Schema.String),
       showGithubButton: Schema.optionalKey(Schema.Boolean),
+      showWebsiteButton: Schema.optionalKey(Schema.Boolean),
       customButtonLabel: Schema.optionalKey(Schema.String),
       customButtonUrl: Schema.optionalKey(Schema.String),
     }),

@@ -16,6 +16,7 @@ import * as Layer from "effect/Layer";
 import * as ProjectStore from "../orchestration-v2/ProjectStore.ts";
 import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as MemIdleTracker from "../overseer/MemIdleTracker.ts";
+import * as MemOverseerTaskStore from "../overseer/MemOverseerTaskStore.ts";
 import * as Scheduler from "../scheduling/Scheduler.ts";
 import * as ServerSettings from "../serverSettings.ts";
 
@@ -165,45 +166,78 @@ const summarizeStatePart = (values: ReadonlyArray<string>): string | undefined =
 /**
  * Never names a thread: Discord shows this to the user's friends, so project
  * names only appear when the user turns them on.
- * Zero live agents clears the presence instead of leaving a stale count.
+ * Nothing running and nothing Mem is driving clears the presence instead of leaving a stale card.
  * A large image key must already be registered on the Discord application.
  */
+export type DiscordPresenceState =
+  | { readonly kind: "none"; readonly agents: 0 }
+  | { readonly kind: "agents"; readonly agents: number }
+  | { readonly kind: "autonomous"; readonly agents: number };
+
+const normalizedAgents = (liveAgents: number): number =>
+  Number.isFinite(liveAgents) ? Math.max(0, Math.floor(liveAgents)) : 0;
+
+/**
+ * What the card should say, before any text is rendered. Autonomous mode wins only while Mem is
+ * actually driving a claimed session, so a finished round with nothing queued clears the card
+ * instead of claiming work that is not happening.
+ */
+export const resolvePresenceState = (input: {
+  readonly liveAgents: number;
+  readonly autonomous: boolean;
+  /** Sessions Mem claimed and has not finished: claimed or awaiting review. */
+  readonly autonomousSessions: number;
+}): DiscordPresenceState => {
+  const agents = normalizedAgents(input.liveAgents);
+  const sessions = normalizedAgents(input.autonomousSessions);
+  if (input.autonomous && sessions > 0) return { kind: "autonomous", agents };
+  if (agents > 0) return { kind: "agents", agents };
+  return { kind: "none", agents: 0 };
+};
+
 export const presenceActivity = (
-  liveAgents: number,
+  state: DiscordPresenceState,
   startedAtMs: number,
   options: {
     readonly modelNames?: ReadonlyArray<string>;
     readonly projectNames?: ReadonlyArray<string>;
     /** The user's Rich Presence text and images; the defaults keep Discord's original card. */
     readonly presence?: DiscordPresenceSettings;
-    /** The overseer is driving the sessions, so presence survives with no thread running. */
-    readonly overseerInControl?: boolean;
     /** Only claim the owner is away when idle detection actually said so. */
     readonly ownerAfk?: boolean;
   } = {},
 ): DiscordActivity | null => {
-  const agents = Number.isFinite(liveAgents) ? Math.max(0, Math.floor(liveAgents)) : 0;
-  const overseer = options.overseerInControl === true;
-  if (agents === 0 && !overseer) return null;
+  if (state.kind === "none") return null;
+  const agents = normalizedAgents(state.agents);
   const presence = options.presence ?? DEFAULT_DISCORD_PRESENCE_SETTINGS;
   if (!presence.enabled) return null;
   const values: DiscordTemplateValues = {
     agents,
     project: summarizeStatePart(options.projectNames ?? []) ?? "",
     model: summarizeStatePart(options.modelNames ?? []) ?? "",
-    mode: summarizeMode({ overseer, ownerAfk: options.ownerAfk === true }),
+    mode: summarizeMode({ ownerAfk: options.ownerAfk === true }),
   };
-  // Mem driving with nothing running is a state, not a count, so the idle text replaces the template.
-  const details = discordField(
-    overseer && agents === 0
-      ? presence.idleText
-      : renderDiscordTemplate(presence.detailsTemplate, values),
+  // Autonomous mode replaces the details line so the owner's friends see Mem is driving, and
+  // keeps the count visible without naming a project or a thread.
+  const autonomousText = discordField(
+    [
+      presence.autonomousText,
+      agents > 0 ? renderDiscordTemplate("{agents}", values) : "",
+      values.mode,
+    ]
+      .map((part) => part.trim())
+      .filter((part) => part !== "")
+      .join(" · "),
   );
-  const state = discordField(renderDiscordTemplate(presence.stateTemplate, values));
+  const details =
+    state.kind === "autonomous"
+      ? autonomousText
+      : discordField(renderDiscordTemplate(presence.detailsTemplate, values));
+  const stateLine = discordField(renderDiscordTemplate(presence.stateTemplate, values));
   const assets = presenceAssets(presence);
   const activity: DiscordActivity = {
     ...(details === undefined ? {} : { details }),
-    ...(state === undefined ? {} : { state }),
+    ...(stateLine === undefined ? {} : { state: stateLine }),
     ...(presence.showElapsedTimer ? { timestamps: { start: Math.floor(startedAtMs) } } : {}),
     ...(Object.keys(assets).length === 0 ? {} : { assets }),
   };
@@ -250,10 +284,8 @@ export const renderDiscordTemplate = (template: string, values: DiscordTemplateV
   return truncateDiscordText(joined.replace(/\s+/g, " "));
 };
 
-const summarizeMode = (input: { readonly overseer: boolean; readonly ownerAfk: boolean }): string =>
-  [input.overseer && input.ownerAfk ? "user is afk" : "", input.overseer ? "mem in control" : ""]
-    .filter((part) => part !== "")
-    .join(" · ");
+const summarizeMode = (input: { readonly ownerAfk: boolean }): string =>
+  input.ownerAfk ? "user is afk" : "";
 
 /** Discord rejects fields shorter than two characters, so a blank line drops instead. */
 const discordField = (value: string): string | undefined => {
@@ -458,6 +490,7 @@ const makeSweep = Effect.gen(function* () {
   const projections = yield* ProjectionStore.ProjectionStoreV2;
   const projects = yield* ProjectStore.ProjectStoreV2;
   const idleTracker = yield* MemIdleTracker.MemIdleTracker;
+  const taskStore = yield* MemOverseerTaskStore.MemOverseerTaskStore;
   const ipc = new DiscordIpc(
     discordIpcPathCandidates(yield* HostProcess.Platform, yield* HostProcess.Environment),
   );
@@ -496,7 +529,22 @@ const makeSweep = Effect.gen(function* () {
     const liveThreads = (yield* projections.listActiveShellIndex()).filter(
       (thread) => thread.mayBeLive,
     );
-    if (liveThreads.length === 0 && !mem.enabled) {
+    // Mem's own claimed sessions outlive a turn; without them the card would blink off between
+    // rounds and back on when the next instruction starts a run.
+    const records = yield* taskStore
+      .all()
+      .pipe(
+        Effect.orElseSucceed(() => [] as ReadonlyArray<MemOverseerTaskStore.MemOverseerTaskRecord>),
+      );
+    const autonomousSessions = records.filter(
+      (record) => record.task.phase === "claimed" || record.task.phase === "awaitingReview",
+    ).length;
+    const state = resolvePresenceState({
+      liveAgents: liveThreads.length,
+      autonomous: mem.enabled && mem.autonomous,
+      autonomousSessions,
+    });
+    if (state.kind === "none") {
       activityStartedAtMs = undefined;
       ipc.update(clientId, null);
       return;
@@ -511,15 +559,15 @@ const makeSweep = Effect.gen(function* () {
         : [];
     // The sweep already runs on its own interval, so the idle check rides along instead of a timer.
     const ownerAfk = mem.enabled ? yield* idleTracker.isOwnerAway(mem.idleThresholdMinutes) : false;
+    // The sweep's 15 s interval is the debounce; the socket also drops a payload that did not change.
     ipc.update(
       clientId,
-      presenceActivity(liveThreads.length, activityStartedAtMs, {
+      presenceActivity(state, activityStartedAtMs, {
         modelNames: liveThreads
           .map((thread) => thread.modelName)
           .filter((name): name is string => name !== null),
         projectNames,
         presence: discordPresence,
-        overseerInControl: mem.enabled,
         ownerAfk,
       }),
     );

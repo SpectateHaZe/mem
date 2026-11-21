@@ -435,7 +435,6 @@ export const layerProduction = Layer.mergeAll(
         layerProjectService,
         layerThreadManagementProvided,
         MemReviewer.layer.pipe(Layer.provide(TextGeneration.layer)),
-        MemOverseerTaskStore.layer,
       ),
     ),
   ),
@@ -466,5 +465,7 @@ export const layerProduction = Layer.mergeAll(
   // One idle clock for the process: the overseer and presence read this value, and the WebSocket
   // activity hook writes through the service that holds it, so no second tracker is ever built.
   Layer.provideMerge(MemIdleTracker.layer),
+  // One task store too: presence reads the same claimed sessions the overseer writes.
+  Layer.provideMerge(MemOverseerTaskStore.layer),
   Layer.provideMerge(layerEventInfrastructure),
 );

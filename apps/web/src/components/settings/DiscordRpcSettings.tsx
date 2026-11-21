@@ -28,7 +28,6 @@ import {
 const PREVIEW_AGENTS = "2 agents";
 const PREVIEW_PROJECT = "my-project";
 const PREVIEW_MODEL = "gpt-5.4";
-const PREVIEW_MODE = "mem in control";
 
 const DEFAULTS = DEFAULT_DISCORD_PRESENCE_SETTINGS;
 
@@ -104,7 +103,9 @@ function DiscordCardPreview({
     model: PREVIEW_MODEL,
     mode,
   };
-  const details = renderTemplate(presence.detailsTemplate, values) || presence.idleText.trim();
+  // The first line falls back to the autonomous text, which is what Discord shows while Mem drives.
+  const details =
+    renderTemplate(presence.detailsTemplate, values) || presence.autonomousText.trim();
   const state = renderTemplate(presence.stateTemplate, values);
   const smallImageKey = presence.smallImageKey.trim();
   return (
@@ -251,14 +252,14 @@ export function DiscordRpcSettingsPanel() {
         />
         <SettingsRow
           serverScoped
-          {...searchableSetting("discord-idle-text")}
-          description="Shown instead of the details line while Mem is in control and no agent is running."
+          {...searchableSetting("discord-autonomous-text")}
+          description="Replaces the first line while autonomous mode is driving sessions. The live agent count is added after it when agents are running; project and thread names never are."
           settingKeys={["discordPresence"]}
           resetAction={
-            presence.idleText !== DEFAULTS.idleText && !mixed ? (
+            presence.autonomousText !== DEFAULTS.autonomousText && !mixed ? (
               <SettingResetButton
-                label="idle text"
-                onClick={() => update({ idleText: DEFAULTS.idleText })}
+                label="autonomous text"
+                onClick={() => update({ autonomousText: DEFAULTS.autonomousText })}
               />
             ) : null
           }
@@ -266,10 +267,10 @@ export function DiscordRpcSettingsPanel() {
             <DraftInput
               size="sm"
               className="w-full sm:w-56"
-              value={presence.idleText}
-              onCommit={(next) => update({ idleText: next })}
-              placeholder={mixed ? "Mixed" : DEFAULTS.idleText}
-              aria-label="Idle text"
+              value={presence.autonomousText}
+              onCommit={(next) => update({ autonomousText: next })}
+              placeholder={mixed ? "Mixed" : DEFAULTS.autonomousText}
+              aria-label="Autonomous text"
             />
           }
         />
@@ -388,8 +389,22 @@ export function DiscordRpcSettingsPanel() {
       <SettingsSection id="discord-buttons" title="Buttons">
         <SettingsRow
           serverScoped
+          {...searchableSetting("discord-website-button")}
+          description="Adds a “Mem website” button linking to the public site, on by default. Discord only shows activity buttons to people viewing your profile, so your own card stays without them."
+          settingKeys={["discordPresence"]}
+          control={
+            <ScopedSwitch
+              settingKeys={["discordPresence"]}
+              checked={presence.showWebsiteButton}
+              onCheckedChange={(checked) => update({ showWebsiteButton: Boolean(checked) })}
+              aria-label="Show Mem website button"
+            />
+          }
+        />
+        <SettingsRow
+          serverScoped
           {...searchableSetting("discord-github-button")}
-          description="Adds a “Mem on GitHub” button linking to the repository, on by default. Discord only shows activity buttons to people viewing your profile, so your own card stays without them."
+          description="Adds a “Mem on GitHub” button linking to the repository, on by default."
           settingKeys={["discordPresence"]}
           control={
             <ScopedSwitch
@@ -403,7 +418,7 @@ export function DiscordRpcSettingsPanel() {
         <SettingsRow
           serverScoped
           {...searchableSetting("discord-custom-button")}
-          description="Optional second button. It needs a label of 1–32 characters and an https link; until both are valid the button stays off the card."
+          description="Optional link of your own. It replaces the website button rather than becoming a third, needs a label of 1–32 characters and an https link, and stays off the card until both are valid."
           settingKeys={["discordPresence"]}
           resetAction={
             (presence.customButtonLabel !== DEFAULTS.customButtonLabel ||
@@ -444,15 +459,12 @@ export function DiscordRpcSettingsPanel() {
           title="Your Discord profile card"
           description={
             presence.enabled
-              ? "Rendered with a sample project, model, and two agents. Discord replaces the asset keys with the images uploaded to your application."
+              ? "Rendered with a sample project, model, and two agents. While autonomous mode drives, the first line becomes your autonomous text. Discord draws the asset keys as your uploaded images."
               : "Presence is off, so this card stays hidden on Discord."
           }
         >
           <div className={cn("pb-3.5", !presence.enabled && "opacity-50")}>
-            <DiscordCardPreview
-              presence={{ ...presence, showProjectName }}
-              mode={settings.mem.enabled ? PREVIEW_MODE : ""}
-            />
+            <DiscordCardPreview presence={{ ...presence, showProjectName }} mode="" />
           </div>
         </SettingsRow>
       </SettingsSection>
