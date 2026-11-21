@@ -45,6 +45,7 @@ function Card({
   rows = 1,
   automationRows = 0,
   serverOverflowRows = 0,
+  sectionBodyRows = 0,
 }: {
   threadRef: ScopedThreadRef;
   inline: boolean;
@@ -55,6 +56,8 @@ function Card({
   automationRows?: number;
   /** Rows of 100px that expanded server lists add, which density ignores. */
   serverOverflowRows?: number;
+  /** Rows of 100px in an opened section, half of them in a server list nested inside it. */
+  sectionBodyRows?: number;
 }) {
   return (
     // The web root renders in StrictMode, which re-runs ref callbacks on every mount.
@@ -91,6 +94,14 @@ function Card({
                   data-thread-details-server-overflow
                   style={{ height: serverOverflowRows * 100 }}
                 />
+              ) : null}
+              {density === "full" && sectionBodyRows > 0 ? (
+                <div data-thread-details-section-body style={{ height: sectionBodyRows * 100 }}>
+                  <div
+                    data-thread-details-server-overflow
+                    style={{ height: sectionBodyRows * 50 }}
+                  />
+                </div>
               ) : null}
             </>
           )}
@@ -195,4 +206,18 @@ it("stays full while expanded server rows overflow", async () => {
   await expect
     .element(page.getByRole("region", { name: "Thread details" }))
     .toHaveAttribute("data-density", "full");
+});
+
+it("ignores opened sections, counting a list nested in one only once", async () => {
+  using fixture = setup();
+  await using screen = await render(
+    <Card threadRef={threadB} inline fixture={fixture} rows={2} sectionBodyRows={6} />,
+  );
+  const card = page.getByRole("region", { name: "Thread details" });
+  await expect.element(card).toHaveAttribute("data-density", "full");
+
+  await screen.rerender(
+    <Card threadRef={threadB} inline fixture={fixture} rows={5} sectionBodyRows={3} />,
+  );
+  await expect.element(card).toHaveAttribute("data-density", "compact");
 });

@@ -15,7 +15,6 @@ import {
 } from "@t3tools/client-runtime/state/subagent-panel";
 import { EnvironmentId, OrchestrationV2RemoteTaskChild, ThreadId } from "@t3tools/contracts";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
-import { BotIcon, ChevronDownIcon } from "lucide-react";
 import { useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useQuietThreadProjection, useQuietThreadShell } from "../../state/entities";
@@ -25,12 +24,8 @@ import { buildThreadRouteParams } from "../../threadRoutes";
 import { cn } from "../../lib/utils";
 import { SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
-import { ThreadDetailsSection } from "./ThreadDetailsSection";
-import {
-  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LABEL_CLASS,
-} from "./threadDetailsPanelStyles";
+import { isLiveSubagent, splitEarlier } from "./ThreadDetailsPanel.logic";
+import { ThreadDetailsEarlierToggle, ThreadDetailsSection } from "./ThreadDetailsSection";
 
 /** One row of the subagents panel: title, live to-do progress, one status line. */
 function SubagentProgressRow(props: {
@@ -144,8 +139,8 @@ function SubagentProgressRow(props: {
 
 /**
  * The thread's delegated subagents, each with progress from its real to-do list and one truthful
- * status line. Finished tasks stay listed; a thread without subagents renders nothing. Desktop
- * shows the same panel, since it wraps this web client.
+ * status line. Finished tasks wait behind Show earlier; a thread without subagents renders nothing.
+ * Desktop shows the same panel, since it wraps this web client.
  */
 export function SubagentProgressPanel(props: {
   readonly environmentId: EnvironmentId;
@@ -153,7 +148,7 @@ export function SubagentProgressPanel(props: {
 }) {
   const ref = scopeThreadRef(props.environmentId, props.threadId);
   const structure = useQuietThreadProjection(ref);
-  const [expanded, setExpanded] = useState(true);
+  const [showEarlier, setShowEarlier] = useState(false);
   const navigate = useNavigate();
 
   // Flats and workflow members list; the coordinators fall back in, so a workflow whose members
@@ -203,53 +198,48 @@ export function SubagentProgressPanel(props: {
   const failedCount = rows.filter(
     (agent) => agent.status === "failed" || agent.status === "cancelled",
   ).length;
+  // shortcut: splits on the task's own status, so a finished task whose thread runs again stays
+  // under Show earlier; split on the row's shell-refreshed status if that proves confusing.
+  const { live, earlier } = splitEarlier(rows, isLiveSubagent);
+  const renderRow = (agent: RuntimeSubagent) => (
+    <SubagentProgressRow
+      key={agent.id}
+      environmentId={props.environmentId}
+      agent={agent}
+      remote={remoteForAgent(agent)}
+      onOpenThread={openChild}
+      onOpenRemote={openRemote}
+    />
+  );
 
   return (
     <ThreadDetailsSection
       headingId="thread-details-subagents-heading"
       title="Subagents"
-      showHeading={false}
+      summary={
+        <>
+          {failedCount > 0 ? <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus> : null}
+          {rows.length}
+        </>
+      }
       data-subagents-progress-panel
     >
-      <div>
-        <ThreadDetailsControl aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          <BotIcon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 flex-1 truncate")}>
-            Subagents
-          </span>
-          {failedCount > 0 ? <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus> : null}
-          {expanded ? null : (
-            <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">
-              {rows.length}
-            </span>
-          )}
-          <ChevronDownIcon
-            aria-hidden
-            className={cn(
-              THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-              "transition-transform",
-              !expanded && "-rotate-90",
-            )}
-          />
-        </ThreadDetailsControl>
-        {expanded ? (
-          <ul
-            aria-label="Subagents"
-            className="m-0 max-h-64 list-none overflow-y-auto overscroll-contain p-0"
-          >
-            {rows.map((agent) => (
-              <SubagentProgressRow
-                key={agent.id}
-                environmentId={props.environmentId}
-                agent={agent}
-                remote={remoteForAgent(agent)}
-                onOpenThread={openChild}
-                onOpenRemote={openRemote}
-              />
-            ))}
-          </ul>
+      <ul
+        aria-label="Subagents"
+        className="m-0 max-h-64 list-none overflow-y-auto overscroll-contain p-0"
+      >
+        {live.map(renderRow)}
+        {earlier.length > 0 ? (
+          <li>
+            <ThreadDetailsEarlierToggle
+              count={earlier.length}
+              shown={showEarlier}
+              onToggle={() => setShowEarlier(!showEarlier)}
+            />
+          </li>
         ) : null}
-      </div>
+        {showEarlier ? earlier.map(renderRow) : null}
+      </ul>
     </ThreadDetailsSection>
   );
 }

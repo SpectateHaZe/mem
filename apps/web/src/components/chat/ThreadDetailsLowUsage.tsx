@@ -10,7 +10,7 @@ import {
 } from "../../providerInstances";
 import { ProviderModelPicker } from "./ProviderModelPicker";
 import { Switch } from "../ui/switch";
-import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 
 export function ThreadDetailsLowUsage(props: {
   readonly environmentId: EnvironmentId;
@@ -47,58 +47,62 @@ export function ThreadDetailsLowUsage(props: {
     return `${name}${selection.model.endsWith("-free") ? " (free)" : ""}`;
   };
 
+  // A row of the usage section, aligned with its limit rows.
   return (
-    <ThreadDetailsSection headingId="thread-details-low-usage" title="Low usage mode">
-      <div className="flex flex-col gap-2 px-1">
-        <label className="flex items-center justify-between gap-2 text-xs">
-          <span>Main agent only leads subagents</span>
-          <Switch
-            aria-label="Low usage mode"
-            checked={saved !== undefined || choosingModel}
-            onCheckedChange={(checked) => {
-              setChoosingModel(checked);
-              if (!checked) updateSettings({ lowUsageThreads: others });
-            }}
-          />
-        </label>
-        {activeInstanceId && (saved !== undefined || choosingModel) ? (
-          <ProviderModelPicker
-            environmentId={props.environmentId}
-            activeInstanceId={activeInstanceId}
-            model={savedSelection?.model ?? ""}
-            lockedProvider={null}
-            instanceEntries={entries}
-            modelOptionsByInstance={modelOptionsByInstance}
-            size="sm"
-            triggerLabel={
-              savedSelection
-                ? `Subagent: ${modelLabel(savedSelection)}`
-                : savedUnavailable
-                  ? `Unavailable: ${saved.subagentModel.model}. Choose another`
-                  : "Choose subagent model"
-            }
-            triggerAriaLabel="Subagent model"
-            triggerClassName="w-full justify-between rounded-lg border bg-background text-sm font-normal sm:text-xs"
-            open={choosingModel}
-            onOpenChange={(open) => setChoosingModel(open)}
-            onInstanceModelChange={(instanceId, model) => {
-              setChoosingModel(false);
-              updateSettings({
-                lowUsageThreads: [
-                  ...others,
-                  { threadId: props.threadId, subagentModel: { instanceId, model } },
-                ],
-              });
-            }}
-          />
-        ) : null}
-        {savedUnavailable ? (
-          <p className="text-destructive text-xs" role="alert">
-            The subagent model's provider is gone, so low usage mode is paused and the lead works
-            normally. Choose another model to turn it back on.
-          </p>
-        ) : null}
-      </div>
-    </ThreadDetailsSection>
+    <div className="flex flex-col gap-2 px-2.5 pt-1">
+      <label className="flex min-h-6 items-center justify-between gap-2 text-xs">
+        <Tooltip>
+          <TooltipTrigger render={<span className="min-w-0 truncate text-muted-foreground" />}>
+            Low usage mode
+          </TooltipTrigger>
+          <TooltipPopup side="left">The main agent only leads subagents</TooltipPopup>
+        </Tooltip>
+        <Switch
+          aria-label="Low usage mode"
+          checked={saved !== undefined || choosingModel}
+          onCheckedChange={(checked) => {
+            setChoosingModel(checked);
+            if (!checked) updateSettings({ lowUsageThreads: others });
+          }}
+        />
+      </label>
+      {activeInstanceId && (saved !== undefined || choosingModel) ? (
+        <ProviderModelPicker
+          environmentId={props.environmentId}
+          activeInstanceId={activeInstanceId}
+          model={savedSelection?.model ?? ""}
+          lockedProvider={null}
+          instanceEntries={entries}
+          modelOptionsByInstance={modelOptionsByInstance}
+          size="sm"
+          triggerLabel={
+            savedSelection
+              ? `Subagent: ${modelLabel(savedSelection)}`
+              : savedUnavailable
+                ? `Unavailable: ${saved.subagentModel.model}. Choose another`
+                : "Choose subagent model"
+          }
+          triggerAriaLabel="Subagent model"
+          triggerClassName="w-full justify-between rounded-lg border bg-background text-sm font-normal sm:text-xs"
+          open={choosingModel}
+          onOpenChange={(open) => setChoosingModel(open)}
+          onInstanceModelChange={(instanceId, model) => {
+            setChoosingModel(false);
+            updateSettings({
+              lowUsageThreads: [
+                ...others,
+                { threadId: props.threadId, subagentModel: { instanceId, model } },
+              ],
+            });
+          }}
+        />
+      ) : null}
+      {savedUnavailable ? (
+        <p className="text-destructive text-xs" role="alert">
+          The subagent model's provider is gone, so low usage mode is paused and the lead works
+          normally. Choose another model to turn it back on.
+        </p>
+      ) : null}
+    </div>
   );
 }

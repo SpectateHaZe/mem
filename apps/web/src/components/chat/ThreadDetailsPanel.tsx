@@ -268,14 +268,16 @@ export function ThreadDetailsPanel(props: ThreadDetailsPanelProps) {
                 />
               ) : null}
 
-              {visible.lowUsage ? (
-                <ThreadDetailsLowUsage
-                  environmentId={props.environmentId}
-                  threadId={props.threadId}
-                />
+              {visible.usage || visible.lowUsage ? (
+                <ThreadDetailsUsage {...props.usage} showLimits={visible.usage}>
+                  {visible.lowUsage ? (
+                    <ThreadDetailsLowUsage
+                      environmentId={props.environmentId}
+                      threadId={props.threadId}
+                    />
+                  ) : null}
+                </ThreadDetailsUsage>
               ) : null}
-
-              {visible.usage ? <ThreadDetailsUsage {...props.usage} /> : null}
 
               {visible.sessionUsage && props.usage.sessionUsage ? (
                 <ThreadDetailsSessionUsage usage={props.usage.sessionUsage} />

@@ -1,6 +1,6 @@
 # Usage and limits
 
-Open **Usage** from the sidebar or the command palette, or press `mod+u` on web and
+Open **Usage** from the sidebar's **More** menu or the command palette, or press `mod+u` on web and
 desktop when the terminal is not focused. Customize `usage.open` in
 **Settings → Keybindings**.
 
@@ -144,10 +144,11 @@ closes when you dismiss it or send your next message. It uses the same snapshot 
 anything. The command is offered only for providers that appear under **Usage → Limits**.
 
 To keep them in view on web and desktop, turn on **Usage limits** in **Settings → Appearance → Thread details**, or right-click the thread details card.
-The bottom of the thread details card then shows how much is left in each limit window of the
-current provider account. Some windows, such as a weekly Opus limit, count only one model. Hover a
-row to see when it resets and your pace. Turn on **Context window** to also show the thread's
-context use against the model's limit. A tick on the bar marks where the provider compacts
+The thread details card then shows one row per provider account: the window closest to its limit, with
+the time until it resets. Hover or click a row to see every window for that account, with each reset
+time and your pace. Some windows, such as a weekly Opus limit, count only one model. The Usage section
+starts collapsed and remembers whether you opened it. Turn on **Context window** to also show the
+thread's context use against the model's limit. A tick on the bar marks where the provider compacts
 automatically, when it reports that point.
 
 OpenCode Go reports its session, weekly, and monthly allowance when OpenCode runs locally in

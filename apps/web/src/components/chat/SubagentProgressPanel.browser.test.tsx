@@ -95,8 +95,11 @@ function childProjection(overrides: Record<string, unknown> = {}) {
   return { environmentId, projection: { ...makeThreadProjectionFixture(), ...overrides } };
 }
 
-/** One working one-of-three task beside a finished task with no checklist. */
+const SECTION_OPEN_KEY = "t3code.threadDetailsSection.thread-details-subagents-heading";
+
+/** One working one-of-three task beside a finished task with no checklist, its section open. */
 function setup() {
+  localStorage.setItem(SECTION_OPEN_KEY, "true");
   state.shells = new Map([["child-a", activeShell]]);
   state.children = new Map([["child-a", childProjection({ plans: [todoPlan] })]]);
   state.environment = "remote";
@@ -144,6 +147,8 @@ it("shows each task's bar from its real checklist, or No task list", async () =>
   expect(bar.getAttribute("aria-valuemax")).toBe("3");
   await expect.element(page.getByText("1 of 3", { exact: true })).toBeVisible();
   await expect.element(page.getByText("Working on: Write the fix", { exact: true })).toBeVisible();
+  await expect.element(page.getByText("Finished", { exact: true })).not.toBeInTheDocument();
+  await screen.getByRole("button", { name: "Show 1 earlier" }).click();
   await expect.element(page.getByText("Finished", { exact: true })).toBeVisible();
   await expect.element(page.getByText("No task list", { exact: true })).toBeVisible();
 });
@@ -186,6 +191,7 @@ it("reports the awaited work it holds on as Waiting on", async () => {
 });
 
 it("keeps a truly finished failed task from a lying Working on label", async () => {
+  setup();
   const plan: SubagentTodoList = { ...todoPlan, status: "active" };
   state.shells = new Map([["child-a", { ...activeShell, runtime: null }]]);
   state.children = new Map([["child-a", childProjection({ plans: [plan] })]]);
@@ -203,21 +209,23 @@ it("keeps a truly finished failed task from a lying Working on label", async () 
   await using screen = await render(
     <SubagentProgressPanel environmentId={environmentId} threadId={parentThreadId} />,
   );
+  await screen.getByRole("button", { name: "Show 1 earlier" }).click();
   await expect.element(page.getByText("Finished · Failed", { exact: true })).toBeVisible();
   expect(screen.container.textContent).not.toContain("Working on:");
 });
 
-it("collapses to its header and expands again", async () => {
+it("starts collapsed to its header and count, and expands again", async () => {
   setup();
+  localStorage.removeItem(SECTION_OPEN_KEY);
   await using screen = await render(
     <SubagentProgressPanel environmentId={environmentId} threadId={parentThreadId} />,
   );
-  expect(screen.container.querySelector('[role="progressbar"]')).not.toBeNull();
-  await screen.getByRole("button", { name: /Subagents/ }).click();
-  await vi.waitFor(() => expect(screen.container.querySelector('[role="progressbar"]')).toBeNull());
   await expect.element(page.getByText("2", { exact: true })).toBeVisible();
+  expect(screen.container.querySelector('[role="progressbar"]')).toBeNull();
   await screen.getByRole("button", { name: /Subagents/ }).click();
   await expect.element(page.getByText("1 of 3", { exact: true })).toBeVisible();
+  await screen.getByRole("button", { name: /Subagents/ }).click();
+  await vi.waitFor(() => expect(screen.container.querySelector('[role="progressbar"]')).toBeNull());
 });
 
 it("opens a delegated task's thread from its row", async () => {

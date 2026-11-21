@@ -42,6 +42,8 @@ const task = {
 } as ScheduledTask;
 
 async function setup() {
+  // The section starts collapsed; these tests use its rows.
+  localStorage.setItem("t3code.threadDetailsSection.thread-details-automations-heading", "true");
   state.allowed = true;
   state.toggle.mockReset().mockResolvedValue({ _tag: "Success" });
   state.run.mockReset().mockResolvedValue({ _tag: "Success" });

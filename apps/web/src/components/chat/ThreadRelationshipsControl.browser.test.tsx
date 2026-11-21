@@ -63,6 +63,9 @@ const environmentId = EnvironmentId.make("environment");
 const threadId = ThreadId.make("fork");
 
 function setup() {
+  // Both sections start collapsed; these tests use their rows.
+  localStorage.setItem("t3code.threadDetailsSection.thread-details-lineage-heading", "true");
+  localStorage.setItem("t3code.threadDetailsSection.thread-details-side-chats-heading", "true");
   state.commandSucceeds = false;
   state.relatedShells = [];
   state.threadTitles = { source: "Source" };
@@ -199,7 +202,7 @@ it("opens an idle child from Lineage when its shell has not been loaded", async 
       showSideChats
     />,
   );
-  await screen.getByRole("button", { name: /Previous agents/ }).click();
+  await screen.getByRole("button", { name: "Show 1 earlier" }).click();
   const child = screen.getByRole("button", { name: /Idle child/ });
   await expect.element(child).toBeEnabled();
   await child.click();
@@ -314,7 +317,7 @@ it("shows a remote subagent's full title in its tooltip even when its environmen
   await expect
     .element(screen.getByRole("button", { name: new RegExp(longTitle) }))
     .not.toBeInTheDocument();
-  await screen.getByRole("button", { name: /Previous agents/ }).click();
+  await screen.getByRole("button", { name: "Show 1 earlier" }).click();
   const row = screen.getByRole("button", { name: new RegExp(longTitle) });
   await userEvent.hover(row);
   await vi.waitFor(() =>

@@ -2,7 +2,7 @@ import { useAtomValue } from "@effect/atom-react";
 import { threadKey } from "@t3tools/client-runtime/state/entities";
 import { ThreadDetailsControl } from "./ThreadDetailsControl";
 import { ThreadHoverCardPopup } from "../ThreadHoverCard";
-import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadDetailsEarlierToggle, ThreadDetailsSection } from "./ThreadDetailsSection";
 import { SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { SubagentTooltipContent } from "./SubagentTooltipContent";
 import { PullRequestGlyph } from "../pullRequest/pullRequestIcons";
@@ -47,7 +47,6 @@ import { useNavigate } from "@tanstack/react-router";
 import {
   ArrowRightIcon,
   BotIcon,
-  ChevronDownIcon,
   CornerLeftUpIcon,
   GitForkIcon,
   MessagesSquareIcon,
@@ -87,11 +86,7 @@ import { Menu, MenuItem, MenuPopup, MenuTrigger } from "../ui/menu";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import { Spinner } from "../ui/spinner";
-import { cn } from "~/lib/utils";
 import {
-  THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-  THREAD_DETAILS_PANEL_ICON_CLASS,
-  THREAD_DETAILS_PANEL_LABEL_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_GROUP_CLASS,
   THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
   THREAD_DETAILS_PANEL_SPLIT_SEPARATOR_CLASS,
@@ -150,42 +145,23 @@ const isFinishedAgentStatus = (status: string | null | undefined) =>
   ["completed", "failed", "error", "cancelled", "interrupted", "idle"].includes(status ?? "");
 
 function ThreadLineageGroup<Row extends LineageRow>(props: {
-  readonly label: string | null;
+  /** Finished agents wait behind Show earlier. */
+  readonly earlier: boolean;
   readonly rows: ReadonlyArray<Row>;
-  readonly expanded: boolean;
   readonly children: (rows: ReadonlyArray<Row>) => ReactNode;
 }) {
-  const [expanded, setExpanded] = useState(props.expanded);
+  const [expanded, setExpanded] = useState(!props.earlier);
   const [visibleCount, setVisibleCount] = useState(THREAD_LINEAGE_INITIAL_COUNT);
   const { visibleRows, hiddenCount } = resolveThreadLineageWindow(props.rows, visibleCount);
-  const failedCount = props.rows.filter((row) => {
-    const status = lineageRowStatus(row);
-    return status === "failed" || status === "error";
-  }).length;
   if (props.rows.length === 0) return null;
   return (
     <div>
-      {props.label ? (
-        <ThreadDetailsControl aria-expanded={expanded} onClick={() => setExpanded(!expanded)}>
-          <BotIcon aria-hidden className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-          <span className={cn(THREAD_DETAILS_PANEL_LABEL_CLASS, "min-w-0 flex-1 truncate")}>
-            {props.label}
-          </span>
-          {failedCount > 0 ? <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus> : null}
-          {expanded ? null : (
-            <span className="shrink-0 text-xs font-normal tabular-nums text-muted-foreground">
-              {props.rows.length}
-            </span>
-          )}
-          <ChevronDownIcon
-            aria-hidden
-            className={cn(
-              THREAD_DETAILS_PANEL_CHEVRON_CLASS,
-              "transition-transform",
-              !expanded && "-rotate-90",
-            )}
-          />
-        </ThreadDetailsControl>
+      {props.earlier ? (
+        <ThreadDetailsEarlierToggle
+          count={props.rows.length}
+          shown={expanded}
+          onToggle={() => setExpanded(!expanded)}
+        />
       ) : null}
       {expanded ? (
         <ThreadLineageRowList
@@ -559,19 +535,18 @@ export function ThreadRelationshipsPanel(props: {
   );
   const groups: ReadonlyArray<{
     id: string;
-    label: string | null;
+    earlier: boolean;
     rows: ReadonlyArray<LineageRow>;
-    expanded: boolean;
   }> = [
-    { id: "related", label: null, rows: related, expanded: true },
-    { id: "active", label: null, rows: [...active, ...remoteActive], expanded: true },
-    {
-      id: "previous",
-      label: "Previous agents",
-      rows: [...previous, ...remotePrevious],
-      expanded: false,
-    },
+    { id: "related", earlier: false, rows: related },
+    { id: "active", earlier: false, rows: [...active, ...remoteActive] },
+    { id: "previous", earlier: true, rows: [...previous, ...remotePrevious] },
   ];
+  const lineageRows = groups.flatMap((group) => group.rows);
+  const failedCount = lineageRows.filter((row) => {
+    const status = lineageRowStatus(row);
+    return status === "failed" || status === "error";
+  }).length;
   const runningCount =
     (projection?.subagents.filter(
       (agent) => agent.childThreadId === null && agent.status === "running",
@@ -579,6 +554,7 @@ export function ThreadRelationshipsPanel(props: {
 
   // A linked environment's agent may have delegated this thread from there.
   const delegatedFrom = currentThread?.delegatedFrom;
+  const lineageCount = lineageRows.length + (delegatedFrom === undefined ? 0 : 1);
 
   const lineageVisible =
     props.showLineage &&
@@ -943,14 +919,16 @@ export function ThreadRelationshipsPanel(props: {
         <ThreadDetailsSection
           headingId="thread-details-lineage-heading"
           title={runningCount > 0 ? `Lineage · ${runningCount} running` : "Lineage"}
-          // A lone "Previous agents" row names itself; the heading returns for status or actions.
-          showHeading={
-            runningCount > 0 ||
-            canDetach ||
-            related.length > 0 ||
-            active.length > 0 ||
-            remoteActive.length > 0 ||
-            delegatedFrom !== undefined
+          // With no rows it holds only status or Disconnect, so it stays a plain heading.
+          summary={
+            lineageCount === 0 ? undefined : (
+              <>
+                {failedCount > 0 ? (
+                  <SectionHeaderStatus>{failedCount} failed</SectionHeaderStatus>
+                ) : null}
+                {lineageCount}
+              </>
+            )
           }
           data-thread-relationships-panel
           actions={
@@ -1013,13 +991,13 @@ export function ThreadRelationshipsPanel(props: {
         <ThreadDetailsSection
           headingId="thread-details-side-chats-heading"
           title={runningSideChats > 0 ? `Side chats · ${runningSideChats} running` : "Side chats"}
+          summary={sideChats.length}
           data-thread-side-chats-panel
         >
           <ThreadLineageGroup
             key={`${scopedThreadKey(ref)}:side-chats`}
-            label={null}
+            earlier={false}
             rows={sideChats}
-            expanded
           >
             {(visibleRows) => visibleRows.map(renderRelationshipRow)}
           </ThreadLineageGroup>

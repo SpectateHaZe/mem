@@ -14,7 +14,9 @@ import {
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
 
-import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { ThreadDetailsEarlierToggle, ThreadDetailsSection } from "./ThreadDetailsSection";
+import { isUpcomingAutomation, splitEarlier } from "./ThreadDetailsPanel.logic";
+import { SectionHeaderStatus } from "../ui/collapsible-section-header";
 import { cn } from "../../lib/utils";
 import { ScheduledRelativeLabel, scheduleLabel } from "../settings/ScheduledTasksSettings";
 import { useEnvironmentQuery } from "../../state/query";
@@ -75,10 +77,12 @@ export function ThreadAutomationsPanel(props: {
   });
   const navigate = useNavigate();
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  const [showEarlier, setShowEarlier] = useState(false);
 
   const boundTasks = (tasksQuery.data?.tasks ?? []).filter(
     (task) => task.threadId === props.threadId,
   );
+  const { live: upcoming, earlier } = splitEarlier(boundTasks, isUpcomingAutomation);
 
   if (tasksQuery.error === null && boundTasks.length === 0) return null;
 
@@ -126,11 +130,99 @@ export function ThreadAutomationsPanel(props: {
     }
   };
 
+  const renderTask = (task: ScheduledTask) => (
+    <li
+      key={task.id}
+      className={cn(
+        "group flex items-center rounded-lg py-1.5",
+        THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
+      )}
+    >
+      <span className="relative inline-flex size-4 shrink-0 items-center justify-center">
+        <CalendarClockIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
+        <span
+          className={cn(
+            "absolute -right-1 -top-1 size-1.5 rounded-full",
+            STATUS_DOT_CLASS[task.lastRunStatus],
+          )}
+          aria-hidden
+        />
+      </span>
+      <Tooltip>
+        <TooltipTrigger render={<div className="min-w-0 flex-1" />}>
+          <span className="block truncate text-sm font-medium text-foreground/80">
+            {task.title}
+          </span>
+          <p className="truncate text-2xs text-muted-foreground">{taskScheduleLine(task)}</p>
+        </TooltipTrigger>
+        <TooltipPopup side="left">
+          <p className="font-medium">{task.title}</p>
+          <p className="text-muted-foreground">{taskScheduleLine(task)}</p>
+        </TooltipPopup>
+      </Tooltip>
+      <Tooltip>
+        <TooltipTrigger
+          render={
+            <ThreadDetailsControl
+              size="icon-xs"
+              variant="ghost"
+              part="icon"
+              aria-label={`Edit ${task.title}`}
+              onClick={() =>
+                void navigate({
+                  to: "/settings/scheduled-tasks",
+                  search: { environmentId: props.environmentId, taskId: task.id },
+                })
+              }
+            >
+              <PencilIcon className="size-3.5" />
+            </ThreadDetailsControl>
+          }
+        />
+        <TooltipPopup>Edit automation</TooltipPopup>
+      </Tooltip>
+      {/* Webhook tasks need a request from their URL. */}
+      {task.schedule.type === "webhook" ? null : (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <ThreadDetailsControl
+                size="icon-xs"
+                variant="ghost"
+                part="icon"
+                aria-label={`Run ${task.title} now`}
+                disabled={!canOperate || busyTaskId !== null || task.lastRunStatus === "running"}
+                onClick={() => void runNow(task)}
+              >
+                <PlayIcon className="size-3.5" />
+              </ThreadDetailsControl>
+            }
+          />
+          <TooltipPopup>Run now</TooltipPopup>
+        </Tooltip>
+      )}
+      <Switch
+        checked={task.enabled}
+        disabled={!canOperate || busyTaskId !== null}
+        aria-label={task.enabled ? `Pause ${task.title}` : `Resume ${task.title}`}
+        onCheckedChange={(enabled) => void toggleEnabled(task, enabled)}
+      />
+    </li>
+  );
+
   return (
     <ThreadDetailsSection
       headingId="thread-details-automations-heading"
       title="Automations"
       data-thread-automations-panel
+      summary={
+        <>
+          {tasksQuery.error !== null ? (
+            <SectionHeaderStatus>Could not load</SectionHeaderStatus>
+          ) : null}
+          {boundTasks.length || null}
+        </>
+      }
       actions={
         <Tooltip>
           <TooltipTrigger
@@ -156,89 +248,18 @@ export function ThreadAutomationsPanel(props: {
       }
     >
       <ul className="m-0 max-h-[13.5rem] list-none overflow-y-auto p-0">
-        {boundTasks.map((task) => (
-          <li
-            key={task.id}
-            className={cn(
-              "group flex items-center rounded-lg py-1.5",
-              THREAD_DETAILS_PANEL_ROW_CONTENT_CLASS,
-            )}
-          >
-            <span className="relative inline-flex size-4 shrink-0 items-center justify-center">
-              <CalendarClockIcon className={THREAD_DETAILS_PANEL_ICON_CLASS} />
-              <span
-                className={cn(
-                  "absolute -right-1 -top-1 size-1.5 rounded-full",
-                  STATUS_DOT_CLASS[task.lastRunStatus],
-                )}
-                aria-hidden
-              />
-            </span>
-            <Tooltip>
-              <TooltipTrigger render={<div className="min-w-0 flex-1" />}>
-                <span className="block truncate text-sm font-medium text-foreground/80">
-                  {task.title}
-                </span>
-                <p className="truncate text-2xs text-muted-foreground">{taskScheduleLine(task)}</p>
-              </TooltipTrigger>
-              <TooltipPopup side="left">
-                <p className="font-medium">{task.title}</p>
-                <p className="text-muted-foreground">{taskScheduleLine(task)}</p>
-              </TooltipPopup>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger
-                render={
-                  <ThreadDetailsControl
-                    size="icon-xs"
-                    variant="ghost"
-                    part="icon"
-                    aria-label={`Edit ${task.title}`}
-                    onClick={() =>
-                      void navigate({
-                        to: "/settings/scheduled-tasks",
-                        search: { environmentId: props.environmentId, taskId: task.id },
-                      })
-                    }
-                  >
-                    <PencilIcon className="size-3.5" />
-                  </ThreadDetailsControl>
-                }
-              />
-              <TooltipPopup>Edit automation</TooltipPopup>
-            </Tooltip>
-            {/* Webhook tasks need a request from their URL. */}
-            {task.schedule.type === "webhook" ? null : (
-              <Tooltip>
-                <TooltipTrigger
-                  render={
-                    <ThreadDetailsControl
-                      size="icon-xs"
-                      variant="ghost"
-                      part="icon"
-                      aria-label={`Run ${task.title} now`}
-                      disabled={
-                        !canOperate || busyTaskId !== null || task.lastRunStatus === "running"
-                      }
-                      onClick={() => void runNow(task)}
-                    >
-                      <PlayIcon className="size-3.5" />
-                    </ThreadDetailsControl>
-                  }
-                />
-                <TooltipPopup>Run now</TooltipPopup>
-              </Tooltip>
-            )}
-            <Switch
-              checked={task.enabled}
-              disabled={!canOperate || busyTaskId !== null}
-              aria-label={task.enabled ? `Pause ${task.title}` : `Resume ${task.title}`}
-              onCheckedChange={(enabled) => void toggleEnabled(task, enabled)}
+        {upcoming.map(renderTask)}
+        {earlier.length > 0 ? (
+          <li>
+            <ThreadDetailsEarlierToggle
+              count={earlier.length}
+              shown={showEarlier}
+              onToggle={() => setShowEarlier(!showEarlier)}
             />
           </li>
-        ))}
+        ) : null}
+        {showEarlier ? earlier.map(renderTask) : null}
       </ul>
-      {/* Kept last: the details card treats a section whose last child is empty as empty. */}
       {tasksQuery.error !== null ? (
         <p className="px-2.5 py-1.5 text-2xs text-destructive">
           Could not load automations: {tasksQuery.error}

@@ -27,10 +27,10 @@ import type {
 import { formatContextWindowTokens } from "../../lib/contextWindow";
 import { cn } from "../../lib/utils";
 import { formatUpcomingTimestamp } from "../../timestampFormat";
-import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
+import { Popover, PopoverPopup, PopoverTrigger } from "../ui/popover";
 import { formatContextWindowCompactionMessage } from "./compaction.logic";
-import { ProviderInstanceIcon } from "./ProviderInstanceIcon";
 import { ThreadDetailsSection } from "./ThreadDetailsSection";
+import { tightestUsageWindow } from "./ThreadDetailsPanel.logic";
 
 const PACE_LABEL: Record<LimitPace, string> = {
   ahead: "Ahead of pace",
@@ -48,70 +48,98 @@ export interface ThreadDetailsUsageInput {
 
 type UsageTone = "error" | "warning" | null;
 
-/** The selected provider's limit windows, plus OpenCode Go windows when another instance has them. */
+const usageTone = (left: number): UsageTone =>
+  left <= 10 ? "error" : left <= 20 ? "warning" : null;
+
+const TONE_TEXT_CLASS = { error: "text-error-foreground", warning: "text-warning-foreground" };
+
+/**
+ * One row per provider, for the selected one plus OpenCode Go when another instance has it, then the
+ * rows passed in, such as low usage mode. A row shows its tightest window; hover or click shows all.
+ */
 export function ThreadDetailsUsage({
   providerInstanceId,
   providers,
   sources,
-}: Omit<ThreadDetailsUsageInput, "contextWindow">) {
+  showLimits,
+  children,
+}: Omit<ThreadDetailsUsageInput, "contextWindow"> & {
+  readonly showLimits: boolean;
+  readonly children?: ReactNode;
+}) {
   const nowMinute = useNowMinute();
   const now = Date.parse(`${nowMinute}:00Z`);
   const report =
-    providerInstanceId !== null
+    showLimits && providerInstanceId !== null
       ? collectProviderUsageLimits(providerInstanceId, providers, sources, now)
       : null;
   // Only this instance's data: the report keeps one instance per login, and any other entry may be
   // a different login or workspace, so fall back to the instance's own snapshot.
-  const limits =
-    report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
-    providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits;
-  const goGroup = findOpenCodeGoLimits(providerInstanceId, providers);
-  if (!limits && !goGroup) return null;
-  const notice = limits ? limitsNotice(limits) : null;
-  const selected = providers.find((provider) => provider.instanceId === providerInstanceId) ?? null;
-  const goWindows = goGroup
-    ? goGroup.limits.windows.filter((window) => window.id.startsWith("go_"))
-    : [];
+  const limits = showLimits
+    ? (report?.accounts.find((entry) => entry.instanceId === providerInstanceId)?.limits ??
+      providers.find((provider) => provider.instanceId === providerInstanceId)?.usageLimits)
+    : undefined;
+  const goGroup = showLimits ? findOpenCodeGoLimits(providerInstanceId, providers) : null;
+  const selected = providers.find((provider) => provider.instanceId === providerInstanceId);
+  const meters = [
+    ...(limits
+      ? [
+          {
+            key: "selected",
+            label: selected
+              ? selected.displayName?.trim() ||
+                PROVIDER_DISPLAY_NAMES[selected.driver] ||
+                selected.driver
+              : "Limits",
+            notice: limitsNotice(limits),
+            windows: limits.windows,
+          },
+        ]
+      : []),
+    ...(goGroup
+      ? [
+          {
+            key: "opencode-go",
+            label: "OpenCode Go",
+            notice: null,
+            windows: goGroup.limits.windows.filter((window) => window.id.startsWith("go_")),
+          },
+        ]
+      : []),
+  ];
+  if (meters.length === 0 && !children) return null;
+  const tightest = tightestUsageWindow(
+    meters.flatMap((meter) => (meter.notice ? [] : meter.windows)),
+  );
+  const tightestLeft = tightest ? remainingPercent(tightest) : null;
+  const tightestTone = tightestLeft === null ? null : usageTone(tightestLeft);
 
   return (
     <ThreadDetailsSection
       headingId="thread-details-usage-heading"
-      title="Usage limits"
-      showHeading={false}
+      title="Usage"
+      summary={
+        tightestLeft === null ? null : (
+          <span className={tightestTone ? TONE_TEXT_CLASS[tightestTone] : undefined}>
+            {tightestLeft}% left
+          </span>
+        )
+      }
     >
-      <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
-        {goGroup && selected && limits ? (
-          <UsageGroupHeading
-            provider={selected}
-            label={
-              selected.displayName?.trim() ||
-              PROVIDER_DISPLAY_NAMES[selected.driver] ||
-              selected.driver
-            }
-          />
-        ) : null}
-        {limits ? (
-          notice ? (
-            <UsageRow
-              label="Limits"
-              fill={null}
-              tone={null}
-              value="Unavailable"
-              tooltip={<span className="text-foreground">{notice}</span>}
+      {meters.length > 0 ? (
+        <div className="grid grid-cols-[auto_minmax(3rem,1fr)_auto] gap-x-3 text-xs">
+          {meters.map((meter) => (
+            <ProviderLimitRow
+              key={meter.key}
+              label={meter.label}
+              notice={meter.notice}
+              windows={meter.windows}
+              now={now}
             />
-          ) : (
-            limits.windows.map((window) => <LimitRow key={window.id} window={window} now={now} />)
-          )
-        ) : null}
-        {goGroup ? (
-          <>
-            <UsageGroupHeading provider={goGroup.provider} label="OpenCode Go" />
-            {goWindows.map((window) => (
-              <LimitRow key={`opencode-go:${window.id}`} window={window} now={now} />
-            ))}
-          </>
-        ) : null}
-      </div>
+          ))}
+        </div>
+      ) : null}
+      {children}
     </ThreadDetailsSection>
   );
 }
@@ -207,61 +235,64 @@ export function ThreadDetailsContext({ usage }: { readonly usage: ContextWindowS
   );
 }
 
-function LimitRow({
-  window,
+/** A provider's tightest window and its reset; every window's detail opens on hover or click. */
+function ProviderLimitRow({
+  label,
+  notice,
+  windows,
   now,
 }: {
-  readonly window: ServerProviderUsageWindow;
+  readonly label: string;
+  readonly notice: string | null;
+  readonly windows: readonly ServerProviderUsageWindow[];
   readonly now: number;
 }) {
   const timestampFormat = usePrimarySettings((settings) => settings.timestampFormat);
-  const left = remainingPercent(window);
-  const pace = paceOf(window, now);
-  const resetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
-  const resetsIn = formatResetsIn(window, now);
+  const tightest = notice ? null : tightestUsageWindow(windows);
+  if (!tightest) {
+    return (
+      <UsageRow
+        label={label}
+        fill={null}
+        tone={null}
+        value="Unavailable"
+        tooltip={<span className="text-foreground">{notice ?? "No limits reported."}</span>}
+      />
+    );
+  }
+  const left = remainingPercent(tightest);
+  const resetsAt = tightest.resetsAt ? Date.parse(tightest.resetsAt) : Number.NaN;
+  const resetsIn = formatResetsIn(tightest, now);
   return (
     <UsageRow
-      label={window.label}
+      label={label}
       fill={left}
-      tone={left <= 10 ? "error" : left <= 20 ? "warning" : null}
-      value={`${left}%`}
-      detail={resetsIn ? `${resetsIn.charAt(0).toUpperCase()}${resetsIn.slice(1)}` : null}
+      tone={usageTone(left)}
+      value={resetsAt > now ? `${left}% · ${formatDuration(resetsAt - now)}` : `${left}%`}
       ariaValue={resetsIn ? `${left}% left, ${resetsIn}` : `${left}% left`}
-      tooltip={
-        <>
-          <span className="text-foreground">
-            {window.label}: {left}% left
-          </span>
-          {window.resetsAt && resetsAt > now ? (
-            <span className="text-muted-foreground">
-              Resets in {formatDuration(resetsAt - now)} ·{" "}
-              {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
+      tooltip={windows.map((window) => {
+        const windowResetsAt = window.resetsAt ? Date.parse(window.resetsAt) : Number.NaN;
+        const pace = paceOf(window, now);
+        return (
+          <span key={window.id} className="flex flex-col not-first:mt-1.5">
+            <span className="text-foreground">
+              {window.label}: {remainingPercent(window)}% left
             </span>
-          ) : null}
-          {pace ? <span className="text-muted-foreground">{PACE_LABEL[pace]}</span> : null}
-        </>
-      }
+            {window.resetsAt && windowResetsAt > now ? (
+              <span className="text-muted-foreground">
+                Resets in {formatDuration(windowResetsAt - now)} ·{" "}
+                {formatUpcomingTimestamp(window.resetsAt, timestampFormat, now)}
+              </span>
+            ) : null}
+            {pace ? <span className="text-muted-foreground">{PACE_LABEL[pace]}</span> : null}
+          </span>
+        );
+      })}
     />
   );
 }
 
-/** Names one provider's block of rows, so Go usage never reads as the thread provider's. */
-function UsageGroupHeading({ provider, label }: { provider: ServerProvider; label: string }) {
-  return (
-    <div className="col-span-3 flex items-center gap-1.5 px-2.5 pt-1.5 text-muted-foreground">
-      <ProviderInstanceIcon
-        driverKind={provider.driver}
-        displayName={provider.displayName ?? label}
-        accentColor={provider.accentColor}
-        className="size-3.5"
-        iconClassName="size-3.5"
-      />
-      <span className="truncate text-2xs font-medium">{label}</span>
-    </div>
-  );
-}
-
-/** One label, hairline, and value row; the whole row opens the details tooltip. */
+/** One label, hairline, and value row; hovering or clicking the row opens its details. */
 function UsageRow({
   label,
   fill,
@@ -269,7 +300,6 @@ function UsageRow({
   tick = null,
   value,
   ariaValue = value,
-  detail = null,
   tooltip,
   muted = false,
 }: {
@@ -281,14 +311,14 @@ function UsageRow({
   readonly tick?: number | null;
   readonly value: string;
   readonly ariaValue?: string;
-  /** Second line under the bar, for reset times too long to sit beside it. */
-  readonly detail?: string | null;
   readonly tooltip: ReactNode;
   readonly muted?: boolean;
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger
+    <Popover>
+      <PopoverTrigger
+        openOnHover
+        nativeButton={false}
         render={
           <div
             tabIndex={0}
@@ -340,16 +370,11 @@ function UsageRow({
         >
           {value}
         </span>
-        {detail ? (
-          <span className="col-span-3 truncate text-end text-muted-foreground tabular-nums">
-            {detail}
-          </span>
-        ) : null}
-      </TooltipTrigger>
+      </PopoverTrigger>
       {/* Rows sit 8px inside the card; clear its edge instead of overlapping it. */}
-      <TooltipPopup side="left" sideOffset={16}>
+      <PopoverPopup tooltipStyle side="left" sideOffset={16}>
         <div className="flex flex-col gap-0.5">{tooltip}</div>
-      </TooltipPopup>
-    </Tooltip>
+      </PopoverPopup>
+    </Popover>
   );
 }

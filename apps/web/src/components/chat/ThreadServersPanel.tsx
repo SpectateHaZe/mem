@@ -106,7 +106,11 @@ function ThreadServersList(props: ThreadServersPanelProps) {
   };
 
   return (
-    <ThreadDetailsSection headingId="thread-details-servers-heading" title="Servers">
+    <ThreadDetailsSection
+      headingId="thread-details-servers-heading"
+      title="Servers"
+      summary={servers.length}
+    >
       <ul className="m-0 list-none p-0">
         {servers.slice(0, visibleCount).map((server, index) => {
           const key = serverKey(server);

@@ -19,6 +19,10 @@ import {
 import { observeResize } from "../../lib/observeResize";
 import { requestWorkspaceFocus } from "../../lib/workspaceFocus";
 
+// Nested matches are skipped: their height is already inside the outer one.
+const GROWING_CONTENT_SELECTOR =
+  "[data-thread-relationships-panel], [data-thread-side-chats-panel], [data-thread-details-pr-list], [data-thread-automations-panel], [data-thread-details-server-overflow], [data-thread-details-section-body]";
+
 export function ThreadDetailsCard({
   threadRef,
   anchor,
@@ -78,13 +82,12 @@ export function ThreadDetailsCard({
     const measure = () => {
       const frame = element.closest<HTMLElement>("[data-thread-details-card]");
       const next = element.offsetHeight + (frame ? frame.offsetHeight - frame.clientHeight : 0);
-      // PR lists, servers, lineage, side chats and automations scroll as they grow. Counting them
-      // toward density would hide the section and workspace controls when the user asks to see more.
-      const lists = element.querySelectorAll<HTMLElement>(
-        "[data-thread-relationships-panel], [data-thread-side-chats-panel], [data-thread-details-pr-list], [data-thread-automations-panel], [data-thread-details-server-overflow]",
-      );
-      const fittingHeight =
-        next - Array.from(lists).reduce((sum, list) => sum + list.offsetHeight, 0);
+      // Lists and opened sections grow when the user asks to see more. Counting them toward density
+      // would hide the workspace controls, and the section itself, in answer.
+      const lists = Array.from(
+        element.querySelectorAll<HTMLElement>(GROWING_CONTENT_SELECTOR),
+      ).filter((list) => !list.parentElement?.closest(GROWING_CONTENT_SELECTOR));
+      const fittingHeight = next - lists.reduce((sum, list) => sum + list.offsetHeight, 0);
       setMeasurements((current) => {
         const heights = current.key === measurementKey ? current.heights : { full: 0, compact: 0 };
         return current.key === measurementKey && heights[density] === fittingHeight
