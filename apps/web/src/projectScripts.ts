@@ -107,7 +107,19 @@ export function primaryProjectScript(scripts: ReadonlyArray<ProjectScript>): Pro
   return regular ?? scripts.find((script) => !script.runOnSettle) ?? null;
 }
 
-const RUN_SCRIPT_NAMES = ["dev", "start", "serve", "preview"] as const;
+// A project with both a desktop app and a web dev server runs as the app.
+const RUN_SCRIPT_NAMES = [
+  "dev:desktop",
+  "desktop",
+  "dev:electron",
+  "electron:dev",
+  "electron",
+  "tauri:dev",
+  "dev",
+  "start",
+  "serve",
+  "preview",
+] as const;
 
 /** A one-click Run for a project with no saved scripts, read from its package.json. */
 export function detectedRunScript(packageJson: string | null): ProjectScript | null {

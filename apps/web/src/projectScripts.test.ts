@@ -104,6 +104,11 @@ describe("detectedRunScript", () => {
     expect(
       detectedRunScript(pkg({ packageManager: "bun@1.1.0", scripts: { preview: "x" } }))?.command,
     ).toBe("bun run preview");
+    expect(
+      detectedRunScript(
+        pkg({ packageManager: "pnpm@9.0.0", scripts: { dev: "x", "dev:desktop": "y" } }),
+      )?.command,
+    ).toBe("pnpm dev:desktop");
     expect(detectedRunScript(pkg({ scripts: { build: "x" } }))).toBeNull();
     expect(detectedRunScript("{not json")).toBeNull();
     expect(detectedRunScript(null)).toBeNull();
