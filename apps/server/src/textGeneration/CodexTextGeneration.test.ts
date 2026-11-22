@@ -22,7 +22,7 @@ import * as Scope from "effect/Scope";
 import { createModelSelection } from "@t3tools/shared/model";
 import { expect } from "vite-plus/test";
 
-import { CodexSettings, ProviderInstanceId } from "@t3tools/contracts";
+import { CodexSettings, ProviderInstanceId, TextGenerationError } from "@t3tools/contracts";
 
 import * as ServerConfig from "../config.ts";
 import { makeProcessProbe, processProbeSource } from "../testUtils/processProbe.ts";
@@ -543,6 +543,7 @@ const PREFLIGHT_PRIMARY_STATES = [
   "not installed",
   "signed out",
   "signed out, fallback failed",
+  "rejected as signed out",
 ] as const;
 
 it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (primaryState) =>
@@ -605,9 +606,17 @@ it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (prima
           generateReviewGuide: () => Effect.die("unused"),
           generateTranscriptionPostProcessing: () => Effect.die("unused"),
           generateThreadTitle: (input) =>
-            Effect.sync(() => {
+            Effect.suspend(() => {
               calls.push(input.modelSelection);
-              return { title: "Generated title" };
+              // The probe still reads signed in while the CLI's token has expired.
+              return primaryState === "rejected as signed out" && instanceId === primary
+                ? Effect.fail(
+                    new TextGenerationError({
+                      operation: "generateThreadTitle",
+                      detail: "Codex CLI command failed: unexpected status 401 Unauthorized",
+                    }),
+                  )
+                : Effect.succeed({ title: "Generated title" });
             }),
         }),
       };
@@ -639,6 +648,14 @@ it.effect.each(PREFLIGHT_PRIMARY_STATES)("text generation preflight: %s", (prima
         modelSelection: selection,
       }),
     ).toEqual({ title: "Generated title" });
+    const fallbackSelection = {
+      instanceId: fallback,
+      model: DEFAULT_TEXT_GENERATION_MODEL_BY_PROVIDER[ProviderDriverKind.make("claudeAgent")],
+    };
+    if (primaryState === "rejected as signed out") {
+      expect(calls).toEqual([selection, fallbackSelection]);
+      return;
+    }
     expect(calls).toEqual([
       primaryState === "ready" ||
       primaryState === "pending" ||

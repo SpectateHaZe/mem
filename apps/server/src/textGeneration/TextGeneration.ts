@@ -67,6 +67,9 @@ const resolveInstance = (
     ),
   );
 
+// A probe can read signed in while the CLI's stored token has expired; the call then says so.
+const SIGNED_OUT_DETAIL = /401|unauthori[sz]ed|not (logged|signed) in|please (log|sign) in/i;
+
 // Review guides investigate the checkout read-only; the other drivers reject that request.
 const INVESTIGATING_DRIVERS = new Set(["codex", "claudeAgent"]);
 
@@ -95,7 +98,9 @@ export const make = Effect.gen(function* () {
       selected?.enabled === true &&
       selected.status === "error" &&
       (!selected.installed || selected.auth.status === "unauthenticated");
-    if (unusable || exhaustedUsageWindow(selected, now, selection.model)) {
+    const fallbackFor = Effect.fn("TextGeneration.fallbackFor")(function* (
+      current: ModelSelection,
+    ) {
       const settings = yield* serverSettings.getSettings.pipe(
         Effect.mapError(
           (cause) =>
@@ -106,29 +111,44 @@ export const make = Effect.gen(function* () {
             }),
         ),
       );
-      selection =
-        fallbackTextGenerationModelSelection(
-          settings.providerInstances,
-          (instanceId, driver) => {
-            const provider = snapshots.find((candidate) => candidate.instanceId === instanceId);
-            return (
-              instanceId !== selection.instanceId &&
-              provider?.enabled === true &&
-              resolveProjectProviderInstanceEnabled(settings, null, instanceId) &&
-              provider.installed &&
-              provider.auth.status !== "unauthenticated" &&
-              provider.status !== "error" &&
-              isProviderAvailable(provider) &&
-              isProviderTextGenerationCapable(provider) &&
-              (operation !== "generateReviewGuide" || INVESTIGATING_DRIVERS.has(driver)) &&
-              !exhaustedUsageWindow(provider, now, defaultTextGenerationModel(driver))
-            );
-          },
-          { includeConfiguredInstances: true },
-        ) ?? selection;
+      return fallbackTextGenerationModelSelection(
+        settings.providerInstances,
+        (instanceId, driver) => {
+          const provider = snapshots.find((candidate) => candidate.instanceId === instanceId);
+          return (
+            instanceId !== current.instanceId &&
+            provider?.enabled === true &&
+            resolveProjectProviderInstanceEnabled(settings, null, instanceId) &&
+            provider.installed &&
+            provider.auth.status !== "unauthenticated" &&
+            provider.status !== "error" &&
+            isProviderAvailable(provider) &&
+            isProviderTextGenerationCapable(provider) &&
+            (operation !== "generateReviewGuide" || INVESTIGATING_DRIVERS.has(driver)) &&
+            !exhaustedUsageWindow(provider, now, defaultTextGenerationModel(driver))
+          );
+        },
+        { includeConfiguredInstances: true },
+      );
+    });
+    const run = (current: ModelSelection) =>
+      resolveInstance(registry, operation, current.instanceId).pipe(
+        Effect.flatMap((service) => invoke(service, current)),
+      );
+    if (unusable || exhaustedUsageWindow(selected, now, selection.model)) {
+      return yield* run((yield* fallbackFor(selection)) ?? selection);
     }
-    return yield* resolveInstance(registry, operation, selection.instanceId).pipe(
-      Effect.flatMap((service) => invoke(service, selection)),
+    return yield* run(selection).pipe(
+      Effect.catchTags({
+        TextGenerationError: (error) =>
+          SIGNED_OUT_DETAIL.test(error.detail)
+            ? fallbackFor(selection).pipe(
+                Effect.flatMap((fallback) =>
+                  fallback === null ? Effect.fail(error) : run(fallback),
+                ),
+              )
+            : Effect.fail(error),
+      }),
     );
   });
   return TextGeneration.of({
