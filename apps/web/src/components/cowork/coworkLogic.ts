@@ -65,6 +65,8 @@ export function validateCoworkSetup(input: {
 }
 
 const DECISION_LINE = /^[ \t]*\**Decision:\**[ \t]*(.+?)\**[ \t]*$/im;
+const USER_SUMMARY_LINE = /^[ \t]*(?:[-*][ \t]+)?\**(?:For you|Summary):\**[ \t]*(.+?)\**[ \t]*$/im;
+const MAX_FALLBACK_SUMMARY_CHARS = 180;
 
 export function decisionLine(text: string): string | null {
   return DECISION_LINE.exec(text)?.[1]?.trim() ?? null;
@@ -73,6 +75,64 @@ export function decisionLine(text: string): string | null {
 /** The reply without its decision line, which the UI shows in its own callout. */
 export function withoutDecision(text: string): string {
   return text.replace(DECISION_LINE, "").trim();
+}
+
+function condenseForUser(text: string): string {
+  const withoutCode = text.replace(/```[\s\S]*?```/g, " ");
+  const lines = withoutCode
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line !== "");
+  const nonHeadingLines = lines.filter((line) => !/^#{1,6}[ \t]+/.test(line));
+  const chosenLines = nonHeadingLines.length > 0 ? nonHeadingLines : lines;
+  const plainLines = chosenLines.map((line) =>
+    line
+      .replace(/^(?:#{1,6}|[-*+]|\d+\.|>)[ \t]+/, "")
+      .replace(/\*\*([^*\n]+)\*\*/g, "$1")
+      .trim(),
+  );
+  const normalized = plainLines.filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  if (normalized === "") return "";
+  const firstSentence = /^(.{25,}?[.!?])(?:\s|$)/.exec(normalized)?.[1];
+  if (
+    firstSentence &&
+    firstSentence.length <= MAX_FALLBACK_SUMMARY_CHARS &&
+    normalized.length > 100
+  ) {
+    return firstSentence;
+  }
+  if (normalized.length <= MAX_FALLBACK_SUMMARY_CHARS) return normalized;
+  const clipped = normalized.slice(0, MAX_FALLBACK_SUMMARY_CHARS);
+  const lastSpace = clipped.lastIndexOf(" ");
+  return `${(lastSpace > 80 ? clipped.slice(0, lastSpace) : clipped).trim()}…`;
+}
+
+/** Returns a short user-facing summary for a cowork turn without walls of peer text. */
+export function coworkTurnSummary(
+  message: Pick<CoworkSession["transcript"][number], "kind" | "text" | "summary">,
+): string {
+  if (message.kind === "user") return message.text.trim();
+  if (message.summary && message.summary.trim() !== "") return message.summary.trim();
+  const explicit = USER_SUMMARY_LINE.exec(message.text)?.[1]?.trim();
+  if (explicit) return explicit;
+  return condenseForUser(withoutDecision(message.text));
+}
+
+export function coworkTurnDetails(
+  message: Pick<CoworkSession["transcript"][number], "kind" | "text">,
+): string {
+  if (message.kind === "user") return message.text.trim();
+  return withoutDecision(message.text).replace(USER_SUMMARY_LINE, "").trim();
+}
+
+export function coworkHasExtraDetails(
+  message: Pick<CoworkSession["transcript"][number], "kind" | "text" | "summary">,
+): boolean {
+  if (message.kind === "user") return false;
+  const details = coworkTurnDetails(message);
+  if (details === "") return false;
+  const summary = coworkTurnSummary(message);
+  return details.replace(/\s+/g, " ").trim() !== summary.replace(/\s+/g, " ").trim();
 }
 
 export function speakerColor(speaker: string): string | undefined {

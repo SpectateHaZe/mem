@@ -200,6 +200,35 @@ const make = Effect.gen(function* () {
     return [];
   };
 
+  const deletePeerThreads = Effect.fn("CoworkService.deletePeerThreads")(function* (
+    session: CoworkSession,
+    reason: string,
+  ) {
+    const toStop = activeThreadIds(session);
+    if (toStop.length > 0) {
+      yield* stopThreads(session, toStop, reason);
+    }
+    yield* Effect.forEach(
+      session.participants,
+      (participant) =>
+        Effect.gen(function* () {
+          const deleteId = yield* random.uuidV4();
+          yield* threads
+            .dispatch({
+              type: "thread.delete",
+              commandId: CommandId.make(`cowork-delete:${session.sessionThreadId}:${deleteId}`),
+              threadId: participant.threadId,
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("cowork.delete-peer-failed", { cause }),
+              ),
+            );
+        }),
+      { discard: true },
+    );
+  });
+
   const pauseWithNote = (
     session: CoworkSession,
     note: string,
@@ -459,10 +488,7 @@ const make = Effect.gen(function* () {
     start: Effect.fn("CoworkService.start")(function* (input: CoworkStartInput) {
       const previous = sessions.get(input.sessionThreadId);
       if (previous !== undefined) {
-        const toStop = activeThreadIds(previous);
-        if (toStop.length > 0) {
-          yield* stopThreads(previous, toStop, "Replaced by a new cowork session.");
-        }
+        yield* deletePeerThreads(previous, "Replaced by a new cowork session.");
       }
 
       const parent = yield* projections
@@ -500,6 +526,7 @@ const make = Effect.gen(function* () {
             workspaceStrategy,
             createdBy: "user",
             creationSource: "server",
+            cowork: true,
           })
           .pipe(
             Effect.map(({ threadId }) => ({
@@ -605,10 +632,7 @@ const make = Effect.gen(function* () {
 
     delete: Effect.fn("CoworkService.delete")(function* (input: CoworkDeleteInput) {
       const session = yield* requireSession(input.sessionThreadId);
-      const toStop = activeThreadIds(session);
-      if (toStop.length > 0) {
-        yield* stopThreads(session, toStop, "Cowork session deleted.");
-      }
+      yield* deletePeerThreads(session, "Cowork session deleted.");
       sessions.delete(input.sessionThreadId);
       yield* persist;
     }, lock.withPermit),

@@ -3108,8 +3108,9 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
       });
     }
 
-    // Only the server stamps this; a client asking for one gets an ordinary thread.
+    // Only the server stamps these; a client asking for one gets an ordinary thread.
     const memMaster = command.memMaster === true && command.creationSource === "server";
+    const cowork = command.cowork === true && command.creationSource === "server";
     if (memMaster) {
       const existingMaster = yield* projectionStore
         .findMemMasterThreadId()
@@ -3151,6 +3152,7 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         parentThreadId: null,
         relationshipToParent: null,
         rootThreadId: command.threadId,
+        ...(cowork ? { cowork: true } : {}),
       },
       forkedFrom: null,
       createdAt: now,

@@ -28,6 +28,7 @@ import { useEnvironmentScope } from "../../state/session";
 import { useAtomCommand } from "../../state/use-atom-command";
 import { buildThreadRouteParams } from "../../threadRoutes";
 import { scopeThreadRef } from "@t3tools/client-runtime/environment";
+import ChatMarkdown from "../ChatMarkdown";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -38,13 +39,15 @@ import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
 import {
   coworkDecisionSummary,
+  coworkHasExtraDetails,
   coworkPhaseLabel,
+  coworkTurnDetails,
+  coworkTurnSummary,
   decisionLine,
   defaultCoworkAgents,
   modelOptions,
   speakerColor,
   validateCoworkSetup,
-  withoutDecision,
 } from "./coworkLogic";
 
 interface AgentDraft {
@@ -137,8 +140,9 @@ function CoworkSetupForm({
             <span>Launch equal peers in this session</span>
           </div>
           <p className="text-xs text-muted-foreground">
-            Starts full peer agent threads (not subagents) anchored to this session. Round 1 thinks
-            independently in parallel; further rounds debate and decide together.
+            Runs hidden peer agents in the background (not shown in your sidebar) and summarizes
+            each turn for you. Round 1 thinks in parallel; further rounds debate and decide
+            together.
           </p>
         </div>
 
@@ -309,6 +313,19 @@ function CoworkActiveView({
 
   const [draft, setDraft] = useState("");
   const [sendingDecision, setSendingDecision] = useState(false);
+  const [showFullReplies, setShowFullReplies] = useState(false);
+  const [expandedIds, setExpandedIds] = useState<ReadonlySet<string>>(() => new Set());
+
+  const toggleExpanded = (id: string) =>
+    setExpandedIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+      }
+      return next;
+    });
 
   const cap = settings.dailySpendCapUsd;
   const activeSpeaker =
@@ -404,6 +421,24 @@ function CoworkActiveView({
           <TooltipTrigger
             render={
               <Button
+                size="xs"
+                variant="ghost"
+                onClick={() => setShowFullReplies((current) => !current)}
+              />
+            }
+          >
+            {showFullReplies ? "Summaries only" : "Full replies"}
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            {showFullReplies
+              ? "Show concise turn summaries written for you"
+              : "Expand every peer's full technical notes"}
+          </TooltipPopup>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
                 size="icon-xs"
                 variant="ghost"
                 aria-label="New cowork"
@@ -426,7 +461,7 @@ function CoworkActiveView({
                 disabled={!canOperate}
                 onClick={async () => {
                   const message =
-                    "Clear this cowork discussion?\nIndividual peer threads are kept in your project.";
+                    "Clear this cowork discussion?\nIts hidden peer threads will also be cleaned up.";
                   const confirmed =
                     (await requestConfirmDialog(message, { variant: "destructive" })) ??
                     window.confirm(message);
@@ -441,7 +476,7 @@ function CoworkActiveView({
           >
             <Trash2Icon />
           </TooltipTrigger>
-          <TooltipPopup side="bottom">Clear cowork (peer threads are kept)</TooltipPopup>
+          <TooltipPopup side="bottom">Clear cowork</TooltipPopup>
         </Tooltip>
       </div>
 
@@ -449,9 +484,16 @@ function CoworkActiveView({
         <div className="flex flex-col gap-3 p-3">
           {session.transcript.map((message) => {
             const inlineDecision = decisionLine(message.text);
-            const body = withoutDecision(message.text);
+            const summary = coworkTurnSummary(message);
+            const details = coworkTurnDetails(message);
+            const hasDetails = coworkHasExtraDetails(message);
+            const isExpanded = showFullReplies || expandedIds.has(message.id);
+            const visibleText = isExpanded ? details || summary : summary;
             return (
-              <div key={message.id} className="flex flex-col gap-1">
+              <div
+                key={message.id}
+                className="flex flex-col gap-1.5 rounded-lg border border-border/50 bg-card/40 px-3 py-2.5"
+              >
                 <div className="flex items-center gap-1.5">
                   <span
                     className="text-xs font-semibold"
@@ -466,8 +508,17 @@ function CoworkActiveView({
                       Round {message.round} · Deliberation
                     </span>
                   ) : null}
+                  {hasDetails && !showFullReplies ? (
+                    <button
+                      type="button"
+                      className="ms-auto cursor-pointer text-2xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+                      onClick={() => toggleExpanded(message.id)}
+                    >
+                      {isExpanded ? "Hide details" : "Show details"}
+                    </button>
+                  ) : null}
                 </div>
-                {body !== "" ? <p className="whitespace-pre-wrap text-sm">{body}</p> : null}
+                {visibleText !== "" ? <ChatMarkdown cwd={undefined} text={visibleText} /> : null}
                 {inlineDecision === null ? null : (
                   <div className="rounded-md border-s-2 border-success bg-muted/50 px-3 py-1.5 text-sm">
                     <span className="font-medium">Decision:</span> {inlineDecision}

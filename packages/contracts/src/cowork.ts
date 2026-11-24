@@ -26,6 +26,7 @@ export const CoworkMessage = Schema.Struct({
   kind: CoworkMessageKind,
   round: Schema.Number,
   text: Schema.String,
+  summary: Schema.optional(Schema.String),
   at: Schema.String,
 });
 export type CoworkMessage = typeof CoworkMessage.Type;

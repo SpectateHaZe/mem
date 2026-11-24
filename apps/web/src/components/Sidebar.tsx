@@ -1091,6 +1091,7 @@ export default function Sidebar({ routeReveal }: { routeReveal: SidebarRouteReve
   const watchingThreadCount = threads.filter(
     (thread) =>
       thread.archivedAt === null &&
+      thread.lineage.cowork !== true &&
       !isMemMasterThread(thread.source) &&
       threadRuntimeIsActive(thread.runtime),
   ).length;

@@ -186,6 +186,8 @@ it.effect(
         assert.equal(launches.length, 2);
         assert.isUndefined(launches[0]?.delegatedFrom);
         assert.isUndefined(launches[1]?.delegatedFrom);
+        assert.isTrue(launches[0]?.cowork);
+        assert.isTrue(launches[1]?.cowork);
         assert.deepEqual(launches[0]?.workspaceStrategy, {
           type: "existing_worktree",
           worktreePath: "/tmp/wt-auth",
@@ -275,6 +277,7 @@ it.effect(
           }
         });
         assert.equal(afterDelete.sessions.length, 0);
+        assert.equal(dispatches.filter((d) => d.type === "thread.delete").length, 2);
       }).pipe(Effect.provide(coworkLayer));
     }).pipe(Effect.provide(Layer.mergeAll(NodeServices.layer, NodeCrypto.layer))),
 );

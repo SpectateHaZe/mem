@@ -156,12 +156,15 @@ export const OrchestrationV2AppThreadLineage = Schema.Struct({
   relationshipToParent: Schema.NullOr(Schema.Literals(["fork", "subagent"])),
   rootThreadId: ThreadId,
   sideChat: Schema.optional(Schema.Boolean),
+  cowork: Schema.optional(Schema.Boolean),
 });
 export type OrchestrationV2AppThreadLineage = typeof OrchestrationV2AppThreadLineage.Type;
 
-/** Subagents and side chats live inside their parent's view, never in thread lists. */
+/** Subagents, side chats, and cowork peer threads live inside their parent's view, never in thread lists. */
 export const isListedThreadLineage = (lineage: OrchestrationV2AppThreadLineage): boolean =>
-  lineage.relationshipToParent !== "subagent" && lineage.sideChat !== true;
+  lineage.relationshipToParent !== "subagent" &&
+  lineage.sideChat !== true &&
+  lineage.cowork !== true;
 
 /**
  * The one thread where the owner talks to Mem. It always exists, sorts first, and can never be
@@ -2973,6 +2976,8 @@ export const OrchestrationV2Command = Schema.Union([
     title: TrimmedNonEmptyString,
     /** Only the server sets this, when it creates the environment's Mem thread. */
     memMaster: Schema.optional(Schema.Boolean),
+    /** Only the server sets this, for hidden Cowork peer threads. */
+    cowork: Schema.optional(Schema.Boolean),
     modelSelection: ModelSelection,
     runtimeMode: RuntimeMode,
     interactionMode: ProviderInteractionMode,

@@ -7,6 +7,7 @@ import {
   buildParallelThinkingPrompt,
   createInitialCowork,
   extractDecision,
+  extractUserSummary,
   formatSessionContext,
   nextSpeakerIndex,
   recordDeliberationReply,
@@ -152,9 +153,22 @@ it("lets a follow-up reopen deliberation or preserve an in-flight turn budget", 
   assert.equal(reopened.turnsLeft, 3);
 });
 
-it("extracts decision lines and formats bounded session context", () => {
+it("extracts user summaries and decision lines and formats bounded session context", () => {
   assert.equal(extractDecision("Summary\n**Decision:** Ship Cowork"), "Ship Cowork");
   assert.equal(extractDecision("My Decision: pending"), null);
+  assert.equal(extractUserSummary("For you: Keep it short.\nDetailed points."), "Keep it short.");
+
+  let session = makeCowork(2);
+  session = recordParallelThought(
+    session,
+    0,
+    "For you: Use WS for live updates.\nWS supports bidirectional RPC cleanly.",
+    "t1",
+    "m1",
+  );
+  const thought = session.transcript[1]!;
+  assert.equal(thought.summary, "Use WS for live updates.");
+  assert.equal(thought.text, "WS supports bidirectional RPC cleanly.");
 
   const ctx = formatSessionContext({
     title: "Refactor auth",

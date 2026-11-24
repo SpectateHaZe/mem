@@ -99,6 +99,8 @@ export interface ThreadLaunchInput {
   };
   readonly createdBy: OrchestrationV2Actor;
   readonly creationSource: OrchestrationV2CreationSource;
+  /** Marks internal Cowork peer threads so they stay out of top-level thread lists. */
+  readonly cowork?: boolean;
   /** The linked environment this launch is for, if one asked for it. */
   readonly linkOrigin?: OrchestrationV2LinkOrigin;
   /** The parent there, when that environment's agent delegated this as a task. */
@@ -950,6 +952,7 @@ const make = Effect.gen(function* () {
                   : { delegatedFrom: input.delegatedFrom }),
                 createdBy: input.createdBy,
                 creationSource: input.creationSource,
+                ...(input.cowork === true ? { cowork: true } : {}),
               });
         const claimed = yield* claimDispatch.pipe(
           Effect.mapError(

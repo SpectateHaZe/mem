@@ -3,7 +3,10 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   coworkDecisionSummary,
+  coworkHasExtraDetails,
   coworkPhaseLabel,
+  coworkTurnDetails,
+  coworkTurnSummary,
   decisionLine,
   defaultCoworkAgents,
   validateCoworkSetup,
@@ -94,5 +97,34 @@ describe("cowork status helpers", () => {
       "Ship it",
     );
     expect(coworkDecisionSummary({ ...session, phase: "decided" })).toBe("Final take");
+  });
+});
+
+describe("cowork turn summaries", () => {
+  it("prefers explicit user summary and strips it from details", () => {
+    const msg = {
+      kind: "thought" as const,
+      summary: "Use single-flight promise for refresh.",
+      text: "Here is the detailed analysis.\nDecision: Single-flight promise",
+    };
+    expect(coworkTurnSummary(msg)).toBe("Use single-flight promise for refresh.");
+    expect(coworkTurnDetails(msg)).toBe("Here is the detailed analysis.");
+    expect(coworkHasExtraDetails(msg)).toBe(true);
+  });
+
+  it("extracts inline For you line or condenses long markdown fallback", () => {
+    expect(
+      coworkTurnSummary({
+        kind: "deliberation",
+        text: "For you: Retry only on 401.\n## Full notes\nMore technical points.",
+      }),
+    ).toBe("Retry only on 401.");
+
+    const longFallback = coworkTurnSummary({
+      kind: "thought",
+      text: "## Plan\n```ts\nconst longCode = 123;\n```\n- First use a single mutex for token refresh. Second add jittered retries when the upstream endpoint returns 503 for longer than two seconds across multiple tabs.",
+    });
+    expect(longFallback).toBe("First use a single mutex for token refresh.");
+    expect(longFallback.length).toBeLessThanOrEqual(221);
   });
 });

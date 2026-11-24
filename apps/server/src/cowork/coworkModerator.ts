@@ -2,6 +2,7 @@ import type { CoworkMessage, CoworkSession } from "@t3tools/contracts";
 
 const USER_SPEAKER = "You";
 const DECISION_LINE = /^[ \t]*\**Decision:\**[ \t]*(.+?)\**[ \t]*$/im;
+const USER_SUMMARY_LINE = /^[ \t]*(?:[-*][ \t]+)?\**(?:For you|Summary):\**[ \t]*(.+?)\**[ \t]*$/im;
 const MAX_SESSION_CONTEXT_MESSAGES = 8;
 const MAX_SESSION_CONTEXT_MESSAGE_CHARS = 600;
 const MAX_SESSION_CONTEXT_CHARS = 3_600;
@@ -14,7 +15,10 @@ const mentionPattern = (label: string) =>
 export const extractDecision = (text: string): string | null =>
   DECISION_LINE.exec(text)?.[1]?.trim() ?? null;
 
-export const latestDecision = (transcript: ReadonlyArray<CoworkMessage>): string | undefined => {
+export const extractUserSummary = (text: string): string | null =>
+  USER_SUMMARY_LINE.exec(text)?.[1]?.trim() ?? null;
+
+const latestDecision = (transcript: ReadonlyArray<CoworkMessage>): string | undefined => {
   for (let index = transcript.length - 1; index >= 0; index -= 1) {
     const decision = extractDecision(transcript[index]!.text);
     if (decision !== null) return decision;
@@ -27,8 +31,22 @@ const stripSpeakerPrefix = (label: string, reply: string) =>
   reply.replace(new RegExp(`^\\s*[*[]*${escapeRegExp(label)}[\\]:*]+\\s*`, "i"), "").trim() ||
   "(no reply)";
 
+const splitPeerReply = (
+  label: string,
+  reply: string,
+): { readonly text: string; readonly summary?: string } => {
+  const cleaned = stripSpeakerPrefix(label, reply);
+  const summary = extractUserSummary(cleaned);
+  if (summary === null) return { text: cleaned };
+  const withoutSummary = cleaned.replace(USER_SUMMARY_LINE, "").trim();
+  return {
+    text: withoutSummary || summary,
+    summary,
+  };
+};
+
 /** The first peer named with an `@`, excluding the current speaker. */
-export const mentionedPeerIndex = (
+const mentionedPeerIndex = (
   session: Pick<CoworkSession, "participants">,
   text: string,
   exceptIndex: number | null,
@@ -91,6 +109,7 @@ const equalPeerPreamble = (
   return [
     `You are ${speaker.label}${speaker.role ? ` (perspective: ${speaker.role})` : ""}, collaborating as an equal peer with ${others.join(", ")} in a cowork session on "${session.topic}".`,
     "Every agent in this cowork is an equal peer; none of you is a subagent or lead. Inspect workspace files if needed to ground your reasoning, but do not edit files unless the user explicitly asks you to.",
+    "Keep replies concise and scannable (under ~150 words, short bullets or brief sentences; avoid long walls of text or large code dumps).",
   ].join(" ");
 };
 
@@ -146,7 +165,7 @@ export function buildParallelThinkingPrompt(
     equalPeerPreamble(session, participantIndex),
     sessionContext || null,
     `[You]: ${userMessage}`,
-    "Round 1 (independent thinking): analyze the problem on your own before seeing your peers' takes. Share your concrete proposal, key reasoning, and trade-offs concisely.",
+    'Round 1 (independent thinking): analyze the problem on your own before seeing peers\' takes. Start with a single short line written only for the user: "For you: <1-2 plain sentences summarizing your proposal and why>". Follow with brief technical points for your peers.',
   ]
     .filter((part) => part !== null && part !== "")
     .join("\n\n");
@@ -160,10 +179,18 @@ export function recordParallelThought(
   messageId: string,
 ): CoworkSession {
   const speaker = session.participants[participantIndex]!;
-  const text = stripSpeakerPrefix(speaker.label, reply);
+  const parsed = splitPeerReply(speaker.label, reply);
   const transcript: ReadonlyArray<CoworkMessage> = [
     ...session.transcript,
-    { id: messageId, speaker: speaker.label, kind: "thought", round: 1, text, at },
+    {
+      id: messageId,
+      speaker: speaker.label,
+      kind: "thought",
+      round: 1,
+      text: parsed.text,
+      ...(parsed.summary === undefined ? {} : { summary: parsed.summary }),
+      at,
+    },
   ];
   const participants = session.participants.map((participant, index) =>
     index === participantIndex ? { ...participant, status: "done" as const } : participant,
@@ -206,8 +233,8 @@ export function beginDeliberationTurn(
     speaker.seen === 0 && sessionContext ? sessionContext : null,
     unseen.length > 0 ? unseen.join("\n\n") : "Please continue the deliberation.",
     session.turnsLeft <= 1
-      ? 'This is the final turn. Synthesize where the team landed in one clear line starting with "Decision:", and note any remaining trade-off or dissent.'
-      : "Discuss as equals: evaluate your peers' reasoning, challenge weak assumptions, answer any @questions addressed to you, and write @Name to ask a specific peer. Include a line starting with \"Decision:\" once you propose or agree on the team's answer.",
+      ? 'This is the final turn. Start with "For you: <1-2 plain sentences summarizing where the team landed for the user>", then finish with one clear line starting with "Decision:" noting any remaining trade-off or dissent.'
+      : 'Discuss as equals: evaluate your peers\' reasoning, challenge weak assumptions, answer @questions to you, and write @Name to address a specific peer. Start with "For you: <1-2 plain sentences for the user>", keep peer notes brief, and add a line starting with "Decision:" once you propose or agree on the answer.',
   ]
     .filter((part) => part !== null && part !== "")
     .join("\n\n");
@@ -232,7 +259,7 @@ export function recordDeliberationReply(
   messageId: string,
 ): CoworkSession {
   const speaker = session.participants[speakerIndex]!;
-  const text = stripSpeakerPrefix(speaker.label, reply);
+  const parsed = splitPeerReply(speaker.label, reply);
   const transcript: ReadonlyArray<CoworkMessage> = [
     ...session.transcript,
     {
@@ -240,7 +267,8 @@ export function recordDeliberationReply(
       speaker: speaker.label,
       kind: "deliberation",
       round: session.currentRound,
-      text,
+      text: parsed.text,
+      ...(parsed.summary === undefined ? {} : { summary: parsed.summary }),
       at,
     },
   ];
@@ -249,7 +277,7 @@ export function recordDeliberationReply(
   const participants = session.participants.map((participant, index) =>
     index === speakerIndex ? { ...participant, status: "done" as const } : participant,
   );
-  const decision = extractDecision(text) ?? session.decision ?? latestDecision(transcript);
+  const decision = extractDecision(parsed.text) ?? session.decision ?? latestDecision(transcript);
   const nextRound = done
     ? session.currentRound
     : Math.min(
@@ -266,7 +294,7 @@ export function recordDeliberationReply(
     turnsLeft,
     currentRound: nextRound,
     phase: done ? "decided" : "deliberating",
-    speakerIndex: done ? null : nextSpeakerIndex(session, speakerIndex, text),
+    speakerIndex: done ? null : nextSpeakerIndex(session, speakerIndex, parsed.text),
     ...(decision === undefined ? {} : { decision }),
     updatedAt: at,
   };
