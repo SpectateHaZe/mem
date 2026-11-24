@@ -372,6 +372,8 @@ export interface ChatComposerProps {
   sideChatAvailable?: boolean;
   subagent?: ComposerSubagent | undefined;
   sideChatDisabledReason?: string | null;
+  coworkAvailable?: boolean;
+  coworkDisabledReason?: string | null;
   /** Arms a fresh session for the next message; absent where `/clear` is unavailable. */
   onFreshSession?: (() => void) | undefined;
   environmentUnavailable: {
@@ -1096,6 +1098,8 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
     threadPullRequests,
     sideChatAvailable: props.sideChatAvailable === true,
     sideChatDisabledReason: props.sideChatDisabledReason ?? null,
+    coworkAvailable: props.coworkAvailable === true,
+    coworkDisabledReason: props.coworkDisabledReason ?? null,
     freshSessionAvailable: props.onFreshSession !== undefined,
     compactSlashCommandAvailable,
     selectedProvider,
@@ -1890,6 +1894,14 @@ export const ChatComposer = memo(function ChatComposer(props: ChatComposerProps)
           `/${item.command} `,
           { expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd) },
         );
+        if (applied) setComposerHighlightedItemId(null);
+        return;
+      }
+      if (item.command === "cowork") {
+        if (props.coworkDisabledReason) return;
+        const applied = applyPromptReplacement(trigger.rangeStart, trigger.rangeEnd, "/cowork ", {
+          expectedText: snapshot.value.slice(trigger.rangeStart, trigger.rangeEnd),
+        });
         if (applied) setComposerHighlightedItemId(null);
         return;
       }

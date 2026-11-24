@@ -1238,4 +1238,16 @@ describe("rightPanelStore", () => {
     expect(surfaceIds()).toEqual(["browser:tab-a", "terminal:term-1", "diff", "browser:tab-b"]);
     expect(store.getUserActionRevision(refA)).toBe(revision);
   });
+
+  it("opens and toggles the cowork singleton surface per thread", () => {
+    const store = useRightPanelStore.getState();
+    store.open(refA, "cowork");
+    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
+      id: "cowork",
+      kind: "cowork",
+    });
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refB)).toBeNull();
+    store.toggle(refA, "cowork");
+    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
+  });
 });

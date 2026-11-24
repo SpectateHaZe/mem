@@ -6,8 +6,8 @@ import * as MemOverseerTaskStore from "../overseer/MemOverseerTaskStore.ts";
 import * as MemReviewer from "../overseer/MemReviewer.ts";
 import * as DiscordPresence from "../presence/DiscordPresence.ts";
 import * as MemMasterThreadService from "../overseer/MemMasterThreadService.ts";
+import * as CoworkService from "../cowork/CoworkService.ts";
 import * as GoalQueueService from "../rooms/GoalQueueService.ts";
-import * as RoomService from "../rooms/RoomService.ts";
 import * as SubagentReportService from "../rooms/SubagentReportService.ts";
 import * as SpendingCap from "./SpendingCap.ts";
 import * as UsageLimitRecoveryWorker from "./UsageLimitRecoveryWorker.ts";
@@ -406,7 +406,7 @@ export const layerProduction = Layer.mergeAll(
       ),
     ),
   ),
-  RoomService.layer.pipe(
+  CoworkService.layer.pipe(
     Layer.provide(
       Layer.mergeAll(
         layerThreadLaunchProvided,

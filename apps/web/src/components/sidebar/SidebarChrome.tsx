@@ -5,7 +5,6 @@ import {
   EllipsisIcon,
   HandIcon,
   ListTodoIcon,
-  MessagesSquareIcon,
   SettingsIcon,
 } from "lucide-react";
 import type { ReactNode } from "react";
@@ -263,11 +262,6 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
     void navigate({ to: "/usage" });
   };
 
-  const handleRoomsClick = () => {
-    closeMobileSidebar();
-    void navigate({ to: "/rooms" });
-  };
-
   const handleQueueClick = () => {
     closeMobileSidebar();
     void navigate({ to: "/queue" });
@@ -313,10 +307,6 @@ const SidebarUtilityMenu = memo(function SidebarUtilityMenu() {
                     Pull requests
                   </MenuItem>
                 ) : null}
-                <MenuItem onClick={handleRoomsClick}>
-                  <MessagesSquareIcon />
-                  Group chats
-                </MenuItem>
                 <MenuItem onClick={handleQueueClick}>
                   <ListTodoIcon />
                   Queue

@@ -65,6 +65,8 @@ export function useComposerMenuItems({
   threadPullRequests,
   sideChatAvailable,
   sideChatDisabledReason,
+  coworkAvailable,
+  coworkDisabledReason,
   freshSessionAvailable,
   compactSlashCommandAvailable,
   selectedProvider,
@@ -84,6 +86,8 @@ export function useComposerMenuItems({
   readonly threadPullRequests: ReadonlyArray<ThreadPullRequestLink> | undefined;
   readonly sideChatAvailable: boolean;
   readonly sideChatDisabledReason: string | null;
+  readonly coworkAvailable: boolean;
+  readonly coworkDisabledReason: string | null;
   readonly freshSessionAvailable: boolean;
   readonly compactSlashCommandAvailable: boolean;
   readonly selectedProvider: ProviderDriverKind;
@@ -239,6 +243,18 @@ export function useComposerMenuItems({
                 command: "btw",
                 label: "/btw",
                 description: sideChatDisabledReason ?? "Same as /side",
+              },
+            ] as const)
+          : []),
+        ...(coworkAvailable
+          ? ([
+              {
+                id: "slash:cowork",
+                type: "slash-command",
+                command: "cowork",
+                label: "/cowork",
+                description:
+                  coworkDisabledReason ?? "Launch equal peer agents to think and decide together",
               },
             ] as const)
           : []),

@@ -23,8 +23,9 @@ import * as ProjectionStore from "../orchestration-v2/ProjectionStore.ts";
 import * as ThreadManagement from "../orchestration-v2/ThreadManagementService.ts";
 import { forkParked } from "../serverActivation.ts";
 import * as ServerSettings from "../serverSettings.ts";
+import { ENDED_RUN_STATUSES } from "./endedRuns.ts";
 import { readLimitStop } from "./limitStops.ts";
-import { ENDED_RUN_STATUSES, subagentFinishedNote, subagentStartedNote } from "./roomModerator.ts";
+import { subagentFinishedNote, subagentStartedNote } from "./subagentReportNotes.ts";
 
 const ReportsFile = Schema.fromJsonString(Schema.Array(SubagentReportWatchInput));
 const decodeReports = Schema.decodeUnknownEffect(ReportsFile);

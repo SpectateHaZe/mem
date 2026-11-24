@@ -7,7 +7,7 @@ import { useEnvironmentQuery } from "../../state/query";
 import { serverEnvironment } from "../../state/server";
 import { hasDesktopNotifications } from "../../threadNotifications";
 import { toastManager } from "../ui/toast";
-import { queueAlerts } from "./roomLogic";
+import { queueAlerts } from "./queueLogic";
 
 function QueueWatcher({ environmentId }: { readonly environmentId: EnvironmentId }) {
   const { data } = useEnvironmentQuery(serverEnvironment.queueLive({ environmentId, input: {} }));

@@ -1335,9 +1335,9 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:scheduled-task:webhook-delivery",
       tag: WS_METHODS.scheduledTasksGetWebhookDelivery,
     }),
-    roomsLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
-      label: "environment-data:server:rooms:live",
-      tag: WS_METHODS.roomsSubscribe,
+    coworkLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
+      label: "environment-data:server:cowork:live",
+      tag: WS_METHODS.coworkSubscribe,
     }),
     computerUseLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:computer-use:live",
@@ -1399,21 +1399,21 @@ export function createServerEnvironmentAtoms<R, E>(
       label: "environment-data:server:subagent-report:watch",
       tag: WS_METHODS.subagentReportsWatch,
     }),
-    createRoom: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:room:create",
-      tag: WS_METHODS.roomsCreate,
+    startCowork: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cowork:start",
+      tag: WS_METHODS.coworkStart,
     }),
-    sendToRoom: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:room:send",
-      tag: WS_METHODS.roomsSend,
+    sendToCowork: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cowork:send",
+      tag: WS_METHODS.coworkSend,
     }),
-    setRoomPaused: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:room:set-paused",
-      tag: WS_METHODS.roomsSetPaused,
+    setCoworkPaused: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cowork:set-paused",
+      tag: WS_METHODS.coworkSetPaused,
     }),
-    deleteRoom: createEnvironmentRpcCommand(runtime, {
-      label: "environment-data:server:room:delete",
-      tag: WS_METHODS.roomsDelete,
+    deleteCowork: createEnvironmentRpcCommand(runtime, {
+      label: "environment-data:server:cowork:delete",
+      tag: WS_METHODS.coworkDelete,
     }),
     scheduledTasksLive: createEnvironmentRpcSubscriptionAtomFamily(runtime, {
       label: "environment-data:server:scheduled-tasks:live",

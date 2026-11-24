@@ -280,6 +280,7 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import { coworkPhaseLabel } from "./cowork/coworkLogic";
 import type { ComposerSubagent } from "./chat/SubagentModelPicker";
 import { useSideChat } from "./chat/useSideChat";
 import { useRemoteOpenState } from "~/remoteOpen";
@@ -2823,6 +2824,46 @@ export default function ChatView(props: ChatViewProps) {
                 ? "Available once the thread's worktree is set up."
                 : null;
   const openSideChatStable = useStableCallback(() => void sideChat.open());
+  const coworkOffered = !embedded && activeThread?.lineage.sideChat !== true && !isSubagentThread;
+  const coworkAvailable = coworkOffered && isServerThread;
+  const coworkDisabledReason =
+    activeThread?.lineage.sideChat === true
+      ? "Side chats cannot open cowork."
+      : isSubagentThread
+        ? "Subagent threads cannot open cowork."
+        : coworkOffered && !isServerThread
+          ? "Cowork starts after the first message."
+          : null;
+  const coworkQuery = useEnvironmentQuery(
+    coworkAvailable ? serverEnvironment.coworkLive({ environmentId, input: {} }) : null,
+  );
+  const activeCowork =
+    coworkQuery.data?.sessions.find((session) => session.sessionThreadId === activeThread?.id) ??
+    null;
+  const [coworkPrefill, setCoworkPrefill] = useState<{
+    readonly threadKey: string;
+    readonly topic: string;
+  } | null>(null);
+  const openCoworkStable = useStableCallback((prefill?: string) => {
+    if (!activeThreadRef || !coworkAvailable) return;
+    if (prefill && prefill.trim() !== "") {
+      setCoworkPrefill({ threadKey: routeThreadKey, topic: prefill.trim() });
+    }
+    useRightPanelStore.getState().open(activeThreadRef, "cowork");
+  });
+  const consumeCoworkPrefillStable = useStableCallback(() => setCoworkPrefill(null));
+  const insertCoworkDecisionStable = useStableCallback((text: string) => {
+    const composer = composerRef.current;
+    if (!composer || !composer.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
+      toastManager.add({
+        type: "error",
+        title: "Unable to add to chat",
+        description: "The composer is busy; try again once it is ready.",
+      });
+      return;
+    }
+    scheduleComposerFocus();
+  });
   const [pickedSubagent, setPickedSubagent] = useState<{
     readonly threadKey: string | null;
     readonly selection: ModelSelection;
@@ -2995,6 +3036,8 @@ export default function ChatView(props: ChatViewProps) {
     acknowledgeActiveThreadWoke,
     onSideChat: sideChat.available ? sendSideChatStable : undefined,
     sideChatDisabledReason,
+    onCowork: coworkAvailable ? openCoworkStable : undefined,
+    coworkDisabledReason,
     subagentArmed: subagent !== null,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
@@ -3251,6 +3294,12 @@ export default function ChatView(props: ChatViewProps) {
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
       sideChatParentPanel={sideChatParentPanel}
+      cowork={{
+        prefillTopic: coworkPrefill?.threadKey === routeThreadKey ? coworkPrefill.topic : null,
+        onConsumePrefill: consumeCoworkPrefillStable,
+        onSendToSession: sendAppMessageStable,
+        onInsertInComposer: insertCoworkDecisionStable,
+      }}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
@@ -3389,6 +3438,17 @@ export default function ChatView(props: ChatViewProps) {
                 ? { onOpenProjectSettings: handleOpenDraftProjectSettingsStable }
                 : {})}
               {...(threadFindEnabled ? { onFindInThread: openThreadFindStable } : {})}
+              cowork={
+                coworkAvailable
+                  ? {
+                      label: activeCowork ? coworkPhaseLabel(activeCowork) : null,
+                      active:
+                        activeCowork?.phase === "thinking" ||
+                        activeCowork?.phase === "deliberating",
+                      onOpen: () => openCoworkStable(),
+                    }
+                  : undefined
+              }
             />
           </header>
         )}
@@ -3699,6 +3759,8 @@ export default function ChatView(props: ChatViewProps) {
                                 sideChatAvailable={sideChat.available}
                                 subagent={composerSubagent}
                                 sideChatDisabledReason={sideChatDisabledReason}
+                                coworkAvailable={coworkAvailable}
+                                coworkDisabledReason={coworkDisabledReason}
                                 onFreshSession={
                                   freshSessionCommandAvailable ? armFreshSessionStable : undefined
                                 }
@@ -4045,6 +4107,7 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
+          onAddCowork={coworkOffered ? () => openCoworkStable() : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
@@ -4054,6 +4117,8 @@ export default function ChatView(props: ChatViewProps) {
           deviceAvailable={activeThreadRef !== null}
           sideChatAvailable={sideChat.available}
           sideChatDisabledReason={sideChatDisabledReason}
+          coworkAvailable={coworkAvailable}
+          coworkDisabledReason={coworkDisabledReason}
         >
           {rightPanelContent}
         </ChatRightPanel>

@@ -13,7 +13,7 @@ import { Button } from "../ui/button";
 import { Label } from "../ui/label";
 import { Select, SelectItem, SelectPopup, SelectTrigger, SelectValue } from "../ui/select";
 import { Textarea } from "../ui/textarea";
-import { modelOptions } from "./roomLogic";
+import { modelOptions } from "../cowork/coworkLogic";
 
 const STATUS_LABEL: Record<QueueGoal["status"], string> = {
   pending: "Waiting",

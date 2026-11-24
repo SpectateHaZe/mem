@@ -180,3 +180,9 @@ export function parseSideChatCommand(text: string): { prompt: string } | null {
   const match = /^\/(?:side|btw)(?:\s+([\s\S]*))?$/i.exec(text.trim());
   return match ? { prompt: match[1]?.trim() ?? "" } : null;
 }
+
+/** `/cowork [prompt]` as the whole message opens Cowork in the current session. */
+export function parseCoworkCommand(text: string): { prompt: string } | null {
+  const match = /^\/cowork(?:\s+([\s\S]*))?$/i.exec(text.trim());
+  return match ? { prompt: match[1]?.trim() ?? "" } : null;
+}

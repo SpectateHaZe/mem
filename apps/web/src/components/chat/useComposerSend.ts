@@ -1,4 +1,8 @@
-import { isClearComposerCommand, parseSideChatCommand } from "@t3tools/shared/composerTrigger";
+import {
+  isClearComposerCommand,
+  parseCoworkCommand,
+  parseSideChatCommand,
+} from "@t3tools/shared/composerTrigger";
 import { armFreshSession, disarmFreshSession, readFreshSessionArm } from "./freshSessionArms";
 import {
   mergeDirectPreviewAnnotation,
@@ -237,6 +241,10 @@ interface ComposerSendInput {
   readonly onSideChat?: ((prompt: string) => Promise<boolean>) | undefined;
   /** Refuses `/side` with this reason and keeps the draft. */
   readonly sideChatDisabledReason: string | null;
+  /** Opens Cowork for the active session, optionally prefilling a topic. */
+  readonly onCowork?: ((prompt?: string) => void) | undefined;
+  /** Refuses `/cowork` with this reason and keeps the draft. */
+  readonly coworkDisabledReason?: string | null;
   /** The next message starts a subagent even without `/side`. */
   readonly subagentArmed: boolean;
   readonly handleNewThreadInActiveProject: () => void;
@@ -324,6 +332,8 @@ export function useComposerSend(input: ComposerSendInput) {
     acknowledgeActiveThreadWoke,
     onSideChat,
     sideChatDisabledReason,
+    onCowork,
+    coworkDisabledReason = null,
     subagentArmed,
     handleNewThreadInActiveProject,
     persistThreadSettingsForNextTurn,
@@ -446,14 +456,40 @@ export function useComposerSend(input: ComposerSendInput) {
       return;
     }
     const sendCtx = composerRef.current?.getSendContext();
+    const answeringQuestion =
+      Boolean(activePendingProgress) && sendCtx?.answeringPendingUserInput !== false;
     // `/side` beats an open question and a plan follow-up, which would send the text to main.
     const sideChatCommand =
       sendCtx && !directAnnotation && !queuedRunEdit.isEditing
         ? (parseSideChatCommand(promptAtSend) ??
           (subagentArmed && promptAtSend.trim() ? { prompt: promptAtSend.trim() } : null))
         : null;
-    const answeringQuestion =
-      Boolean(activePendingProgress) && sendCtx?.answeringPendingUserInput !== false;
+    const coworkCommand =
+      sendCtx && !directAnnotation && !queuedRunEdit.isEditing
+        ? parseCoworkCommand(promptAtSend)
+        : null;
+    if (coworkCommand && !answeringQuestion) {
+      if (coworkDisabledReason !== null || !onCowork) {
+        toastManager.add(
+          stackedThreadToast({
+            type: "warning",
+            title: "Cowork unavailable",
+            description: coworkDisabledReason ?? "Cowork is unavailable in this session.",
+          }),
+        );
+        return;
+      }
+      onCowork(coworkCommand.prompt);
+      if (
+        currentRouteThreadKeyRef.current === routeThreadKey &&
+        promptRef.current === promptAtSend
+      ) {
+        promptRef.current = "";
+        setComposerDraftPrompt(composerDraftTarget, "");
+        composerRef.current?.resetCursorState();
+      }
+      return;
+    }
     // Where side chats are unavailable, `/side` text can still be a literal answer.
     if (sideChatDisabledReason !== null && sideChatCommand && !answeringQuestion) {
       toastManager.add(

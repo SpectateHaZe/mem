@@ -10,7 +10,7 @@ import {
   isAtomCommandInterrupted,
   squashAtomCommandFailure,
 } from "@t3tools/client-runtime/state/runtime";
-import { ChevronDownIcon } from "lucide-react";
+import { ChevronDownIcon, UsersIcon } from "lucide-react";
 import {
   memo,
   useEffect,
@@ -20,6 +20,7 @@ import {
   type MouseEvent as ReactMouseEvent,
 } from "react";
 import { isTrailingDoubleClick } from "../Sidebar.logic";
+import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import { toastManager } from "../ui/toast";
@@ -57,6 +58,13 @@ interface ChatHeaderProps {
   onNewThreadInProject: () => void;
   onOpenProjectSettings?: (() => void) | undefined;
   onFindInThread?: ((threadRef: ScopedThreadRef) => void) | undefined;
+  cowork?:
+    | {
+        readonly label: string | null;
+        readonly active: boolean;
+        readonly onOpen: () => void;
+      }
+    | undefined;
 }
 
 function resolveRenameCommit(input: {
@@ -84,6 +92,7 @@ export const ChatHeader = memo(function ChatHeader({
   onNewThreadInProject,
   onOpenProjectSettings,
   onFindInThread,
+  cowork,
 }: ChatHeaderProps) {
   const activeProjectName = activeProject?.isScratch ? "Chats" : activeProject?.title;
   const activeProjectCwd = activeProject?.workspaceRoot ?? null;
@@ -431,6 +440,27 @@ export const ChatHeader = memo(function ChatHeader({
           ) : null}
         </WorkspaceBreadcrumbItem>
       </WorkspaceBreadcrumb>
+      {isServerThread && cowork ? (
+        <Tooltip>
+          <TooltipTrigger
+            render={
+              <Button
+                size="xs"
+                variant={cowork.label ? "outline" : "ghost-muted"}
+                onClick={cowork.onOpen}
+                aria-label={cowork.label ? `Cowork: ${cowork.label}` : "Open cowork"}
+              />
+            }
+          >
+            <UsersIcon aria-hidden />
+            <span>{cowork.label ? `Cowork · ${cowork.label}` : "Cowork"}</span>
+            {cowork.active ? <span className="size-1.5 rounded-full bg-info" aria-hidden /> : null}
+          </TooltipTrigger>
+          <TooltipPopup side="bottom">
+            Launch equal peer agents in this session to think and decide together
+          </TooltipPopup>
+        </Tooltip>
+      ) : null}
       {isServerThread ? <GuestShareIndicator threadRef={activeThreadRef} /> : null}
       {isServerThread ? <LendAHandHeaderControl threadRef={activeThreadRef} /> : null}
     </div>

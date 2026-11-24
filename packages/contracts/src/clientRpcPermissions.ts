@@ -68,10 +68,10 @@ export const CLIENT_GUARDED_RPC_SCOPES = {
 
   // Starts an agent session on this environment that can read its logs and database.
   [WS_METHODS.serverPrepareTriage]: AuthOrchestrationOperateScope,
-  [WS_METHODS.roomsCreate]: AuthOrchestrationOperateScope,
-  [WS_METHODS.roomsSend]: AuthOrchestrationOperateScope,
-  [WS_METHODS.roomsSetPaused]: AuthOrchestrationOperateScope,
-  [WS_METHODS.roomsDelete]: AuthOrchestrationOperateScope,
+  [WS_METHODS.coworkStart]: AuthOrchestrationOperateScope,
+  [WS_METHODS.coworkSend]: AuthOrchestrationOperateScope,
+  [WS_METHODS.coworkSetPaused]: AuthOrchestrationOperateScope,
+  [WS_METHODS.coworkDelete]: AuthOrchestrationOperateScope,
   [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,
   // Starting hands this PC to someone outside, like a pairing link.
   [WS_METHODS.lendAHandHostStart]: AuthAccessWriteScope,

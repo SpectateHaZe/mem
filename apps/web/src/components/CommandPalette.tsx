@@ -58,7 +58,6 @@ import {
   BugIcon,
   ChartNoAxesColumnIcon,
   ListTodoIcon,
-  MessagesSquareIcon,
   CheckIcon,
   ChevronRightIcon,
   CornerLeftUpIcon,
@@ -78,6 +77,7 @@ import {
   SquarePenIcon,
   TextSearchIcon,
   UserPlusIcon,
+  UsersIcon,
 } from "lucide-react";
 import { openThreadFind } from "./chat/threadFindStore";
 import {
@@ -1624,28 +1624,31 @@ function OpenCommandPaletteDialog(props: {
     },
   });
 
-  actionItems.push(
-    {
-      kind: "action",
-      value: "action:group-chats",
-      searchTerms: ["group chat", "room", "agents", "discuss", "brainstorm", "lead"],
-      title: "Open group chats",
-      icon: <MessagesSquareIcon className={ITEM_ICON_CLASS} />,
-      run: async () => {
-        await navigate({ to: "/rooms" });
-      },
+  actionItems.push({
+    kind: "action",
+    value: "action:queue",
+    searchTerms: ["queue", "goals", "unattended", "24/7", "background"],
+    title: "Open queue",
+    icon: <ListTodoIcon className={ITEM_ICON_CLASS} />,
+    run: async () => {
+      await navigate({ to: "/queue" });
     },
-    {
+  });
+
+  if (activeThread !== null && activeThread.lineage.sideChat !== true) {
+    actionItems.push({
       kind: "action",
-      value: "action:queue",
-      searchTerms: ["queue", "goals", "unattended", "24/7", "background"],
-      title: "Open queue",
-      icon: <ListTodoIcon className={ITEM_ICON_CLASS} />,
+      value: "action:cowork",
+      searchTerms: ["cowork", "agents", "peers", "brainstorm", "decide", "team"],
+      title: "Open cowork in this session",
+      icon: <UsersIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        await navigate({ to: "/queue" });
+        useRightPanelStore
+          .getState()
+          .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "cowork");
       },
-    },
-  );
+    });
+  }
 
   for (const direction of [1, -1] as const) {
     const title = direction === 1 ? "Focus Next Workspace Area" : "Focus Previous Workspace Area";

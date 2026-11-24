@@ -60,7 +60,7 @@ export type EnvironmentSubscriptionRpcTag =
   | typeof WS_METHODS.subscribeServerConfig
   | typeof WS_METHODS.subscribeServerLifecycle
   | typeof WS_METHODS.scheduledTasksSubscribe
-  | typeof WS_METHODS.roomsSubscribe
+  | typeof WS_METHODS.coworkSubscribe
   | typeof WS_METHODS.queueSubscribe
   | typeof WS_METHODS.computerUseSubscribe
   | typeof WS_METHODS.lendAHandHostSubscribe

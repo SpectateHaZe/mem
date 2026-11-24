@@ -51,15 +51,15 @@ import {
 } from "./memOverseer.ts";
 import * as Schema from "effect/Schema";
 import {
-  Room,
-  RoomCreateInput,
-  RoomDeleteInput,
-  RoomError,
-  RoomListResult,
-  RoomSendInput,
-  RoomSetPausedInput,
-  SubagentReportWatchInput,
-} from "./room.ts";
+  CoworkDeleteInput,
+  CoworkError,
+  CoworkListResult,
+  CoworkSendInput,
+  CoworkSession,
+  CoworkSetPausedInput,
+  CoworkStartInput,
+} from "./cowork.ts";
+import { RoomError, SubagentReportWatchInput } from "./room.ts";
 import {
   GoalQueue,
   QueueAddInput,
@@ -621,11 +621,11 @@ export const WS_METHODS = {
   lendAHandInvite: "lendAHand.invite",
   lendAHandAccept: "lendAHand.accept",
 
-  roomsSubscribe: "rooms.subscribe",
-  roomsCreate: "rooms.create",
-  roomsSend: "rooms.send",
-  roomsSetPaused: "rooms.setPaused",
-  roomsDelete: "rooms.delete",
+  coworkSubscribe: "cowork.subscribe",
+  coworkStart: "cowork.start",
+  coworkSend: "cowork.send",
+  coworkSetPaused: "cowork.setPaused",
+  coworkDelete: "cowork.delete",
   subagentReportsWatch: "subagentReports.watch",
   queueSubscribe: "queue.subscribe",
   queueAdd: "queue.add",
@@ -2216,17 +2216,17 @@ const WsLendAHandHelperSubscribeRpc = Rpc.make(WS_METHODS.lendAHandHelperSubscri
   stream: true,
 });
 
-const WsRoomsSubscribeRpc = Rpc.make(WS_METHODS.roomsSubscribe, {
+const WsCoworkSubscribeRpc = Rpc.make(WS_METHODS.coworkSubscribe, {
   payload: Schema.Struct({}),
-  success: RoomListResult,
-  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+  success: CoworkListResult,
+  error: Schema.Union([CoworkError, EnvironmentAuthorizationError]),
   stream: true,
 });
 
-const WsRoomsCreateRpc = Rpc.make(WS_METHODS.roomsCreate, {
-  payload: RoomCreateInput,
-  success: Room,
-  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+const WsCoworkStartRpc = Rpc.make(WS_METHODS.coworkStart, {
+  payload: CoworkStartInput,
+  success: CoworkSession,
+  error: Schema.Union([CoworkError, EnvironmentAuthorizationError]),
 });
 
 const WsSubagentReportsWatchRpc = Rpc.make(WS_METHODS.subagentReportsWatch, {
@@ -2234,21 +2234,21 @@ const WsSubagentReportsWatchRpc = Rpc.make(WS_METHODS.subagentReportsWatch, {
   error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
 });
 
-const WsRoomsSendRpc = Rpc.make(WS_METHODS.roomsSend, {
-  payload: RoomSendInput,
-  success: Room,
-  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+const WsCoworkSendRpc = Rpc.make(WS_METHODS.coworkSend, {
+  payload: CoworkSendInput,
+  success: CoworkSession,
+  error: Schema.Union([CoworkError, EnvironmentAuthorizationError]),
 });
 
-const WsRoomsSetPausedRpc = Rpc.make(WS_METHODS.roomsSetPaused, {
-  payload: RoomSetPausedInput,
-  success: Room,
-  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+const WsCoworkSetPausedRpc = Rpc.make(WS_METHODS.coworkSetPaused, {
+  payload: CoworkSetPausedInput,
+  success: CoworkSession,
+  error: Schema.Union([CoworkError, EnvironmentAuthorizationError]),
 });
 
-const WsRoomsDeleteRpc = Rpc.make(WS_METHODS.roomsDelete, {
-  payload: RoomDeleteInput,
-  error: Schema.Union([RoomError, EnvironmentAuthorizationError]),
+const WsCoworkDeleteRpc = Rpc.make(WS_METHODS.coworkDelete, {
+  payload: CoworkDeleteInput,
+  error: Schema.Union([CoworkError, EnvironmentAuthorizationError]),
 });
 
 const WsScheduledTasksSubscribeRpc = Rpc.make(WS_METHODS.scheduledTasksSubscribe, {
@@ -2403,12 +2403,12 @@ export const WsRpcGroup = RpcGroup.make(
   WsClaudePluginsRunRpc,
   WsServerSignalProcessRpc,
   WsScheduledTasksSubscribeRpc,
-  WsRoomsSubscribeRpc,
-  WsRoomsCreateRpc,
-  WsRoomsSendRpc,
+  WsCoworkSubscribeRpc,
+  WsCoworkStartRpc,
+  WsCoworkSendRpc,
   WsSubagentReportsWatchRpc,
-  WsRoomsSetPausedRpc,
-  WsRoomsDeleteRpc,
+  WsCoworkSetPausedRpc,
+  WsCoworkDeleteRpc,
   WsComputerUseSubscribeRpc,
   WsComputerUseStopRpc,
   WsLendAHandHostStartRpc,

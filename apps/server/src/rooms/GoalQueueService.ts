@@ -42,8 +42,7 @@ import {
   settleGoal,
   updateGoal,
 } from "./goalQueueLogic.ts";
-import { ENDED_RUN_STATUSES } from "./roomModerator.ts";
-import { makeEndedRunTracker } from "./endedRuns.ts";
+import { ENDED_RUN_STATUSES, makeEndedRunTracker } from "./endedRuns.ts";
 import { readLimitStop } from "./limitStops.ts";
 
 const QueueFile = Schema.fromJsonString(GoalQueue);

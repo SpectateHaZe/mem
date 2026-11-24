@@ -1,3 +1,13 @@
+import type { OrchestrationV2Run } from "@t3tools/contracts";
+
+export const ENDED_RUN_STATUSES: ReadonlySet<OrchestrationV2Run["status"]> = new Set([
+  "completed",
+  "interrupted",
+  "failed",
+  "cancelled",
+  "rolled_back",
+]);
+
 /**
  * Remembers which ended runs were already acted on. The orchestrator re-sends a finished parent
  * run, still "completed", each time one of its subagents finishes; acting again would record an

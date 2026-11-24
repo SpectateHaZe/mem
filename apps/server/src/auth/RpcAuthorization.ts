@@ -128,7 +128,7 @@ export const RPC_REQUIRED_SCOPES = {
   [WS_METHODS.computerUseStop]: AuthOrchestrationOperateScope,
   [WS_METHODS.lendAHandHostSubscribe]: AuthAccessReadScope,
   [WS_METHODS.lendAHandHelperSubscribe]: AuthOrchestrationReadScope,
-  [WS_METHODS.roomsSubscribe]: AuthOrchestrationReadScope,
+  [WS_METHODS.coworkSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.queueSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.scheduledTasksSubscribe]: AuthOrchestrationReadScope,
   [WS_METHODS.secretsAnswerRequest]: AuthOrchestrationOperateScope,

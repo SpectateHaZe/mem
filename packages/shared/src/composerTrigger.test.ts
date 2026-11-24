@@ -2,6 +2,7 @@ import { describe, expect, it } from "vite-plus/test";
 
 import {
   detectComposerTrigger,
+  parseCoworkCommand,
   parseSideChatCommand,
   serializeComposerFileLink,
 } from "./composerTrigger.ts";
@@ -109,5 +110,19 @@ describe("parseSideChatCommand", () => {
     expect(parseSideChatCommand("/sidebar")).toBeNull();
     expect(parseSideChatCommand("/btwx")).toBeNull();
     expect(parseSideChatCommand("ask /side later")).toBeNull();
+  });
+});
+
+describe("parseCoworkCommand", () => {
+  it("reads an optional prompt after /cowork", () => {
+    expect(parseCoworkCommand("/cowork")).toEqual({ prompt: "" });
+    expect(parseCoworkCommand("  /COWORK  compare approaches\nline two ")).toEqual({
+      prompt: "compare approaches\nline two",
+    });
+  });
+
+  it("ignores other commands and inline mentions", () => {
+    expect(parseCoworkCommand("/coworker")).toBeNull();
+    expect(parseCoworkCommand("start /cowork later")).toBeNull();
   });
 });
