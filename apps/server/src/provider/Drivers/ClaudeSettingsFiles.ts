@@ -230,9 +230,16 @@ export const writeClaudeSettingsScope = Effect.fn("writeClaudeSettingsScope")(fu
     );
 
   if (previous !== null && previous !== formatJson(value)) {
-    yield* fileSystem
-      .writeFileString(`${entry.filePath}.mem-backup`, previous)
-      .pipe(Effect.orElseSucceed(() => undefined));
+    const backupPath = `${entry.filePath}.mem-backup`;
+    yield* fileSystem.writeFileString(backupPath, previous).pipe(
+      Effect.catchCause((cause) =>
+        Effect.logWarning("Failed to write Claude settings backup", {
+          scope: input.scope,
+          filePath: backupPath,
+          cause,
+        }),
+      ),
+    );
   }
 
   yield* writeSettings(formatJson(value));

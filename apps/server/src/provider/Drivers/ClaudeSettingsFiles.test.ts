@@ -7,6 +7,7 @@ import {
 } from "@t3tools/contracts";
 import * as Effect from "effect/Effect";
 import * as FileSystem from "effect/FileSystem";
+import * as Logger from "effect/Logger";
 import * as Path from "effect/Path";
 
 import {
@@ -207,6 +208,42 @@ it.layer(NodeServices.layer)("ClaudeSettingsFiles", (it) => {
           }),
         );
         expect(invalid._tag).toBe("Failure");
+      }),
+    );
+
+    it.effect("logs a warning when writing the .mem-backup file fails", () =>
+      Effect.gen(function* () {
+        const workspace = yield* makeWorkspace;
+        const fileSystem = yield* FileSystem.FileSystem;
+        const path = yield* Path.Path;
+        const userSettings = path.join(workspace.config, "settings.json");
+
+        yield* fileSystem.writeFileString(userSettings, `{"switchModelsOnFlag":true}\n`);
+        // Pre-creating a directory at the backup path makes writeFileString fail cross-platform.
+        yield* fileSystem.makeDirectory(`${userSettings}.mem-backup`, { recursive: true });
+
+        const warnings: Array<{ readonly logLevel: string; readonly message: unknown }> = [];
+        const logger = Logger.make(({ logLevel, message }) => {
+          warnings.push({ logLevel, message });
+        });
+
+        yield* writeClaudeSettingsScope({
+          config: { homePath: workspace.config },
+          cwd: workspace.cwd,
+          scope: "user",
+          contents: `{"switchModelsOnFlag":false}`,
+        }).pipe(Effect.provide(Logger.layer([logger], { mergeWithExisting: false })));
+
+        expect(yield* fileSystem.readFileString(userSettings)).toBe(
+          `{\n  "switchModelsOnFlag": false\n}\n`,
+        );
+        expect(
+          warnings.some(
+            (entry) =>
+              entry.logLevel === "Warn" &&
+              String(entry.message).includes("Failed to write Claude settings backup"),
+          ),
+        ).toBe(true);
       }),
     );
   });
