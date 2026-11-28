@@ -253,8 +253,7 @@ export function useComposerMenuItems({
                 type: "slash-command",
                 command: "cowork",
                 label: "/cowork",
-                description:
-                  coworkDisabledReason ?? "Launch equal peer agents to think and decide together",
+                description: coworkDisabledReason ?? "Brainstorm or code together with peer agents",
               },
             ] as const)
           : []),

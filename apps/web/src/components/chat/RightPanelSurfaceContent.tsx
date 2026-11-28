@@ -10,7 +10,6 @@ import type {
 } from "@t3tools/contracts";
 import { scopedThreadKey } from "@t3tools/client-runtime/environment";
 import { lazy, Suspense } from "react";
-import CoworkPane from "../cowork/CoworkPane";
 import SideChatPane from "./SideChatPane";
 import type { ComposerImageAttachment, DraftId } from "../../composerDraftStore";
 import type { ShortcutMatchContext } from "../../keybindings";
@@ -60,13 +59,6 @@ interface RightPanelFileProps {
   readonly onPendingChange: (relativePath: string, pending: boolean) => void;
 }
 
-interface RightPanelCoworkProps {
-  readonly prefillTopic: string | null;
-  readonly onConsumePrefill: () => void;
-  readonly onSendToSession: (text: string) => Promise<void>;
-  readonly onInsertInComposer: (text: string) => void;
-}
-
 export function RightPanelSurfaceContent(props: {
   readonly surface: RightPanelSurface | null;
   readonly activeSurfaceId: string | null;
@@ -87,7 +79,6 @@ export function RightPanelSurfaceContent(props: {
   readonly pullRequest: RightPanelPullRequestProps;
   readonly files: RightPanelFileProps;
   readonly sideChatParentPanel: SideChatParentPanel;
-  readonly cowork: RightPanelCoworkProps;
 }) {
   const { surface, threadRef, visible, onCloseSurface } = props;
   if (surface === null) return null;
@@ -186,19 +177,6 @@ export function RightPanelSurfaceContent(props: {
           parentRef={threadRef}
           threadId={surface.threadId}
           parentPanel={props.sideChatParentPanel}
-          onClose={() => onCloseSurface(surface)}
-        />
-      );
-    case "cowork":
-      return (
-        <CoworkPane
-          key={`cowork:${scopedThreadKey(threadRef)}`}
-          environmentId={props.environmentId}
-          threadId={threadRef.threadId}
-          prefillTopic={props.cowork.prefillTopic}
-          onConsumePrefill={props.cowork.onConsumePrefill}
-          onSendToSession={props.cowork.onSendToSession}
-          onInsertInComposer={props.cowork.onInsertInComposer}
           onClose={() => onCloseSurface(surface)}
         />
       );

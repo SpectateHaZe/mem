@@ -46,7 +46,6 @@ import {
   MessagesSquare,
   Plus,
   TerminalSquare,
-  Users,
 } from "lucide-react";
 import { Volume2, VolumeOff } from "lucide";
 import {
@@ -144,8 +143,6 @@ export interface RightPanelTabsProps {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
-  /** Absent where cowork is not offered. */
-  onAddCowork?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -156,8 +153,6 @@ export interface RightPanelTabsProps {
   sideChatAvailable?: boolean;
   /** Overrides the default reason while side chats are available but cannot start. */
   sideChatDisabledReason?: string | null;
-  coworkAvailable?: boolean;
-  coworkDisabledReason?: string | null;
   pullRequestStatusSeeds?: Readonly<Record<string, PullRequestTabStatusSeed>>;
   children: ReactNode;
 }
@@ -185,7 +180,6 @@ const SURFACE_DISABLED_REASONS = {
   pullRequests: "No linked pull requests are available for this thread.",
   device: "Devices are only available from a thread.",
   sideChat: "Side chats start after the first message.",
-  cowork: "Cowork starts after the first message.",
 } as const;
 
 // Closed keepMounted popups must stop blocking shortcuts once their exit transition ends.
@@ -211,7 +205,6 @@ const SURFACE_UNAVAILABLE_HINTS = {
   pullRequests: "No linked pull requests available.",
   device: "Available from a thread.",
   sideChat: "Available after the first message.",
-  cowork: "Available after the first message.",
 } as const;
 
 type TabContextMenuAction =
@@ -331,8 +324,6 @@ function RightPanelEmptyState(props: {
   onAddDevice: () => void;
   /** Absent where side chats are not offered. */
   onAddSideChat?: (() => void) | undefined;
-  /** Absent where cowork is not offered. */
-  onAddCowork?: (() => void) | undefined;
   browserAvailable: boolean;
   terminalAvailable: boolean;
   diffAvailable: boolean;
@@ -342,8 +333,6 @@ function RightPanelEmptyState(props: {
   deviceAvailable: boolean;
   sideChatAvailable: boolean;
   sideChatDisabledReason: string | null;
-  coworkAvailable: boolean;
-  coworkDisabledReason: string | null;
 }) {
   const [highlight, setHighlight] = useState(-1);
 
@@ -415,19 +404,6 @@ function RightPanelEmptyState(props: {
             available: props.sideChatAvailable && !props.sideChatDisabledReason,
             disabledReason: props.sideChatDisabledReason ?? SURFACE_UNAVAILABLE_HINTS.sideChat,
             onClick: props.onAddSideChat,
-          },
-        ]
-      : []),
-    ...(props.onAddCowork
-      ? [
-          {
-            label: "Cowork",
-            description: "Launch equal peer agents to think and decide together.",
-            icon: Users,
-            shortcut: "C",
-            available: props.coworkAvailable && !props.coworkDisabledReason,
-            disabledReason: props.coworkDisabledReason ?? SURFACE_UNAVAILABLE_HINTS.cowork,
-            onClick: props.onAddCowork,
           },
         ]
       : []),
@@ -618,8 +594,6 @@ function surfaceTitle(
       return surface.title ?? surface.target?.name ?? "Device";
     case "side-chat":
       return "Side chat";
-    case "cowork":
-      return "Cowork";
     case "preview": {
       const snapshot = surface.resourceId ? sessions[surface.resourceId] : null;
       if (!snapshot || snapshot.navStatus._tag === "Idle") return "Browser";
@@ -710,8 +684,6 @@ function SurfaceIcon({
       return <PullRequestGlyph.link className="size-3 shrink-0" />;
     case "side-chat":
       return <SideChatTabIcon environmentId={environmentId} threadId={surface.threadId} />;
-    case "cowork":
-      return <Users className="size-3 shrink-0" />;
     case "device":
       return surface.target?.platform === "ios" ? (
         <AppleIcon className="size-3 shrink-0" />
@@ -1187,18 +1159,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
           },
         ]
       : []),
-    ...(props.onAddCowork
-      ? [
-          {
-            label: "Cowork",
-            icon: Users,
-            shortcut: "C",
-            available: props.coworkAvailable === true && !props.coworkDisabledReason,
-            disabledReason: props.coworkDisabledReason ?? SURFACE_DISABLED_REASONS.cowork,
-            onClick: props.onAddCowork,
-          },
-        ]
-      : []),
   ] as const;
 
   const handleAddSurfaceMenuKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
@@ -1574,7 +1534,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             onAddPullRequests={props.onAddPullRequests}
             onAddDevice={props.onAddDevice}
             onAddSideChat={props.onAddSideChat}
-            onAddCowork={props.onAddCowork}
             browserAvailable={props.browserAvailable}
             terminalAvailable={props.terminalAvailable}
             diffAvailable={props.diffAvailable}
@@ -1584,8 +1543,6 @@ export function RightPanelTabs(props: RightPanelTabsProps) {
             deviceAvailable={props.deviceAvailable}
             sideChatAvailable={props.sideChatAvailable === true}
             sideChatDisabledReason={props.sideChatDisabledReason ?? null}
-            coworkAvailable={props.coworkAvailable === true}
-            coworkDisabledReason={props.coworkDisabledReason ?? null}
           />
         ) : (
           props.children

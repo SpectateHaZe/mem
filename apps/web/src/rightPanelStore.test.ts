@@ -653,6 +653,7 @@ describe("rightPanelStore", () => {
     { kind: "plan", isOpen: true },
     { kind: "agents", isOpen: true },
     { kind: "agents", isOpen: false },
+    { kind: "cowork", isOpen: true },
   ])("drops $kind with isOpen=$isOpen and falls back", ({ kind, isOpen }) => {
     expect(
       migratePersistedRightPanelState({
@@ -1237,17 +1238,5 @@ describe("rightPanelStore", () => {
     store.reconcileBrowserSurfaces(refA, ["tab-a", "tab-b"]);
     expect(surfaceIds()).toEqual(["browser:tab-a", "terminal:term-1", "diff", "browser:tab-b"]);
     expect(store.getUserActionRevision(refA)).toBe(revision);
-  });
-
-  it("opens and toggles the cowork singleton surface per thread", () => {
-    const store = useRightPanelStore.getState();
-    store.open(refA, "cowork");
-    expect(selectActiveRightPanelSurface(useRightPanelStore.getState().byThreadKey, refA)).toEqual({
-      id: "cowork",
-      kind: "cowork",
-    });
-    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refB)).toBeNull();
-    store.toggle(refA, "cowork");
-    expect(selectActiveRightPanel(useRightPanelStore.getState().byThreadKey, refA)).toBeNull();
   });
 });

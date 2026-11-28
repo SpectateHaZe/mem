@@ -280,6 +280,8 @@ import { ProviderSubagentBar } from "./chat/ProviderSubagentBar";
 import { getTriggerDisplayModelName } from "./chat/providerIconUtils";
 import { resolveScrollToEndClearance } from "./composerFooterLayout";
 import { ChatHeader } from "./chat/ChatHeader";
+import CoworkCard from "./cowork/CoworkCard";
+import { useCoworkCardStore } from "./cowork/coworkCardStore";
 import { coworkPhaseLabel } from "./cowork/coworkLogic";
 import type { ComposerSubagent } from "./chat/SubagentModelPicker";
 import { useSideChat } from "./chat/useSideChat";
@@ -2840,18 +2842,18 @@ export default function ChatView(props: ChatViewProps) {
   const activeCowork =
     coworkQuery.data?.sessions.find((session) => session.sessionThreadId === activeThread?.id) ??
     null;
-  const [coworkPrefill, setCoworkPrefill] = useState<{
-    readonly threadKey: string;
-    readonly topic: string;
-  } | null>(null);
+  const coworkCard = useCoworkCardStore((state) => state.cards[routeThreadKey]);
+  const showCoworkCard = coworkAvailable && (coworkCard !== undefined || activeCowork !== null);
   const openCoworkStable = useStableCallback((prefill?: string) => {
-    if (!activeThreadRef || !coworkAvailable) return;
-    if (prefill && prefill.trim() !== "") {
-      setCoworkPrefill({ threadKey: routeThreadKey, topic: prefill.trim() });
-    }
-    useRightPanelStore.getState().open(activeThreadRef, "cowork");
+    if (!coworkAvailable) return;
+    useCoworkCardStore.getState().open(routeThreadKey, prefill);
   });
-  const consumeCoworkPrefillStable = useStableCallback(() => setCoworkPrefill(null));
+  const setCoworkCollapsedStable = useStableCallback((collapsed: boolean) =>
+    useCoworkCardStore.getState().setCollapsed(routeThreadKey, collapsed),
+  );
+  const closeCoworkCardStable = useStableCallback(() =>
+    useCoworkCardStore.getState().close(routeThreadKey),
+  );
   const insertCoworkDecisionStable = useStableCallback((text: string) => {
     const composer = composerRef.current;
     if (!composer || !composer.insertTextAtEnd(text, { ensureLeadingBoundary: true })) {
@@ -3294,12 +3296,6 @@ export default function ChatView(props: ChatViewProps) {
       onSendAnnotation={sendPreviewAnnotationStable}
       onCloseSurface={closeRightPanelSurface}
       sideChatParentPanel={sideChatParentPanel}
-      cowork={{
-        prefillTopic: coworkPrefill?.threadKey === routeThreadKey ? coworkPrefill.topic : null,
-        onConsumePrefill: consumeCoworkPrefillStable,
-        onSendToSession: sendAppMessageStable,
-        onInsertInComposer: insertCoworkDecisionStable,
-      }}
       terminal={{
         launchContext: activeTerminalLaunchContext ?? null,
         keybindings,
@@ -3660,6 +3656,20 @@ export default function ChatView(props: ChatViewProps) {
                     }
                   >
                     <ChildThreadApprovals threadRef={activeThreadRef} />
+                    {showCoworkCard && activeThread ? (
+                      <CoworkCard
+                        environmentId={environmentId}
+                        threadId={activeThread.id}
+                        session={activeCowork}
+                        sessionModelSelection={activeThread.modelSelection}
+                        initialTopic={coworkCard?.topic ?? ""}
+                        collapsed={coworkCard?.collapsed ?? true}
+                        onCollapsedChange={setCoworkCollapsedStable}
+                        onClose={closeCoworkCardStable}
+                        onSendToSession={sendAppMessageStable}
+                        onInsertInComposer={insertCoworkDecisionStable}
+                      />
+                    ) : null}
                     <div className="relative">
                       <ComposerSurface.Shell contextRow={showComposerContextStrip}>
                         <ComposerSurface.Host
@@ -4107,7 +4117,6 @@ export default function ChatView(props: ChatViewProps) {
           onAddPullRequests={addPullRequestsSurfaceStable}
           onAddDevice={addDeviceSurfaceStable}
           onAddSideChat={sideChatsOffered ? openSideChatStable : undefined}
-          onAddCowork={coworkOffered ? () => openCoworkStable() : undefined}
           browserAvailable={canOperatePreview && browserAvailable}
           terminalAvailable={activeProject !== null && canOperateTerminal}
           diffAvailable={isServerThread && isGitRepo}
@@ -4117,8 +4126,6 @@ export default function ChatView(props: ChatViewProps) {
           deviceAvailable={activeThreadRef !== null}
           sideChatAvailable={sideChat.available}
           sideChatDisabledReason={sideChatDisabledReason}
-          coworkAvailable={coworkAvailable}
-          coworkDisabledReason={coworkDisabledReason}
         >
           {rightPanelContent}
         </ChatRightPanel>

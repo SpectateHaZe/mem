@@ -25,57 +25,70 @@ export function modelOptions(providers: ReadonlyArray<ServerProvider>): CoworkMo
     );
 }
 
-/** Picks two default equal peers, preferring distinct providers when available. */
-export function defaultCoworkAgents(options: ReadonlyArray<CoworkModelOption>) {
-  const first = options[0];
-  const distinctProvider = options.find(
-    (option) => first !== undefined && option.providerInstanceId !== first.providerInstanceId,
+export const modelOptionKey = (selection: ModelSelection) =>
+  `${selection.instanceId}::${selection.model}`;
+
+export interface CoworkPeerDraft {
+  readonly key: number;
+  readonly label: string;
+  readonly modelSelection: ModelSelection;
+}
+
+/** A mention-safe name for the model, suffixed until no other peer uses it. */
+export function coworkPeerLabel(
+  selection: ModelSelection,
+  options: ReadonlyArray<CoworkModelOption>,
+  taken: ReadonlyArray<string>,
+): string {
+  const base =
+    options.find((option) => option.key === modelOptionKey(selection))?.label ??
+    mentionName(selection.model);
+  const used = new Set(taken.map((label) => label.toLowerCase()));
+  let label = base;
+  for (let suffix = 2; used.has(label.toLowerCase()); suffix += 1) label = `${base}-${suffix}`;
+  return label;
+}
+
+/** Peers all start on the session's own model so they think like the session does. */
+export function addCoworkPeer(
+  peers: ReadonlyArray<CoworkPeerDraft>,
+  selection: ModelSelection,
+  options: ReadonlyArray<CoworkModelOption>,
+): ReadonlyArray<CoworkPeerDraft> {
+  const key = Math.max(-1, ...peers.map((peer) => peer.key)) + 1;
+  const label = coworkPeerLabel(
+    selection,
+    options,
+    peers.map((peer) => peer.label),
   );
-  const second = distinctProvider ?? options[1] ?? first;
-  const firstLabel = first?.label ?? "";
-  const secondLabel =
-    second === undefined
-      ? ""
-      : second.label.toLowerCase() === firstLabel.toLowerCase()
-        ? `${second.label}-2`
-        : second.label;
-  return [
-    { key: 0, optionKey: first?.key ?? "", label: firstLabel, role: "" },
-    { key: 1, optionKey: second?.key ?? "", label: secondLabel, role: "Skeptic" },
-  ];
+  return [...peers, { key, label, modelSelection: selection }];
 }
 
 export function validateCoworkSetup(input: {
   readonly message: string;
   readonly rounds: number;
-  readonly agents: ReadonlyArray<{ readonly optionKey: string; readonly label: string }>;
+  readonly agents: ReadonlyArray<{ readonly label: string }>;
 }): string | null {
-  if (input.agents.length < 2) return "Add at least 2 agents to cowork together.";
-  if (input.agents.some((agent) => agent.optionKey === "")) return "Choose a model for each agent.";
+  if (input.agents.length < 2) return "Add at least 2 peers.";
   const names = input.agents.map((agent) => agent.label.trim().toLowerCase());
   if (names.some((name) => name === "" || /\s/.test(name))) {
-    return "Agent names can't be empty or contain spaces, since they're used for @mentions.";
+    return "Peer names can't be empty or contain spaces.";
   }
-  if (new Set(names).size !== names.length) return "Give each agent a different name.";
+  if (new Set(names).size !== names.length) return "Give each peer a different name.";
   if (!Number.isInteger(input.rounds) || input.rounds < 1 || input.rounds > 10) {
     return "Rounds must be a whole number from 1 to 10.";
   }
-  if (input.message.trim() === "") return "Write a topic or goal for the agents.";
+  if (input.message.trim() === "") return "Write a topic for the peers.";
   return null;
 }
 
 const DECISION_LINE = /^[ \t]*\**Decision:\**[ \t]*(.+?)\**[ \t]*$/im;
 const USER_SUMMARY_LINE = /^[ \t]*(?:[-*][ \t]+)?\**(?:For you|Summary):\**[ \t]*(.+?)\**[ \t]*$/im;
+const STANCE_LINE = /^[ \t]*\**Stance:.*$/gim;
 const MAX_FALLBACK_SUMMARY_CHARS = 180;
 
-export function decisionLine(text: string): string | null {
-  return DECISION_LINE.exec(text)?.[1]?.trim() ?? null;
-}
-
-/** The reply without its decision line, which the UI shows in its own callout. */
-export function withoutDecision(text: string): string {
-  return text.replace(DECISION_LINE, "").trim();
-}
+const withoutDecisionOrStance = (text: string) =>
+  text.replace(DECISION_LINE, "").replace(STANCE_LINE, "").trim();
 
 function condenseForUser(text: string): string {
   const withoutCode = text.replace(/```[\s\S]*?```/g, " ");
@@ -115,31 +128,7 @@ export function coworkTurnSummary(
   if (message.summary && message.summary.trim() !== "") return message.summary.trim();
   const explicit = USER_SUMMARY_LINE.exec(message.text)?.[1]?.trim();
   if (explicit) return explicit;
-  return condenseForUser(withoutDecision(message.text));
-}
-
-export function coworkTurnDetails(
-  message: Pick<CoworkSession["transcript"][number], "kind" | "text">,
-): string {
-  if (message.kind === "user") return message.text.trim();
-  return withoutDecision(message.text).replace(USER_SUMMARY_LINE, "").trim();
-}
-
-export function coworkHasExtraDetails(
-  message: Pick<CoworkSession["transcript"][number], "kind" | "text" | "summary">,
-): boolean {
-  if (message.kind === "user") return false;
-  const details = coworkTurnDetails(message);
-  if (details === "") return false;
-  const summary = coworkTurnSummary(message);
-  return details.replace(/\s+/g, " ").trim() !== summary.replace(/\s+/g, " ").trim();
-}
-
-export function speakerColor(speaker: string): string | undefined {
-  if (speaker === "You") return undefined;
-  let hash = 0;
-  for (const char of speaker) hash = (hash * 31 + char.charCodeAt(0)) % 360;
-  return `hsl(${hash} 65% 62%)`;
+  return condenseForUser(withoutDecisionOrStance(message.text));
 }
 
 export function coworkPhaseLabel(session: CoworkSession): string {
@@ -149,7 +138,9 @@ export function coworkPhaseLabel(session: CoworkSession): string {
       return `Thinking (${doneCount}/${session.participants.length})`;
     }
     case "deliberating":
-      return `Round ${session.currentRound}/${session.maxRounds}`;
+      return session.mode === "code"
+        ? `Building ${session.currentRound}/${session.maxRounds}`
+        : `Round ${session.currentRound}/${session.maxRounds}`;
     case "decided":
       return "Decided";
     case "paused":

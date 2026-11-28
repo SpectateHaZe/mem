@@ -164,6 +164,7 @@ import {
   useCommandPaletteStore,
 } from "../commandPaletteStore";
 import { PULL_REQUESTS_PANEL_REF, useRightPanelStore } from "../rightPanelStore";
+import { useCoworkCardStore } from "./cowork/coworkCardStore";
 import { getLatestThreadForProject, sortThreads } from "@t3tools/client-runtime/state/thread-sort";
 import {
   cn,
@@ -1643,9 +1644,9 @@ function OpenCommandPaletteDialog(props: {
       title: "Open cowork in this session",
       icon: <UsersIcon className={ITEM_ICON_CLASS} />,
       run: async () => {
-        useRightPanelStore
+        useCoworkCardStore
           .getState()
-          .open(scopeThreadRef(activeThread.environmentId, activeThread.id), "cowork");
+          .open(scopedThreadKey(scopeThreadRef(activeThread.environmentId, activeThread.id)));
       },
     });
   }
