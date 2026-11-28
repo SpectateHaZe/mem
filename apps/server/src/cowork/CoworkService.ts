@@ -8,8 +8,9 @@ import {
   type CoworkSendInput,
   type CoworkSetPausedInput,
   type CoworkStartInput,
+  type ModelSelection,
   type OrchestrationV2Run,
-  type ThreadId,
+  ThreadId,
 } from "@t3tools/contracts";
 import { subagentResultForRun } from "@t3tools/provider-core/server/subagentProjection";
 import { writeFileStringAtomically } from "@t3tools/shared/atomicWrite";
@@ -137,6 +138,7 @@ const make = Effect.gen(function* () {
   const dispatchPrompt = Effect.fn("CoworkService.dispatchPrompt")(function* (
     session: CoworkSession,
     threadId: ThreadId,
+    modelSelection: ModelSelection,
     prompt: string,
   ) {
     const key = `cowork:${session.sessionThreadId}:${yield* random.uuidV4()}`;
@@ -148,6 +150,8 @@ const make = Effect.gen(function* () {
         threadId,
         text: prompt,
         attachments: [],
+        // A forked peer starts on the session's model; the peer's own pick wins.
+        modelSelection,
         mode: "auto",
         createdBy: "user",
         creationSource: "server",
@@ -253,7 +257,7 @@ const make = Effect.gen(function* () {
       session.speakerIndex,
       context,
     );
-    const ok = yield* dispatchPrompt(begun, speaker.threadId, prompt);
+    const ok = yield* dispatchPrompt(begun, speaker.threadId, speaker.modelSelection, prompt);
     return ok
       ? begun
       : pauseWithNote(
@@ -282,7 +286,7 @@ const make = Effect.gen(function* () {
         Effect.gen(function* () {
           const peer = session.participants[index]!;
           const prompt = buildParallelThinkingPrompt(session, index, context);
-          const ok = yield* dispatchPrompt(session, peer.threadId, prompt);
+          const ok = yield* dispatchPrompt(session, peer.threadId, peer.modelSelection, prompt);
           if (!ok) {
             failedLabels.push(peer.label);
             updated = {
@@ -511,8 +515,8 @@ const make = Effect.gen(function* () {
               ...(parent.thread.branch === null ? {} : { branch: parent.thread.branch }),
             } as const);
 
-      // Each agent launches as a top-level peer thread (`relationshipToParent: null`), never a subagent.
-      const participants = yield* Effect.forEach(input.participants, (participant, index) =>
+      // Each agent is a top-level peer thread, never a subagent.
+      const launchPeer = (participant: CoworkStartInput["participants"][number], index: number) =>
         launcher
           .launch({
             commandId: CommandId.make(
@@ -529,16 +533,64 @@ const make = Effect.gen(function* () {
             cowork: true,
           })
           .pipe(
-            Effect.map(({ threadId }) => ({
-              threadId,
-              label: participant.label,
-              ...(participant.role === undefined ? {} : { role: participant.role }),
-              modelSelection: participant.modelSelection,
-              seen: 0,
-              status: "idle" as const,
-            })),
+            Effect.map(({ threadId }) => ({ threadId, forked: false })),
             Effect.mapError(coworkError),
+          );
+
+      // A fork carries the session's whole conversation, checkout and branch. It needs a
+      // finished session turn, so a brand-new session falls back to a fresh peer.
+      const forkPeer = Effect.fn("CoworkService.forkPeer")(function* (
+        participant: CoworkStartInput["participants"][number],
+        index: number,
+      ) {
+        const commandKey = `cowork-fork:${input.sessionThreadId}:${launchBatchId}:${index}`;
+        const threadId = ThreadId.make(commandKey);
+        yield* threads.dispatch({
+          type: "thread.fork",
+          commandId: CommandId.make(commandKey),
+          sourceThreadId: input.sessionThreadId,
+          targetThreadId: threadId,
+          sourcePoint: { type: "latest_stable" },
+          title: `${participant.label} · ${parent.thread.title}`,
+          cowork: true,
+          createdBy: "user",
+          creationSource: "server",
+        });
+        if (parent.thread.interactionMode !== "default") {
+          yield* threads
+            .dispatch({
+              type: "thread.interaction-mode.set",
+              commandId: CommandId.make(`${commandKey}:mode`),
+              threadId,
+              interactionMode: "default",
+            })
+            .pipe(
+              Effect.catchCause((cause) =>
+                Effect.logWarning("cowork.fork-mode-reset-failed", { threadId, cause }),
+              ),
+            );
+        }
+        return { threadId, forked: true };
+      });
+
+      const participants = yield* Effect.forEach(input.participants, (participant, index) =>
+        forkPeer(participant, index).pipe(
+          Effect.catchCause((cause) =>
+            Effect.logInfo("cowork.fork-fallback", {
+              sessionThreadId: input.sessionThreadId,
+              cause,
+            }).pipe(Effect.andThen(launchPeer(participant, index))),
           ),
+          Effect.map(({ threadId, forked }) => ({
+            threadId,
+            label: participant.label,
+            ...(participant.role === undefined ? {} : { role: participant.role }),
+            modelSelection: participant.modelSelection,
+            ...(forked ? { forked: true } : {}),
+            seen: 0,
+            status: "idle" as const,
+          })),
+        ),
       );
 
       const topic =
@@ -549,6 +601,7 @@ const make = Effect.gen(function* () {
         sessionThreadId: input.sessionThreadId,
         projectId: parent.thread.projectId,
         topic,
+        mode: input.mode,
         participants,
         maxRounds: input.maxRounds,
         message: input.message,

@@ -2,6 +2,7 @@ import * as NodeCrypto from "@effect/platform-node/NodeCrypto";
 import * as NodeServices from "@effect/platform-node/NodeServices";
 import { assert, it } from "@effect/vitest";
 import {
+  CoworkError,
   DEFAULT_SERVER_SETTINGS,
   MessageId,
   NodeId,
@@ -55,14 +56,24 @@ const makeCompletedRun = (threadId: ThreadId, id: string, ordinal: number): Orch
   }) as unknown as OrchestrationV2Run;
 
 it.effect(
-  "launches equal non-subagent peers, runs Round 1 in parallel, and settles on a decision",
+  "forks equal peers from the session (launching when a fork is refused), runs Round 1 in parallel, and settles on a decision",
   () =>
     Effect.gen(function* () {
       const fs = yield* FileSystem.FileSystem;
       const stateDir = yield* fs.makeTempDirectoryScoped({ prefix: "cowork-test-" });
       const launches: Array<ThreadLaunch.ThreadLaunchInput> = [];
-      const sentPrompts: Array<{ threadId: ThreadId; text: string }> = [];
-      const dispatches: Array<{ type: string; threadId?: ThreadId }> = [];
+      const sentPrompts: Array<{
+        threadId: ThreadId;
+        text: string;
+        modelSelection?: ModelSelection;
+      }> = [];
+      const dispatches: Array<{
+        type: string;
+        threadId?: ThreadId;
+        targetThreadId?: ThreadId;
+        cowork?: boolean;
+        interactionMode?: string;
+      }> = [];
       const repliesByRunId = new Map<
         string,
         { threadId: ThreadId; run: OrchestrationV2Run; text: string }
@@ -98,16 +109,23 @@ it.effect(
                 }),
             } as unknown as ThreadLaunch.ThreadLaunchService["Service"]),
             Layer.succeed(ThreadManagement.ThreadManagementService, {
-              sendToThread: (input: { threadId: ThreadId; text: string }) =>
+              sendToThread: (input: {
+                threadId: ThreadId;
+                text: string;
+                modelSelection?: ModelSelection;
+              }) =>
                 Effect.sync(() => {
-                  sentPrompts.push({ threadId: input.threadId, text: input.text });
+                  sentPrompts.push(input);
                   return {} as never;
                 }),
-              dispatch: (command: { type: string; threadId?: ThreadId }) =>
-                Effect.sync(() => {
-                  dispatches.push(command);
-                  return {} as never;
-                }),
+              dispatch: (command: (typeof dispatches)[number]) =>
+                // The second peer's fork is refused, as for a session with no finished turn.
+                command.type === "thread.fork" && command.targetThreadId?.endsWith(":1")
+                  ? Effect.fail(new CoworkError({ detail: "No stable source run was found." }))
+                  : Effect.sync(() => {
+                      dispatches.push(command);
+                      return {} as never;
+                    }),
             } as unknown as ThreadManagement.ThreadManagementService["Service"]),
             Layer.succeed(Orchestrator.OrchestratorV2, {
               streamDomainEvents: Stream.fromPubSub(domainEvents),
@@ -123,6 +141,7 @@ it.effect(
                       branch: "feat/auth",
                       worktreePath: "/tmp/wt-auth",
                       runtimeMode: "auto-accept-edits",
+                      interactionMode: "plan",
                       deletedAt: null,
                     },
                     messages: [
@@ -174,6 +193,7 @@ it.effect(
 
         const started = yield* cowork.start({
           sessionThreadId: SESSION_THREAD_ID,
+          mode: "brainstorm",
           participants: [
             { label: "Claude", role: "Architect", modelSelection: model("sonnet") },
             { label: "Codex", modelSelection: model("gpt-5") },
@@ -183,20 +203,39 @@ it.effect(
         });
 
         assert.equal(started.phase, "thinking");
-        assert.equal(launches.length, 2);
+        // Peer 0 forks the session; peer 1's fork is refused, so it launches fresh.
+        const fork = dispatches.find((d) => d.type === "thread.fork");
+        assert.isTrue(fork?.cowork);
+        assert.equal(started.participants[0]?.threadId, fork?.targetThreadId);
+        assert.isTrue(started.participants[0]?.forked);
+        assert.isUndefined(started.participants[1]?.forked);
+        assert.deepEqual(
+          dispatches.find((d) => d.type === "thread.interaction-mode.set"),
+          {
+            type: "thread.interaction-mode.set",
+            commandId: `${fork?.targetThreadId}:mode`,
+            threadId: fork?.targetThreadId,
+            interactionMode: "default",
+          } as never,
+        );
+        assert.equal(launches.length, 1);
         assert.isUndefined(launches[0]?.delegatedFrom);
-        assert.isUndefined(launches[1]?.delegatedFrom);
         assert.isTrue(launches[0]?.cowork);
-        assert.isTrue(launches[1]?.cowork);
         assert.deepEqual(launches[0]?.workspaceStrategy, {
           type: "existing_worktree",
           worktreePath: "/tmp/wt-auth",
           branch: "feat/auth",
         });
-        // Both equal peers receive Round 1 prompts in parallel with session context.
+        // Both peers think in parallel on their own models; only the fresh peer needs the
+        // session transcript, since the fork already holds it.
         assert.equal(sentPrompts.length, 2);
-        assert.include(sentPrompts[0]!.text, "Need safer token refresh");
-        assert.include(sentPrompts[1]!.text, "Need safer token refresh");
+        const promptFor = (index: number) =>
+          sentPrompts.find((p) => p.threadId === started.participants[index]!.threadId)!;
+        assert.notInclude(promptFor(0).text, "Need safer token refresh");
+        assert.include(promptFor(0).text, "fork of the user's session");
+        assert.include(promptFor(1).text, "Need safer token refresh");
+        assert.deepEqual(promptFor(0).modelSelection, model("sonnet"));
+        assert.deepEqual(promptFor(1).modelSelection, model("gpt-5"));
 
         // Complete both Round 1 parallel thoughts.
         const peer0 = started.participants[0]!.threadId;

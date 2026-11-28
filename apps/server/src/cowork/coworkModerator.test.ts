@@ -7,6 +7,7 @@ import {
   buildParallelThinkingPrompt,
   createInitialCowork,
   extractDecision,
+  extractStance,
   extractUserSummary,
   formatSessionContext,
   nextSpeakerIndex,
@@ -19,11 +20,12 @@ const model = (slug: string): ModelSelection => ({
   model: slug,
 });
 
-const makeCowork = (maxRounds = 2) =>
+const makeCowork = (maxRounds = 2, mode: "brainstorm" | "code" = "brainstorm") =>
   createInitialCowork({
     sessionThreadId: ThreadId.make("session-1"),
     projectId: ProjectId.make("project-1"),
     topic: "API sync strategy",
+    mode,
     participants: [
       {
         threadId: ThreadId.make("peer-0"),
@@ -67,6 +69,64 @@ it("starts in parallel thinking phase when maxRounds >= 2 and gives each peer in
   assert.include(prompt, "Architect");
   assert.include(prompt, "Selected session");
   assert.include(prompt, "Should we use WebSockets or SSE?");
+  assert.include(prompt, "do not edit files");
+
+  const forked = {
+    ...session,
+    participants: session.participants.map((p, i) => (i === 0 ? { ...p, forked: true } : p)),
+  };
+  const forkedPrompt = buildParallelThinkingPrompt(forked, 0, 'Selected session: "Auth refactor"');
+  assert.notInclude(forkedPrompt, "Selected session");
+  assert.include(forkedPrompt, "fork of the user's session");
+});
+
+it("stops early once every peer agrees in an unbroken run", () => {
+  let session = makeCowork(3);
+  session = recordParallelThought(session, 0, "Use WS.", "t1", "m1");
+  session = recordParallelThought(session, 1, "Use SSE.", "t2", "m2");
+  session = recordParallelThought(session, 2, "Hybrid.", "t3", "m3");
+  assert.equal(session.turnsLeft, 6);
+  assert.include(beginDeliberationTurn(session, 0, "").prompt, "Stance: agree");
+
+  const reply = (index: number, text: string, id: string) =>
+    recordDeliberationReply(beginDeliberationTurn(session, index, "").session, index, text, id, id);
+  session = reply(0, "Decision: Hybrid.\nStance: agree", "d1");
+  session = reply(1, "Stance: disagree — SSE drops on proxies", "d2");
+  session = reply(2, "Stance: agree", "d3");
+  session = reply(0, "Stance: agree", "d4");
+  assert.equal(session.phase, "deliberating");
+  assert.equal(session.turnsLeft, 2);
+
+  session = reply(1, "Fine, proxies are rare.\nStance: agree", "d5");
+  assert.equal(session.phase, "decided");
+  assert.equal(session.turnsLeft, 0);
+  assert.equal(session.speakerIndex, null);
+  assert.equal(session.decision, "Hybrid.");
+  assert.equal(session.transcript.at(-1)?.stance, "agree");
+});
+
+it("runs code mode strictly in turn, with no parallel phase", () => {
+  let session = makeCowork(2, "code");
+  assert.equal(session.phase, "deliberating");
+  assert.equal(session.speakerIndex, 0);
+  assert.equal(session.turnsLeft, 6);
+  assert.isTrue(session.participants.every((p) => p.status === "idle" && p.seen === 0));
+
+  const first = beginDeliberationTurn(session, 0, "");
+  assert.include(first.prompt, "may edit files");
+  assert.include(first.prompt, "You go first");
+  session = recordDeliberationReply(
+    first.session,
+    0,
+    "Done. Ask @Gemini.\nStance: disagree — tests",
+    "t1",
+    "m1",
+  );
+  assert.equal(session.speakerIndex, 1);
+
+  const second = beginDeliberationTurn(session, 1, "");
+  assert.include(second.prompt, "git diff");
+  assert.include(second.prompt, "[Claude]: Done.");
 });
 
 it("transitions from parallel thinking to deliberation only after all peers finish", () => {
@@ -157,6 +217,10 @@ it("extracts user summaries and decision lines and formats bounded session conte
   assert.equal(extractDecision("Summary\n**Decision:** Ship Cowork"), "Ship Cowork");
   assert.equal(extractDecision("My Decision: pending"), null);
   assert.equal(extractUserSummary("For you: Keep it short.\nDetailed points."), "Keep it short.");
+  assert.equal(extractStance("Stance: agree"), "agree");
+  assert.equal(extractStance("**Stance:** Disagree — missing tests"), "disagree");
+  assert.equal(extractStance("Stance: disagree\nThen fixed.\nStance: agree"), "agree");
+  assert.equal(extractStance("My stance: agree"), null);
 
   let session = makeCowork(2);
   session = recordParallelThought(

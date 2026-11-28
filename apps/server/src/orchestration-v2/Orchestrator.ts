@@ -4915,6 +4915,8 @@ const makeOrchestrator = Effect.fn("orchestrationV2.Orchestrator.layer")(functio
         targetThreadId: command.targetThreadId,
         ...(command.title === undefined ? {} : { title: command.title }),
         ...(command.sideChat ? { sideChat: true } : {}),
+        // Only the server stamps this; a client asking for one gets an ordinary fork.
+        ...(command.cowork === true && command.creationSource === "server" ? { cowork: true } : {}),
         createdBy: command.createdBy,
         creationSource: command.creationSource,
         createdAt: now,

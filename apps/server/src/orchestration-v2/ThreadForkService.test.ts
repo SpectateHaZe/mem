@@ -112,7 +112,7 @@ function makeSourceProjection(sourceRun: OrchestrationV2Run): OrchestrationV2Thr
 const planFork = (
   sourceRun: OrchestrationV2Run,
   sourceProjection = makeSourceProjection(sourceRun),
-  options: { readonly sideChat?: boolean } = {},
+  options: { readonly sideChat?: boolean; readonly cowork?: boolean } = {},
 ) =>
   Effect.gen(function* () {
     const service = yield* ThreadForkService.ThreadForkServiceV2;
@@ -293,79 +293,85 @@ it.effect("rejects in-progress and rolled-back fork sources", () =>
   }),
 );
 
-it.effect("marks only requested forks as side chats and inherits parent permissions", () =>
-  Effect.gen(function* () {
-    const sourceRun = makeSourceRun("completed");
-    const sideChat = yield* planFork(sourceRun, makeSourceProjection(sourceRun), {
-      sideChat: true,
-    });
-    assert.isTrue(sideChat.targetThread.lineage.sideChat);
-    assert.equal(sideChat.targetThread.runtimeMode, "full-access");
-    for (const runtimeMode of [
-      "approval-required",
-      "auto-accept-edits",
-      "auto",
-      "full-access",
-    ] as const) {
-      const source = makeSourceProjection(sourceRun);
-      const inherited = yield* planFork(
+it.effect(
+  "marks only requested forks as side chats or cowork peers and inherits parent permissions",
+  () =>
+    Effect.gen(function* () {
+      const sourceRun = makeSourceRun("completed");
+      const sideChat = yield* planFork(sourceRun, makeSourceProjection(sourceRun), {
+        sideChat: true,
+      });
+      assert.isTrue(sideChat.targetThread.lineage.sideChat);
+      assert.equal(sideChat.targetThread.runtimeMode, "full-access");
+      const cowork = yield* planFork(sourceRun, makeSourceProjection(sourceRun), { cowork: true });
+      assert.isTrue(cowork.targetThread.lineage.cowork);
+      assert.equal(cowork.targetThread.lineage.relationshipToParent, "fork");
+      for (const runtimeMode of [
+        "approval-required",
+        "auto-accept-edits",
+        "auto",
+        "full-access",
+      ] as const) {
+        const source = makeSourceProjection(sourceRun);
+        const inherited = yield* planFork(
+          sourceRun,
+          {
+            ...source,
+            thread: { ...source.thread, runtimeMode },
+          },
+          { sideChat: true },
+        );
+        assert.equal(inherited.targetThread.runtimeMode, runtimeMode);
+      }
+
+      const sideChatSource = makeSourceProjection(sourceRun);
+      const sideChatProjection = {
+        ...sideChatSource,
+        thread: {
+          ...sideChatSource.thread,
+          lineage: { ...sideChatSource.thread.lineage, sideChat: true },
+        },
+      };
+      const forkOfSideChat = yield* planFork(sourceRun, sideChatProjection);
+      assert.isUndefined(forkOfSideChat.targetThread.lineage.sideChat);
+      assert.isUndefined(forkOfSideChat.targetThread.lineage.cowork);
+      assert.equal(forkOfSideChat.targetThread.runtimeMode, "full-access");
+
+      const nested = yield* planFork(sourceRun, sideChatProjection, { sideChat: true }).pipe(
+        Effect.flip,
+      );
+      assert.equal(nested.cause, "A side chat cannot start another side chat.");
+
+      const subagentSource = makeSourceProjection(sourceRun);
+      const fromSubagent = yield* planFork(
         sourceRun,
         {
-          ...source,
-          thread: { ...source.thread, runtimeMode },
-        },
-        { sideChat: true },
-      );
-      assert.equal(inherited.targetThread.runtimeMode, runtimeMode);
-    }
-
-    const sideChatSource = makeSourceProjection(sourceRun);
-    const sideChatProjection = {
-      ...sideChatSource,
-      thread: {
-        ...sideChatSource.thread,
-        lineage: { ...sideChatSource.thread.lineage, sideChat: true },
-      },
-    };
-    const forkOfSideChat = yield* planFork(sourceRun, sideChatProjection);
-    assert.isUndefined(forkOfSideChat.targetThread.lineage.sideChat);
-    assert.equal(forkOfSideChat.targetThread.runtimeMode, "full-access");
-
-    const nested = yield* planFork(sourceRun, sideChatProjection, { sideChat: true }).pipe(
-      Effect.flip,
-    );
-    assert.equal(nested.cause, "A side chat cannot start another side chat.");
-
-    const subagentSource = makeSourceProjection(sourceRun);
-    const fromSubagent = yield* planFork(
-      sourceRun,
-      {
-        ...subagentSource,
-        thread: {
-          ...subagentSource.thread,
-          lineage: { ...subagentSource.thread.lineage, relationshipToParent: "subagent" },
-        },
-      },
-      { sideChat: true },
-    ).pipe(Effect.flip);
-    assert.equal(fromSubagent.cause, "A subagent cannot start a side chat.");
-
-    const delegatedSource = makeSourceProjection(sourceRun);
-    const fromDelegated = yield* planFork(
-      sourceRun,
-      {
-        ...delegatedSource,
-        thread: {
-          ...delegatedSource.thread,
-          delegatedFrom: {
-            environmentId: EnvironmentId.make("linked-environment"),
-            threadId: ThreadId.make("linked-parent"),
-            title: "Linked parent",
+          ...subagentSource,
+          thread: {
+            ...subagentSource.thread,
+            lineage: { ...subagentSource.thread.lineage, relationshipToParent: "subagent" },
           },
         },
-      },
-      { sideChat: true },
-    ).pipe(Effect.flip);
-    assert.equal(fromDelegated.cause, "A subagent cannot start a side chat.");
-  }),
+        { sideChat: true },
+      ).pipe(Effect.flip);
+      assert.equal(fromSubagent.cause, "A subagent cannot start a side chat.");
+
+      const delegatedSource = makeSourceProjection(sourceRun);
+      const fromDelegated = yield* planFork(
+        sourceRun,
+        {
+          ...delegatedSource,
+          thread: {
+            ...delegatedSource.thread,
+            delegatedFrom: {
+              environmentId: EnvironmentId.make("linked-environment"),
+              threadId: ThreadId.make("linked-parent"),
+              title: "Linked parent",
+            },
+          },
+        },
+        { sideChat: true },
+      ).pipe(Effect.flip);
+      assert.equal(fromDelegated.cause, "A subagent cannot start a side chat.");
+    }),
 );
